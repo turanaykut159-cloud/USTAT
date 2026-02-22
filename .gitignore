@@ -1,0 +1,66 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+env/
+.python-version
+
+# Node
+node_modules/
+desktop/node_modules/
+desktop/dist/
+desktop/out/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# SQLite
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+database/
+
+# Environment & Secrets
+.env
+.env.*
+*.enc
+config/credentials.enc
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs (tüm seviyeler)
+*.log
+logs/
+
+# Runtime
+api.pid
+
+# Debug / Geçici
+debug_*.py
+teshis*
+nul
+check_test.json
+*_output.txt
+*.tmp
+
+# Build
+*.spec
+
+# Claude (yerel context)
+.claude/

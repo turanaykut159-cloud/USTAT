@@ -1,0 +1,14 @@
+{
+  "name": "ustat",
+  "version": "1.0.0",
+  "description": "ÜSTAT - VİOP Algorithmic Trading System",
+  "private": true,
+  "scripts": {
+    "api": "cd engine && python -m uvicorn api.server:app --reload --port 8000",
+    "desktop": "cd desktop && npm start",
+    "engine": "cd engine && python main.py",
+    "test": "pytest tests/"
+  },
+  "author": "",
+  "license": "UNLICENSED"
+}

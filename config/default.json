@@ -1,0 +1,34 @@
+{
+  "engine": {
+    "cycle_interval": 10,
+    "data_lookback_bars": 500
+  },
+  "risk": {
+    "max_daily_loss_pct": 0.02,
+    "max_total_drawdown_pct": 0.10,
+    "risk_per_trade_pct": 0.01,
+    "max_open_positions": 5,
+    "max_correlated_positions": 3
+  },
+  "mt5": {
+    "path": "C:\\Program Files\\GCM MT5 Terminal\\terminal64.exe",
+    "login": null,
+    "server": null
+  },
+  "api": {
+    "host": "127.0.0.1",
+    "port": 8000
+  },
+  "indicators": {
+    "ema_fast": 9,
+    "ema_slow": 21,
+    "rsi_period": 14,
+    "macd_fast": 12,
+    "macd_slow": 26,
+    "macd_signal": 9,
+    "adx_period": 14,
+    "bb_period": 20,
+    "bb_std": 2.0,
+    "atr_period": 14
+  }
+}

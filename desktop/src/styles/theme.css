@@ -1,0 +1,2628 @@
+/* ÜSTAT v5.0 — Koyu Tema */
+
+:root {
+  --bg-primary: #0d1117;
+  --bg-secondary: #161b22;
+  --bg-card: #1c2128;
+  --bg-hover: #21262d;
+  --border: #30363d;
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --accent: #58a6ff;
+  --accent-dim: rgba(88, 166, 255, 0.15);
+  --profit: #3fb950;
+  --loss: #f85149;
+  --warning: #d29922;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  background-color: var(--bg-primary);
+  color-scheme: dark;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Cascadia Code', 'Fira Code', monospace;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  overflow: hidden;
+  user-select: none;
+}
+
+/* Scrollbar koyu tema */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+}
+
+/* Layout */
+.app-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.app-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.app-content {
+  flex: 1;
+  padding: 20px;
+  overflow-y: auto;
+}
+
+/* ── Top Bar ──────────────────────────────────────────────────── */
+.top-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 16px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  -webkit-app-region: drag;
+  height: 44px;
+}
+
+.top-bar h1 {
+  font-size: 16px;
+  color: var(--accent);
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+
+.top-bar .version {
+  font-size: 10px;
+  color: var(--text-secondary);
+  font-weight: 400;
+  vertical-align: super;
+}
+
+.top-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  -webkit-app-region: no-drag;
+}
+
+.top-bar-right {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 13px;
+  -webkit-app-region: no-drag;
+}
+
+/* ── Phase badge (AKTIF / PASIF / DURDURULDU / HATA) ─────────── */
+.tb-phase {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.tb-phase--running {
+  background: rgba(63, 185, 80, 0.15);
+  color: var(--profit);
+}
+
+.tb-phase--stopped,
+.tb-phase--idle {
+  background: rgba(139, 148, 158, 0.12);
+  color: var(--text-secondary);
+}
+
+.tb-phase--killed {
+  background: rgba(248, 81, 73, 0.15);
+  color: var(--loss);
+}
+
+.tb-phase--error {
+  background: rgba(210, 153, 34, 0.15);
+  color: var(--warning);
+}
+
+/* ── Faz badge (FAZ 0 / 1 / 2 / 3) ──────────────────────────── */
+.tb-faz {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.tb-faz--level0 {
+  background: rgba(63, 185, 80, 0.12);
+  color: var(--profit);
+}
+
+.tb-faz--level1 {
+  background: rgba(210, 153, 34, 0.12);
+  color: var(--warning);
+}
+
+.tb-faz--level2 {
+  background: rgba(248, 81, 73, 0.12);
+  color: var(--loss);
+}
+
+.tb-faz--level3 {
+  background: rgba(248, 81, 73, 0.25);
+  color: var(--loss);
+  animation: pulse-faz 1s ease-in-out infinite;
+}
+
+@keyframes pulse-faz {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.55; }
+}
+
+/* ── Connection dot (MT5 / Bağlantı Yok) ─────────────────────── */
+.tb-conn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.tb-conn--on {
+  color: var(--profit);
+}
+
+.tb-conn--off {
+  color: var(--loss);
+}
+
+.tb-conn-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.tb-conn--on .tb-conn-dot {
+  background: var(--profit);
+  box-shadow: 0 0 4px var(--profit);
+}
+
+.tb-conn--off .tb-conn-dot {
+  background: var(--loss);
+}
+
+/* ── Financial metric columns ────────────────────────────────── */
+.tb-metric {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  min-width: 90px;
+}
+
+.tb-metric-label {
+  font-size: 10px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-weight: 500;
+}
+
+.tb-metric-value {
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  letter-spacing: -0.3px;
+}
+
+.tb-divider {
+  width: 1px;
+  height: 24px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+/* Pin (Always on Top) butonu */
+.pin-btn {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  transition: all 0.15s;
+  line-height: 1;
+}
+
+.pin-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border);
+}
+
+.pin-btn.pinned {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+}
+
+.clock {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  min-width: 64px;
+  text-align: right;
+}
+
+/* ── Side Nav ─────────────────────────────────────────────────── */
+.side-nav {
+  width: 200px;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border);
+  padding: 0;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.side-nav-links {
+  list-style: none;
+  flex: 1;
+  padding: 8px 0;
+  overflow-y: auto;
+}
+
+.side-nav-links li a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 13px;
+  transition: all 0.15s;
+  border-left: 3px solid transparent;
+}
+
+.side-nav-links li a:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.side-nav-links li a.active {
+  color: var(--accent);
+  border-left-color: var(--accent);
+  background: rgba(88, 166, 255, 0.05);
+}
+
+.nav-icon {
+  font-size: 16px;
+  width: 22px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.nav-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Kill-Switch Button ──────────────────────────────────────── */
+.side-nav-bottom {
+  padding: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.kill-switch-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(248, 81, 73, 0.3);
+  border-radius: 6px;
+  background: rgba(248, 81, 73, 0.08);
+  color: var(--loss);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.2s;
+  user-select: none;
+}
+
+.kill-switch-btn:hover {
+  background: rgba(248, 81, 73, 0.14);
+  border-color: rgba(248, 81, 73, 0.5);
+}
+
+.kill-switch-btn:active {
+  transform: scale(0.98);
+}
+
+.kill-switch-btn.holding {
+  border-color: var(--loss);
+  background: rgba(248, 81, 73, 0.1);
+}
+
+.kill-switch-btn.fired {
+  background: var(--loss);
+  border-color: var(--loss);
+  color: #fff;
+  cursor: not-allowed;
+  opacity: 0.85;
+}
+
+.kill-progress {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  background: rgba(248, 81, 73, 0.25);
+  transition: width 16ms linear;
+  pointer-events: none;
+}
+
+.kill-icon {
+  font-size: 15px;
+  z-index: 1;
+}
+
+.kill-label {
+  z-index: 1;
+  letter-spacing: 0.3px;
+}
+
+/* ── Cards ────────────────────────────────────────────────────── */
+.card,
+.stat-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.card h3 {
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.card p {
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.dashboard-grid,
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+
+/* ── Tables ───────────────────────────────────────────────────── */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 16px;
+  font-size: 13px;
+}
+
+th,
+td {
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+th {
+  color: var(--text-secondary);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+}
+
+tr:hover td {
+  background: var(--bg-hover);
+}
+
+.profit {
+  color: var(--profit);
+  font-weight: 500;
+}
+
+.loss {
+  color: var(--loss);
+  font-weight: 500;
+}
+
+/* ── Lock Screen ──────────────────────────────────────────────── */
+.lock-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  gap: 24px;
+  background: var(--bg-primary);
+}
+
+/* ── Logo ─────────────────────────────────────────────────────── */
+.lock-logo {
+  text-align: center;
+}
+
+.lock-screen h1 {
+  font-size: 52px;
+  color: var(--accent);
+  letter-spacing: 3px;
+  margin-bottom: 6px;
+}
+
+.lock-screen .version {
+  font-size: 16px;
+  color: var(--text-secondary);
+  font-weight: 400;
+  vertical-align: super;
+}
+
+.lock-tagline {
+  color: var(--text-secondary);
+  font-size: 13px;
+  letter-spacing: 1px;
+  opacity: 0.6;
+  margin-top: 2px;
+}
+
+.lock-subtitle {
+  color: var(--text-secondary);
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+/* ── Connection Status Badge ─────────────────────────────────── */
+.conn-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+}
+
+.conn-badge .conn-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.conn-badge.connecting {
+  background: rgba(210, 153, 34, 0.12);
+  color: var(--warning);
+}
+
+.conn-badge.connecting .conn-dot {
+  background: var(--warning);
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}
+
+.conn-badge.connected {
+  background: rgba(63, 185, 80, 0.12);
+  color: var(--profit);
+}
+
+.conn-badge.connected .conn-dot {
+  background: var(--profit);
+}
+
+.conn-badge.error {
+  background: rgba(248, 81, 73, 0.12);
+  color: var(--loss);
+}
+
+.conn-badge.error .conn-dot {
+  background: var(--loss);
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+/* ── Credential Form ─────────────────────────────────────────── */
+.lock-credentials {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.credentials-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 320px;
+}
+
+.credentials-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.credentials-form label span {
+  color: var(--text-secondary);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  font-weight: 500;
+}
+
+.credentials-form input {
+  padding: 10px 14px;
+  font-size: 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  border-radius: 6px;
+  outline: none;
+  transition: border-color 0.15s;
+  width: 100%;
+}
+
+.credentials-form input:focus {
+  border-color: var(--accent);
+}
+
+.credentials-form input::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.4;
+}
+
+/* ── Account Info Card ───────────────────────────────────────── */
+.account-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 24px;
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  position: relative;
+}
+
+.account-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.account-label {
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 500;
+}
+
+.account-value {
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 500;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+}
+
+.account-value.mask {
+  letter-spacing: 2px;
+  color: var(--text-secondary);
+}
+
+.account-switch {
+  margin-top: 4px;
+  align-self: flex-end;
+}
+
+/* ── OTP Section ─────────────────────────────────────────────── */
+.lock-otp-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+}
+
+.otp-form {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.otp-input {
+  padding: 14px 20px;
+  font-size: 28px;
+  text-align: center;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  border-radius: 8px;
+  width: 220px;
+  outline: none;
+  transition: border-color 0.2s;
+  letter-spacing: 8px;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-weight: 600;
+}
+
+.otp-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+
+.otp-input::placeholder {
+  letter-spacing: 8px;
+  font-size: 24px;
+  color: var(--text-secondary);
+  opacity: 0.25;
+  font-weight: 400;
+}
+
+/* ── OTP Waiting (Polling Bekleme Ekranı) ────────────────────── */
+.otp-waiting {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  margin-top: 20px;
+  padding: 20px;
+  border-radius: 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+}
+
+.otp-msg {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.otp-hint {
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-align: center;
+  line-height: 1.6;
+}
+
+.elapsed-time {
+  font-size: 12px;
+  color: var(--text-tertiary, var(--text-secondary));
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+.otp-polling-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.spinner-small {
+  width: 14px;
+  height: 14px;
+  border-width: 2px;
+}
+
+.otp-success {
+  color: #3fb950;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.otp-form .btn-primary {
+  width: 220px;
+  padding: 12px 20px;
+  font-size: 15px;
+}
+
+/* ── Status / Loading ────────────────────────────────────────── */
+.lock-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.status-msg {
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+/* ── Spinner ─────────────────────────────────────────────────── */
+.spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Error State ─────────────────────────────────────────────── */
+.lock-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.lock-error-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.error {
+  color: var(--loss);
+  font-size: 13px;
+}
+
+/* ── Buttons ─────────────────────────────────────────────────── */
+.btn-primary,
+.lock-screen button[type="submit"],
+.settings button {
+  padding: 10px 28px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.15s;
+}
+
+.btn-primary:hover,
+.lock-screen button[type="submit"]:hover,
+.settings button:hover {
+  opacity: 0.9;
+}
+
+.btn-primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  transition: color 0.15s;
+  padding: 4px;
+}
+
+.btn-link:hover {
+  color: var(--accent);
+}
+
+/* ── Settings ─────────────────────────────────────────────────── */
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 400px;
+  margin-top: 16px;
+}
+
+.settings-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.settings-form input {
+  padding: 8px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  border-radius: 4px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.settings-form input:focus {
+  border-color: var(--accent);
+}
+
+/* ── Stat Card ────────────────────────────────────────────────── */
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stat-card .label {
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.stat-card .value {
+  font-size: 22px;
+  font-weight: 600;
+}
+
+/* ── Page Titles ──────────────────────────────────────────────── */
+h2 {
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   DASHBOARD
+   ═══════════════════════════════════════════════════════════════════ */
+
+.dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ── Stat Cards Row (4 adet) ─────────────────────────────────── */
+.dash-stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.dash-stat-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dash-stat-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dash-stat-icon {
+  font-size: 15px;
+}
+
+.dash-stat-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-weight: 500;
+}
+
+.dash-stat-value {
+  font-size: 26px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  letter-spacing: -0.5px;
+  line-height: 1.1;
+}
+
+.dash-stat-sub {
+  font-size: 11px;
+  color: var(--text-secondary);
+  letter-spacing: 0.2px;
+}
+
+/* ── Charts Row (2 adet, yan yana) ───────────────────────────── */
+.dash-charts-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.dash-chart-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px 8px;
+  display: flex;
+  flex-direction: column;
+}
+
+.dash-chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.dash-chart-header h3 {
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+.dash-chart-value {
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+}
+
+.dash-chart-value small {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+
+.dash-chart-body {
+  flex: 1;
+  min-height: 220px;
+}
+
+.dash-chart-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 220px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  opacity: 0.5;
+}
+
+/* ── Chart Tooltip ───────────────────────────────────────────── */
+.chart-tooltip {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.chart-tooltip-date {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+
+.chart-tooltip b {
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+}
+
+/* ── Bottom Row (İşlemler + Rejim/Top5) ──────────────────────── */
+.dash-bottom-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.dash-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.dash-card h3 {
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.dash-empty-msg {
+  color: var(--text-secondary);
+  font-size: 13px;
+  opacity: 0.5;
+  padding: 20px 0;
+  text-align: center;
+}
+
+/* ── Son İşlemler Tablosu ────────────────────────────────────── */
+.dash-trades-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin-top: 0;
+}
+
+.dash-trades-table th {
+  font-size: 10px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  text-align: left;
+}
+
+.dash-trades-table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid rgba(48, 54, 61, 0.5);
+}
+
+.dash-trades-table tr:last-child td {
+  border-bottom: none;
+}
+
+.dash-trades-table .mono {
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+
+.dash-trades-table .text-dim {
+  color: var(--text-secondary);
+}
+
+/* Direction badge */
+.dir-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.dir-badge--buy {
+  background: rgba(63, 185, 80, 0.12);
+  color: var(--profit);
+}
+
+.dir-badge--sell {
+  background: rgba(248, 81, 73, 0.12);
+  color: var(--loss);
+}
+
+/* ── Rejim Göstergesi ────────────────────────────────────────── */
+.dash-regime {
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.regime-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  margin-top: 6px;
+}
+
+.regime-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.regime-conf {
+  font-size: 12px;
+  opacity: 0.7;
+  font-weight: 400;
+  margin-left: 4px;
+}
+
+/* ── Top 5 Kontrat Listesi ───────────────────────────────────── */
+.dash-top5 {
+  margin-top: 0;
+}
+
+.top5-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.top5-item {
+  display: grid;
+  grid-template-columns: 28px 1fr 44px 80px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+
+.top5-rank {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-weight: 600;
+  text-align: center;
+}
+
+.top5-symbol {
+  font-size: 13px;
+  font-weight: 500;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.top5-score {
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-align: right;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+}
+
+.top5-bar-bg {
+  height: 4px;
+  background: var(--bg-hover);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.top5-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   TRADE HISTORY
+   ═══════════════════════════════════════════════════════════════════ */
+
+.trade-history {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ── Filtre Çubuğu ───────────────────────────────────────────── */
+.th-filters {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.th-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.th-filter span {
+  font-size: 10px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-weight: 500;
+}
+
+.th-filter select {
+  padding: 6px 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  border-radius: 4px;
+  font-size: 13px;
+  outline: none;
+  cursor: pointer;
+  min-width: 110px;
+  transition: border-color 0.15s;
+}
+
+.th-filter select:focus {
+  border-color: var(--accent);
+}
+
+.th-refresh-btn {
+  padding: 6px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  transition: all 0.15s;
+}
+
+.th-refresh-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.th-refresh-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── Özet Kartlar (4) ────────────────────────────────────────── */
+.th-summary-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.th-summary-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.th-sc-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-weight: 500;
+}
+
+.th-sc-value {
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  line-height: 1.1;
+}
+
+/* ── Hızlı Erişim Butonları ──────────────────────────────────── */
+.th-quick-btns {
+  display: flex;
+  gap: 8px;
+}
+
+.th-quick-btn {
+  padding: 5px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.th-quick-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
+
+.th-quick-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.th-quick--profit:hover:not(:disabled) {
+  color: var(--profit);
+  border-color: var(--profit);
+}
+
+.th-quick--loss:hover:not(:disabled) {
+  color: var(--loss);
+  border-color: var(--loss);
+}
+
+/* ── İşlem Tablosu ───────────────────────────────────────────── */
+.th-table-wrap {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow-x: auto;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.th-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.th-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  min-width: 900px;
+}
+
+.th-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.th-table th {
+  background: var(--bg-secondary);
+  font-size: 10px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 8px 8px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.th-table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid rgba(48, 54, 61, 0.4);
+  white-space: nowrap;
+}
+
+.th-table tbody tr:hover td {
+  background: var(--bg-hover);
+}
+
+.th-table .mono {
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+
+.th-table .text-dim {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+/* Highlight satır (hızlı erişim) */
+.th-row-hl td {
+  background: var(--accent-dim) !important;
+  transition: background 0.3s;
+}
+
+/* Onaylanmamış satır (hafif kenarlık) */
+.th-row-new td:first-child {
+  border-left: 3px solid var(--warning);
+}
+
+/* Onay badge ve buton */
+.th-approved-badge {
+  color: var(--profit);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.th-approve-btn {
+  padding: 3px 8px;
+  background: transparent;
+  border: 1px solid var(--warning);
+  color: var(--warning);
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.th-approve-btn:hover {
+  background: rgba(210, 153, 34, 0.12);
+}
+
+.th-approve-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── Performans + Risk Panelleri ──────────────────────────────── */
+.th-panels-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.th-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.th-panel h3 {
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.th-panel-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 20px;
+}
+
+.th-pr {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+}
+
+.th-pr-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.th-pr-value {
+  font-size: 13px;
+  font-weight: 600;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Alt Özet Satırı ─────────────────────────────────────────── */
+.th-bottom-summary {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 16px;
+}
+
+.th-bs-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.th-bs-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  font-weight: 500;
+}
+
+.th-bs-value {
+  font-size: 14px;
+  font-weight: 600;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.th-bs-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   OPEN POSITIONS
+   ═══════════════════════════════════════════════════════════════════ */
+
+.open-positions {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ── Özet Kartlar ────────────────────────────────────────────── */
+.op-summary-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.op-summary-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.op-sc-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-weight: 500;
+}
+
+.op-sc-value {
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  line-height: 1.1;
+}
+
+.warning-text {
+  color: var(--warning);
+}
+
+/* Teminat bar */
+.op-margin-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.op-margin-bar {
+  height: 4px;
+  background: var(--bg-hover);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.op-margin-fill {
+  height: 100%;
+  background: var(--profit);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.op-margin-fill.warn {
+  background: var(--warning);
+}
+
+.op-margin-fill.danger {
+  background: var(--loss);
+}
+
+/* ── Pozisyon Tablosu ────────────────────────────────────────── */
+.op-table-wrap {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+.op-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  gap: 10px;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.op-empty-icon {
+  font-size: 32px;
+  opacity: 0.5;
+}
+
+.op-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  min-width: 860px;
+}
+
+.op-table th {
+  background: var(--bg-secondary);
+  font-size: 10px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.op-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid rgba(48, 54, 61, 0.4);
+  white-space: nowrap;
+}
+
+.op-table .mono {
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.op-table .text-dim {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.op-symbol {
+  font-weight: 600;
+}
+
+.op-pnl-cell {
+  font-size: 14px;
+}
+
+/* Satır arka plan renkleri (hafif) */
+.op-row-profit td {
+  background: rgba(63, 185, 80, 0.04);
+}
+
+.op-row-loss td {
+  background: rgba(248, 81, 73, 0.04);
+}
+
+.op-row-profit:hover td {
+  background: rgba(63, 185, 80, 0.08) !important;
+}
+
+.op-row-loss:hover td {
+  background: rgba(248, 81, 73, 0.08) !important;
+}
+
+/* Rejim etiketi */
+.op-regime-tag {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.op-regime--trend {
+  background: rgba(63, 185, 80, 0.1);
+  color: var(--profit);
+}
+
+.op-regime--range {
+  background: rgba(88, 166, 255, 0.1);
+  color: var(--accent);
+}
+
+.op-regime--volatile {
+  background: rgba(210, 153, 34, 0.1);
+  color: var(--warning);
+}
+
+.op-regime--olay {
+  background: rgba(248, 81, 73, 0.1);
+  color: var(--loss);
+}
+
+/* Alt toplam satırı */
+.op-footer-row td {
+  background: var(--bg-secondary) !important;
+  border-top: 1px solid var(--border);
+  border-bottom: none;
+  padding: 10px;
+  font-size: 13px;
+}
+
+/* ── Alt Bilgi Satırı ────────────────────────────────────────── */
+.op-info-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 16px;
+}
+
+.op-info-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.op-info-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  font-weight: 500;
+}
+
+.op-info-value {
+  font-size: 14px;
+  font-weight: 600;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.op-info-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   PERFORMANCE ANALİZİ
+   ══════════════════════════════════════════════════════════════ */
+
+.performance {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px 24px;
+  overflow-y: auto;
+  height: 100%;
+}
+
+/* ── Header + Period Buttons ─────────────────────────────────── */
+
+.pf-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+.pf-header h2 {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.pf-period-btns {
+  display: flex;
+  gap: 4px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.pf-period-btn {
+  padding: 5px 14px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.pf-period-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+}
+
+.pf-period-btn.active {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+/* ── Stat Cards (5) ──────────────────────────────────────────── */
+
+.pf-stats-row {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.pf-stat-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pf-stat-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  font-weight: 500;
+}
+
+.pf-stat-value {
+  font-size: 20px;
+  font-weight: 700;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.pf-stat-value.profit { color: var(--profit); }
+.pf-stat-value.loss   { color: var(--loss); }
+
+/* ── Chart Cards ─────────────────────────────────────────────── */
+
+.pf-chart-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  min-width: 0;
+}
+
+.pf-chart-full {
+  width: 100%;
+}
+
+.pf-chart-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.pf-chart-header h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.pf-chart-sub {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* ── Two-column layout ───────────────────────────────────────── */
+
+.pf-two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+/* ── Empty / Loading states ──────────────────────────────────── */
+
+.pf-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 120px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-style: italic;
+}
+
+.pf-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 200px;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+/* ── Long vs Short Panel ─────────────────────────────────────── */
+
+.pf-ls-grid {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 0;
+  padding: 4px 0;
+}
+
+.pf-ls-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 12px;
+}
+
+.pf-ls-divider {
+  width: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+
+.pf-ls-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.pf-ls-title.profit { color: var(--profit); }
+.pf-ls-title.loss   { color: var(--loss); }
+
+.pf-ls-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pf-ls-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.pf-ls-value {
+  font-size: 13px;
+  font-weight: 600;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.pf-ls-value.profit { color: var(--profit); }
+.pf-ls-value.loss   { color: var(--loss); }
+
+/* ── Saat Bazlı Heatmap ──────────────────────────────────────── */
+
+.pf-heatmap {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.pf-hm-cell {
+  border-radius: 8px;
+  padding: 12px 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  border: 1px solid var(--border);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.pf-hm-cell:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.pf-hm-hour {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+}
+
+.pf-hm-pnl {
+  font-size: 14px;
+  font-weight: 700;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.pf-hm-pnl.profit { color: var(--profit); }
+.pf-hm-pnl.loss   { color: var(--loss); }
+
+.pf-hm-count {
+  font-size: 10px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.pf-hm-wr {
+  font-size: 10px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   AYARLAR (SETTINGS)
+   ══════════════════════════════════════════════════════════════ */
+
+.settings {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px 24px;
+  overflow-y: auto;
+  height: 100%;
+}
+
+.settings > h2 {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.st-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 200px;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+/* ── Grid: sol + sag kolon ───────────────────────────────────── */
+
+.st-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  flex-shrink: 0;
+}
+
+.st-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ── Section kart ────────────────────────────────────────────── */
+
+.st-section {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 18px;
+}
+
+.st-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.st-section-header h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.st-section-note {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin: 0 0 12px;
+  line-height: 1.5;
+}
+
+.st-section-note code {
+  background: var(--bg-tertiary);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  color: var(--accent);
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+}
+
+/* ── Bağlantı badge ──────────────────────────────────────────── */
+
+.st-conn-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 12px;
+}
+
+.st-conn-badge.connected {
+  background: rgba(63, 185, 80, 0.15);
+  color: var(--profit);
+}
+
+.st-conn-badge.disconnected {
+  background: rgba(248, 81, 73, 0.15);
+  color: var(--loss);
+}
+
+/* ── Readonly badge ──────────────────────────────────────────── */
+
+.st-readonly-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(136, 146, 176, 0.15);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+/* ── Field rows ──────────────────────────────────────────────── */
+
+.st-field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.st-field-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 0;
+}
+
+.st-field-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.st-field-value-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.st-field-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.st-field-value.profit { color: var(--profit); }
+.st-field-value.loss   { color: var(--loss); }
+
+.st-field-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+
+/* ── Eye toggle button ───────────────────────────────────────── */
+
+.st-eye-btn {
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.st-eye-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+
+/* ── Buttons ─────────────────────────────────────────────────── */
+
+.st-btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.st-btn-secondary {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+}
+
+.st-btn-secondary:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.st-btn-sm {
+  padding: 5px 12px;
+  font-size: 11px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
+.st-btn-sm:hover {
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+
+/* ── Tema kartları ───────────────────────────────────────────── */
+
+.st-theme-row {
+  display: flex;
+  gap: 12px;
+}
+
+.st-theme-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 2px solid var(--border);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.st-theme-card.active {
+  border-color: var(--accent);
+  background: rgba(88, 166, 255, 0.06);
+}
+
+.st-theme-card.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.st-theme-card span {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.st-theme-card.active span {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.st-theme-preview {
+  width: 100%;
+  height: 48px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+}
+
+.st-theme-preview.dark {
+  background: linear-gradient(135deg, #0d1117 0%, #161b22 50%, #21262d 100%);
+}
+
+.st-theme-preview.light {
+  background: linear-gradient(135deg, #f6f8fa 0%, #ffffff 50%, #e8ebed 100%);
+}
+
+/* ── Toggle switches ─────────────────────────────────────────── */
+
+.st-toggle-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.st-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(48, 54, 61, 0.5);
+}
+
+.st-toggle-row:last-child {
+  border-bottom: none;
+}
+
+.st-toggle-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.st-toggle-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.st-toggle-desc {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.st-toggle {
+  width: 38px;
+  height: 20px;
+  border-radius: 10px;
+  border: none;
+  padding: 2px;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.2s ease;
+  flex-shrink: 0;
+}
+
+.st-toggle.on {
+  background: var(--accent);
+}
+
+.st-toggle.off {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+}
+
+.st-toggle-knob {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.st-toggle.on .st-toggle-knob {
+  transform: translateX(18px);
+}
+
+.st-toggle.off .st-toggle-knob {
+  transform: translateX(0);
+}
+
+/* ── Versiyon ────────────────────────────────────────────────── */
+
+.st-version-section .st-field-group,
+.st-version-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ── Sistem Log section (tam genislik) ───────────────────────── */
+
+.st-log-section {
+  flex-shrink: 0;
+}
+
+.st-log-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.st-log-filters {
+  display: flex;
+  gap: 3px;
+  background: var(--bg-primary);
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.st-log-filter-btn {
+  padding: 4px 10px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.st-log-filter-btn:hover {
+  color: var(--text-primary);
+}
+
+.st-log-filter-btn.active {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.st-log-limit {
+  padding: 4px 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.st-log-limit:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+/* ── Log tablosu ─────────────────────────────────────────────── */
+
+.st-log-table-wrap {
+  max-height: 340px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-top: 10px;
+}
+
+.st-log-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.st-log-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.st-log-table th {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-weight: 600;
+  font-size: 11px;
+  text-align: left;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.st-log-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid rgba(48, 54, 61, 0.4);
+  color: var(--text-primary);
+  vertical-align: top;
+}
+
+.st-log-table tbody tr:hover {
+  background: rgba(88, 166, 255, 0.04);
+}
+
+.st-log-ts {
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.st-log-type {
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.st-log-msg {
+  font-size: 12px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.st-log-action {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+}
+
+.st-log-empty {
+  text-align: center;
+  color: var(--text-secondary);
+  font-style: italic;
+  padding: 24px 10px !important;
+}
+
+/* ── Severity badges ─────────────────────────────────────────── */
+
+.st-sev-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.st-sev-badge.st-sev-critical {
+  background: rgba(248, 81, 73, 0.18);
+  color: #f85149;
+}
+
+.st-sev-badge.st-sev-warning {
+  background: rgba(210, 153, 34, 0.18);
+  color: #d29922;
+}
+
+.st-sev-badge.st-sev-info {
+  background: rgba(88, 166, 255, 0.12);
+  color: #58a6ff;
+}
+
+/* Row severity accent (left border) */
+.st-log-table tbody tr.st-sev-critical {
+  border-left: 3px solid #f85149;
+}
+
+.st-log-table tbody tr.st-sev-warning {
+  border-left: 3px solid #d29922;
+}
+
+.st-log-table tbody tr.st-sev-info {
+  border-left: 3px solid transparent;
+}
+
+/* ── Log footer ──────────────────────────────────────────────── */
+
+.st-log-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 0 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* ── Selection ────────────────────────────────────────────────── */
+::selection {
+  background: var(--accent);
+  color: #fff;
+}

@@ -1,0 +1,74 @@
+"""ÜSTAT API — Bağımlılık yönetimi (Dependency Injection).
+
+Engine bileşenlerine (Database, MT5Bridge, Baba, Ustat, Engine)
+erişim sağlar. FastAPI Depends() ile route'lara enjekte edilir.
+
+Kullanım:
+    from api.deps import get_db, get_engine
+    @router.get("/status")
+    async def status(db=Depends(get_db)):
+        ...
+"""
+
+from __future__ import annotations
+
+import time
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from engine.baba import Baba
+    from engine.database import Database
+    from engine.main import Engine
+    from engine.mt5_bridge import MT5Bridge
+    from engine.ustat import Ustat
+
+# ── Global engine referansları ────────────────────────────────────
+# server.py lifespan'da set edilir.
+_engine: Engine | None = None
+_start_time: float = 0.0
+
+
+def set_engine(engine: Engine) -> None:
+    """Engine referansını kaydet (lifespan'da çağrılır)."""
+    global _engine, _start_time
+    _engine = engine
+    _start_time = time.time()
+
+
+def get_engine() -> Engine | None:
+    """Engine instance'ına eriş."""
+    return _engine
+
+
+def get_db() -> Database | None:
+    """Database instance'ına eriş."""
+    return _engine.db if _engine else None
+
+
+def get_mt5() -> MT5Bridge | None:
+    """MT5Bridge instance'ına eriş."""
+    return _engine.mt5 if _engine else None
+
+
+def get_baba() -> Baba | None:
+    """Baba (risk yöneticisi) instance'ına eriş."""
+    return _engine.baba if _engine else None
+
+
+def get_ustat() -> Ustat | None:
+    """Ustat (strateji yöneticisi) instance'ına eriş."""
+    return _engine.ustat if _engine else None
+
+
+def get_uptime() -> int:
+    """Çalışma süresi (saniye)."""
+    if _start_time == 0.0:
+        return 0
+    return int(time.time() - _start_time)
+
+
+def is_engine_running() -> bool:
+    """Engine çalışıyor mu?"""
+    if _engine is None:
+        return False
+    return getattr(_engine, '_running', False)

@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0d1117"/>
+      <stop offset="100%" stop-color="#161b22"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#58a6ff"/>
+      <stop offset="100%" stop-color="#388bfd"/>
+    </linearGradient>
+    <linearGradient id="green" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#238636"/>
+      <stop offset="100%" stop-color="#3fb950"/>
+    </linearGradient>
+  </defs>
+  <!-- Background -->
+  <rect width="256" height="256" rx="40" fill="url(#bg)"/>
+  <rect x="2" y="2" width="252" height="252" rx="38" fill="none" stroke="#30363d" stroke-width="2"/>
+  <!-- Chart line (ascending) -->
+  <polyline
+    points="40,180 70,165 95,170 120,140 145,150 170,110 195,95 220,70"
+    fill="none"
+    stroke="url(#green)"
+    stroke-width="4"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <!-- Chart dots -->
+  <circle cx="120" cy="140" r="4" fill="#3fb950"/>
+  <circle cx="170" cy="110" r="4" fill="#3fb950"/>
+  <circle cx="220" cy="70" r="4" fill="#3fb950"/>
+  <!-- U letter -->
+  <text x="128" y="155" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-weight="700" font-size="120" fill="url(#accent)" opacity="0.9">U</text>
+</svg>
