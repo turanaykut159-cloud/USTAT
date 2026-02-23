@@ -256,6 +256,7 @@ class Top5Item(BaseModel):
     symbol: str
     score: float = 0.0
     regime: str = ""
+    signal_direction: str = ""  # "BUY" | "SELL" | "BEKLE"
 
 
 class Top5Response(BaseModel):

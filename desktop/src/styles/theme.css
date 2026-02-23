@@ -1374,7 +1374,7 @@ h2 {
 
 .top5-item {
   display: grid;
-  grid-template-columns: 28px 1fr 44px 80px;
+  grid-template-columns: 28px 1fr 46px 44px 80px;
   align-items: center;
   gap: 8px;
   padding: 6px 0;
@@ -1395,6 +1395,17 @@ h2 {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+.top5-direction {
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  letter-spacing: 0.3px;
+}
+.top5-dir-buy  { color: #4CAF50; }
+.top5-dir-sell { color: #f44336; }
+.top5-dir-bekle { color: #888; }
 
 .top5-score {
   font-size: 12px;

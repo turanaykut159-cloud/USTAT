@@ -448,21 +448,28 @@ export default function Dashboard() {
 
             {(top5.contracts || []).length > 0 ? (
               <ul className="top5-list">
-                {top5.contracts.map((c, i) => (
-                  <li key={c.symbol} className="top5-item">
-                    <span className="top5-rank">#{c.rank || i + 1}</span>
-                    <span className="top5-symbol">{c.symbol}</span>
-                    <span className="top5-score">{c.score?.toFixed(1) ?? '—'}</span>
-                    <div className="top5-bar-bg">
-                      <div
-                        className="top5-bar-fill"
-                        style={{
-                          width: `${Math.min((c.score / (top5.contracts[0]?.score || 1)) * 100, 100)}%`,
-                        }}
-                      />
-                    </div>
-                  </li>
-                ))}
+                {top5.contracts.map((c, i) => {
+                  const dir = c.signal_direction || 'BEKLE';
+                  const dirCls = dir === 'BUY' ? 'top5-dir-buy'
+                    : dir === 'SELL' ? 'top5-dir-sell'
+                    : 'top5-dir-bekle';
+                  return (
+                    <li key={c.symbol} className="top5-item">
+                      <span className="top5-rank">#{c.rank || i + 1}</span>
+                      <span className="top5-symbol">{c.symbol}</span>
+                      <span className={`top5-direction ${dirCls}`}>{dir}</span>
+                      <span className="top5-score">{c.score?.toFixed(1) ?? '—'}</span>
+                      <div className="top5-bar-bg">
+                        <div
+                          className="top5-bar-fill"
+                          style={{
+                            width: `${Math.min((c.score / (top5.contracts[0]?.score || 1)) * 100, 100)}%`,
+                          }}
+                        />
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             ) : (
               <div className="dash-empty-msg">Top 5 verisi yok</div>

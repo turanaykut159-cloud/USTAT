@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from engine.database import Database
     from engine.main import Engine
     from engine.mt5_bridge import MT5Bridge
+    from engine.ogul import Ogul
     from engine.ustat import Ustat
 
 # ── Global engine referansları ────────────────────────────────────
@@ -59,6 +60,11 @@ def get_baba() -> Baba | None:
 def get_ustat() -> Ustat | None:
     """Ustat (strateji yöneticisi) instance'ına eriş."""
     return _engine.ustat if _engine else None
+
+
+def get_ogul() -> Ogul | None:
+    """Ogul (sinyal üretici) instance'ına eriş."""
+    return _engine.ogul if _engine else None
 
 
 def get_pipeline() -> DataPipeline | None:
