@@ -28,6 +28,7 @@ class StatusResponse(BaseModel):
     daily_trade_count: int = 0
     uptime_seconds: int = 0
     last_cycle: str | None = None
+    deactivated_symbols: list[str] = []
     warnings: list[WarningItem] = []
 
 

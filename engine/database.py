@@ -488,6 +488,7 @@ class Database:
         self,
         symbol: str | None = None,
         strategy: str | None = None,
+        since: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
         """İşlem listesi getir (filtreli).
@@ -495,6 +496,7 @@ class Database:
         Args:
             symbol: Filtre: kontrat sembolü.
             strategy: Filtre: strateji adı.
+            since: Filtre: bu tarihten sonra (YYYY-MM-DD). entry_time bazlı.
             limit: Maksimum satır.
 
         Returns:
@@ -508,6 +510,9 @@ class Database:
         if strategy:
             clauses.append("strategy=?")
             params.append(strategy)
+        if since:
+            clauses.append("entry_time>=?")
+            params.append(since)
 
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         params.append(limit)

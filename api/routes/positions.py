@@ -16,7 +16,8 @@ router = APIRouter()
 
 
 # MT5 pozisyon tipi → yön
-_TYPE_MAP = {0: "BUY", 1: "SELL"}
+# MT5Bridge string ("BUY"/"SELL") döndürür, eski format int (0/1) olabilir
+_TYPE_MAP = {0: "BUY", 1: "SELL", "BUY": "BUY", "SELL": "SELL"}
 
 
 @router.get("/positions", response_model=PositionsResponse)

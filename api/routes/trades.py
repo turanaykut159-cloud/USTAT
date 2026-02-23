@@ -13,6 +13,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, Query
 
 from api.deps import get_db, get_engine
+from engine.baba import RISK_BASELINE_DATE
 from api.schemas import (
     ApproveRequest,
     ApproveResponse,
@@ -114,7 +115,7 @@ async def get_trade_stats(
     if not db:
         return TradeStatsResponse()
 
-    rows = db.get_trades(limit=limit)
+    rows = db.get_trades(since=RISK_BASELINE_DATE, limit=limit)
     if not rows:
         return TradeStatsResponse()
 

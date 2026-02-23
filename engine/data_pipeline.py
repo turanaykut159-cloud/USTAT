@@ -340,6 +340,31 @@ class DataPipeline:
 
         return df
 
+    @staticmethod
+    def _is_market_hours_gap(t1: pd.Timestamp, t2: pd.Timestamp) -> bool:
+        """İki bar arasındaki boşluk piyasa kapalı saatlerine mi denk geliyor?
+
+        VİOP piyasa saatleri: Hafta içi ~09:30-18:15.
+        Gece kapanış→açılış ve hafta sonu boşlukları normal kabul edilir.
+
+        Args:
+            t1: Önceki barın zamanı.
+            t2: Sonraki barın zamanı.
+
+        Returns:
+            True ise gap piyasa kapalı dönemine denk geliyor (normal).
+        """
+        # Hafta sonu geçişi: Cuma → Pazartesi
+        if t1.weekday() == 4 and t2.weekday() == 0:  # Fri→Mon
+            return True
+        # Farklı günler arası (gece kapanışı): aynı hafta içi
+        if t1.date() != t2.date():
+            return True
+        # Aynı gün ama gece seansı arası (18:15 → ertesi gün)
+        if t1.hour >= 18 or t2.hour < 9:
+            return True
+        return False
+
     def _check_consecutive_missing(
         self,
         df: pd.DataFrame,
@@ -350,6 +375,7 @@ class DataPipeline:
         """Ardışık eksik bar kontrolü.
 
         3+ ardışık beklenen bar eksikse kontratı deaktif eder.
+        Piyasa kapalı saatlerindeki (gece, hafta sonu) boşluklar sayılmaz.
 
         Args:
             df: Temizlenmiş DataFrame.
@@ -364,11 +390,20 @@ class DataPipeline:
             return True
 
         expected_sec = EXPECTED_INTERVALS.get(timeframe, 60)
-        diffs = df["time"].diff().dt.total_seconds().iloc[1:]
+        times = df["time"]
+        diffs = times.diff().dt.total_seconds().iloc[1:]
 
         # Ardışık eksik bar sayısı = (gerçek aralık / beklenen) - 1
         missing_counts = (diffs / expected_sec).round().astype(int) - 1
         missing_counts = missing_counts.clip(lower=0)
+
+        # Piyasa kapalı saatlerindeki boşlukları sıfırla
+        for idx in missing_counts.index:
+            if missing_counts[idx] >= MAX_CONSECUTIVE_MISSING:
+                t1 = times.iloc[idx - 1] if idx > 0 else times.iloc[0]
+                t2 = times.iloc[idx] if idx < len(times) else times.iloc[-1]
+                if self._is_market_hours_gap(t1, t2):
+                    missing_counts.at[idx] = 0
 
         max_consecutive = int(missing_counts.max()) if len(missing_counts) > 0 else 0
 

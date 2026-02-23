@@ -154,6 +154,17 @@ export async function getEvents(params = {}) {
   }
 }
 
+// ── Kontrat Reactivation ─────────────────────────────────────────
+
+export async function reactivateSymbols() {
+  try {
+    const { data } = await client.post('/reactivate');
+    return data;
+  } catch {
+    return { success: false, message: 'Bağlantı hatası.' };
+  }
+}
+
 // ── Kill-Switch ──────────────────────────────────────────────────
 
 export async function activateKillSwitch(user = 'operator') {

@@ -13,6 +13,7 @@ from datetime import datetime
 from fastapi import APIRouter, Query
 
 from api.deps import get_db
+from engine.baba import RISK_BASELINE_DATE
 from api.schemas import EquityPoint, PerformanceResponse
 
 router = APIRouter()
@@ -27,8 +28,8 @@ async def get_performance(
     if not db:
         return PerformanceResponse()
 
-    # ── İşlemler ──────────────────────────────────────────────────
-    trades = db.get_trades(limit=5000)
+    # ── İşlemler (baseline sonrası) ────────────────────────────────
+    trades = db.get_trades(since=RISK_BASELINE_DATE, limit=5000)
     if not trades:
         return PerformanceResponse()
 
@@ -83,7 +84,9 @@ async def get_performance(
     max_drawdown_pct = 0.0
     equity_curve: list[EquityPoint] = []
 
-    snapshots = db.get_risk_snapshots(limit=500)
+    snapshots = db.get_risk_snapshots(
+        since=f"{RISK_BASELINE_DATE}T00:00:00", limit=500,
+    )
     if snapshots:
         # Kronolojik sırada
         snapshots.sort(key=lambda s: s.get("timestamp", ""))

@@ -19,7 +19,7 @@ import {
 } from 'recharts';
 import {
   getTradeStats, getPerformance, getTrades, getTop5, getStatus,
-  connectLiveWS,
+  connectLiveWS, reactivateSymbols,
 } from '../services/api';
 
 // ── Yardımcılar ──────────────────────────────────────────────────
@@ -415,7 +415,31 @@ export default function Dashboard() {
 
           {/* Top 5 kontrat listesi */}
           <div className="dash-top5">
-            <h3>Top 5 Kontrat</h3>
+            <div className="dash-top5-header">
+              <h3>Top 5 Kontrat</h3>
+              {top5.last_refresh && (
+                <span className="top5-refresh-time">
+                  {shortTime(top5.last_refresh)}
+                </span>
+              )}
+            </div>
+
+            {/* Deaktif kontrat uyarısı */}
+            {(status.deactivated_symbols || []).length > 0 && (
+              <div className="top5-deactivated-warn">
+                <span>{status.deactivated_symbols.length} kontrat deaktif</span>
+                <button
+                  className="top5-reactivate-btn"
+                  onClick={async () => {
+                    const res = await reactivateSymbols();
+                    if (res.success) fetchAll();
+                  }}
+                >
+                  Aktif Et
+                </button>
+              </div>
+            )}
+
             {(top5.contracts || []).length > 0 ? (
               <ul className="top5-list">
                 {top5.contracts.map((c, i) => (

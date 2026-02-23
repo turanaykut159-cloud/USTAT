@@ -1,4 +1,5 @@
 """GET /api/status — Sistem durumu.
+POST /api/reactivate — Deaktif kontratları yeniden aktif et.
 
 Bağlantı, rejim, faz, kill-switch, erken uyarılar.
 """
@@ -9,8 +10,8 @@ from datetime import datetime
 
 from fastapi import APIRouter
 
-from api.deps import get_baba, get_engine, get_mt5, get_uptime, is_engine_running
-from api.schemas import StatusResponse, WarningItem
+from api.deps import get_baba, get_engine, get_mt5, get_pipeline, get_uptime, is_engine_running
+from api.schemas import StatusResponse, SuccessResponse, WarningItem
 
 router = APIRouter()
 
@@ -72,6 +73,10 @@ async def get_status():
         if lc:
             last_cycle = lc.isoformat() if isinstance(lc, datetime) else str(lc)
 
+    # Deaktif kontratlar
+    pipeline = get_pipeline()
+    deactivated_symbols = pipeline.get_deactivated_symbols() if pipeline else []
+
     return StatusResponse(
         engine_running=engine_running,
         mt5_connected=mt5_connected,
@@ -83,5 +88,32 @@ async def get_status():
         daily_trade_count=daily_trade_count,
         uptime_seconds=get_uptime(),
         last_cycle=last_cycle,
+        deactivated_symbols=deactivated_symbols,
         warnings=warnings,
+    )
+
+
+@router.post("/reactivate", response_model=SuccessResponse)
+async def reactivate_symbols():
+    """Tüm deaktif kontratları yeniden aktif et.
+
+    Engine restart veya piyasa saatleri nedeniyle yanlışlıkla
+    deaktif edilmiş kontratları toplu olarak geri açar.
+    """
+    pipeline = get_pipeline()
+    if not pipeline:
+        return SuccessResponse(success=False, message="DataPipeline aktif değil.")
+
+    deactivated = pipeline.get_deactivated_symbols()
+    if not deactivated:
+        return SuccessResponse(success=True, message="Deaktif kontrat yok.")
+
+    reactivated: list[str] = []
+    for symbol in deactivated:
+        if pipeline.reactivate_symbol(symbol):
+            reactivated.append(symbol)
+
+    return SuccessResponse(
+        success=True,
+        message=f"{len(reactivated)} kontrat yeniden aktif edildi: {', '.join(reactivated)}",
     )

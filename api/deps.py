@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from engine.baba import Baba
+    from engine.data_pipeline import DataPipeline
     from engine.database import Database
     from engine.main import Engine
     from engine.mt5_bridge import MT5Bridge
@@ -58,6 +59,11 @@ def get_baba() -> Baba | None:
 def get_ustat() -> Ustat | None:
     """Ustat (strateji yöneticisi) instance'ına eriş."""
     return _engine.ustat if _engine else None
+
+
+def get_pipeline() -> DataPipeline | None:
+    """DataPipeline instance'ına eriş."""
+    return _engine.pipeline if _engine else None
 
 
 def get_uptime() -> int:
