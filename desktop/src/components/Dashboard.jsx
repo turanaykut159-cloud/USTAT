@@ -430,29 +430,35 @@ export default function Dashboard() {
               )}
             </div>
 
-            {/* Deaktif kontrat uyarısı */}
-            {(status.deactivated_symbols || []).length > 0 && (
-              <div className="top5-deactivated-warn">
-                <span>{status.deactivated_symbols.length} kontrat deaktif</span>
-                <button
-                  className="top5-reactivate-btn"
-                  onClick={async () => {
-                    const res = await reactivateSymbols();
-                    if (res.success) fetchAll();
-                  }}
-                >
-                  Aktif Et
-                </button>
-              </div>
-            )}
+            {/* Kontrat durumu */}
+            {(() => {
+              const deactCount = (status.deactivated_symbols || []).length;
+              const activeCount = 15 - deactCount;
+              return (
+                <div className={`top5-status-bar ${deactCount > 0 ? 'top5-status-warn' : 'top5-status-ok'}`}>
+                  <span>{activeCount}/15 aktif</span>
+                  {deactCount > 0 && (
+                    <button
+                      className="top5-reactivate-btn"
+                      onClick={async () => {
+                        const res = await reactivateSymbols();
+                        if (res.success) fetchAll();
+                      }}
+                    >
+                      Aktif Et
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
 
             {(top5.contracts || []).length > 0 ? (
               <ul className="top5-list">
                 {top5.contracts.map((c, i) => {
-                  const dir = c.signal_direction || 'BEKLE';
+                  const dir = c.signal_direction || 'NOTR';
                   const dirCls = dir === 'BUY' ? 'top5-dir-buy'
                     : dir === 'SELL' ? 'top5-dir-sell'
-                    : 'top5-dir-bekle';
+                    : 'top5-dir-notr';
                   return (
                     <li key={c.symbol} className="top5-item">
                       <span className="top5-rank">#{c.rank || i + 1}</span>

@@ -45,7 +45,7 @@ async def get_top5():
     contracts: list[Top5Item] = []
     for rank, (symbol, score) in enumerate(sorted_symbols[:5], start=1):
         # Sinyal yönü: son indikatör analizi sonucu
-        direction = last_signals.get(symbol, "BEKLE")
+        direction = last_signals.get(symbol, "NOTR")
         contracts.append(Top5Item(
             rank=rank,
             symbol=symbol,

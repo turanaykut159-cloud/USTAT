@@ -200,7 +200,11 @@ class Ogul:
         # 4. MT5 ile pozisyon senkronizasyonu
         self._sync_positions()
 
-        # 5. Rejim kontrolü — aktif stratejiler
+        # 5. Her sembol için yön eğilimi (bias) hesapla — her zaman, koşulsuz
+        for symbol in symbols:
+            self.last_signals[symbol] = self._calculate_bias(symbol)
+
+        # 6. Rejim kontrolü — aktif stratejiler
         strategies = REGIME_STRATEGIES.get(regime.regime_type, [])
         if not strategies:
             logger.debug(
@@ -208,11 +212,11 @@ class Ogul:
             )
             return
 
-        # 6. İşlem saatleri kontrolü
+        # 7. İşlem saatleri kontrolü
         if not self._is_trading_allowed():
             return
 
-        # 7. Her sembol için sinyal üretimi
+        # 8. Her sembol için sinyal üretimi
         for symbol in symbols:
             # Sembol başına 1 aktif işlem kuralı
             if symbol in self.active_trades:
@@ -224,12 +228,64 @@ class Ogul:
                 continue
 
             signal = self._generate_signal(symbol, regime, strategies)
-            # Sinyal sonucunu kaydet (Dashboard Top 5 için)
             if signal:
                 self.last_signals[symbol] = signal.signal_type.value
                 self._execute_signal(signal, regime)
-            else:
-                self.last_signals[symbol] = "BEKLE"
+
+    # ═════════════════════════════════════════════════════════════════
+    #  YÖN EĞİLİMİ (BIAS)
+    # ═════════════════════════════════════════════════════════════════
+
+    def _calculate_bias(self, symbol: str) -> str:
+        """İndikatör bazlı yön eğilimi (sinyal eşiği olmadan).
+
+        3 temel indikatörün çoğunluk oyu:
+        RSI(14), EMA(20/50) crossover, MACD histogram.
+
+        Returns:
+            ``"BUY"``, ``"SELL"`` veya ``"NOTR"``.
+        """
+        df = self.db.get_bars(symbol, "M15", limit=MIN_BARS_M15)
+        if df is None or df.empty or len(df) < MIN_BARS_M15:
+            return "NOTR"
+
+        close = df["close"].values.astype(np.float64)
+        votes = 0  # pozitif=BUY, negatif=SELL
+
+        # 1. RSI — 50 üstü bullish, 50 altı bearish
+        rsi_arr = calc_rsi(close, period=MR_RSI_PERIOD)
+        rsi_val = _last_valid(rsi_arr)
+        if rsi_val is not None:
+            if rsi_val > 50:
+                votes += 1
+            elif rsi_val < 50:
+                votes -= 1
+
+        # 2. EMA crossover — fast > slow bullish
+        ema_f = ema(close, period=TF_EMA_FAST)
+        ema_s = ema(close, period=TF_EMA_SLOW)
+        ef = _last_valid(ema_f)
+        es = _last_valid(ema_s)
+        if ef is not None and es is not None:
+            if ef > es:
+                votes += 1
+            elif ef < es:
+                votes -= 1
+
+        # 3. MACD histogram — pozitif bullish
+        _, _, hist = calc_macd(close)
+        h = _last_valid(hist)
+        if h is not None:
+            if h > 0:
+                votes += 1
+            elif h < 0:
+                votes -= 1
+
+        if votes > 0:
+            return "BUY"
+        elif votes < 0:
+            return "SELL"
+        return "NOTR"
 
     # ═════════════════════════════════════════════════════════════════
     #  SİNYAL ÜRETİMİ
