@@ -49,14 +49,21 @@ async def get_top5():
 
     # DB'den son Top5 geçmişini de kontrol et (fallback)
     if not contracts and db:
-        history = db.get_top5(limit=5)
+        history = db.get_top5(limit=50)
+        seen: set[str] = set()
         for h in history:
+            sym = h.get("symbol", "")
+            if sym in seen:
+                continue
+            seen.add(sym)
             contracts.append(Top5Item(
-                rank=h.get("rank", 0),
-                symbol=h.get("symbol", ""),
+                rank=len(contracts) + 1,
+                symbol=sym,
                 score=h.get("score", 0.0),
                 regime=h.get("regime", ""),
             ))
+            if len(contracts) >= 5:
+                break
 
     return Top5Response(
         contracts=contracts,
