@@ -92,7 +92,10 @@ async def get_trades(
     if not db:
         return TradesResponse()
 
-    rows = db.get_trades(symbol=symbol, strategy=strategy, limit=limit)
+    rows = db.get_trades(
+        symbol=symbol, strategy=strategy,
+        since=RISK_BASELINE_DATE, limit=limit,
+    )
     items = [_to_trade_item(r) for r in rows]
 
     return TradesResponse(count=len(items), trades=items)

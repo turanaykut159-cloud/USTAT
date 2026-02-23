@@ -19,7 +19,7 @@ import {
 } from 'recharts';
 import {
   getTradeStats, getPerformance, getTrades, getTop5, getStatus,
-  connectLiveWS, reactivateSymbols,
+  getAccount, connectLiveWS, reactivateSymbols,
 } from '../services/api';
 
 // ── Yardımcılar ──────────────────────────────────────────────────
@@ -127,6 +127,7 @@ export default function Dashboard() {
     regime: 'TREND', regime_confidence: 0,
     engine_running: false, daily_trade_count: 0,
   });
+  const [account, setAccount] = useState({ equity: 0 });
 
   // WebSocket kaynak canlı veri
   const [liveEquity, setLiveEquity] = useState(null);
@@ -134,18 +135,20 @@ export default function Dashboard() {
 
   // ── REST veri çekme (10sn) ───────────────────────────────────────
   const fetchAll = useCallback(async () => {
-    const [s, p, t, t5, st] = await Promise.all([
+    const [s, p, t, t5, st, acc] = await Promise.all([
       getTradeStats(),
       getPerformance(30),
       getTrades({ limit: 5 }),
       getTop5(),
       getStatus(),
+      getAccount(),
     ]);
     setStats(s);
     setPerf(p);
     setRecentTrades(t.trades || []);
     setTop5(t5);
     setStatus(st);
+    setAccount(acc);
   }, []);
 
   useEffect(() => {
@@ -212,8 +215,11 @@ export default function Dashboard() {
       }));
   })();
 
-  // Gösterilecek equity: canlı varsa onu, yoksa perf'i kullan
-  const displayEquity = liveEquity?.equity ?? perf.equity_curve?.[perf.equity_curve.length - 1]?.equity ?? 0;
+  // Gösterilecek equity: canlı WS → perf eğrisi → account API fallback
+  const displayEquity = liveEquity?.equity
+    ?? perf.equity_curve?.[perf.equity_curve.length - 1]?.equity
+    ?? account.equity
+    ?? 0;
 
   // Rejim bilgisi
   const regime = status.regime || 'TREND';
