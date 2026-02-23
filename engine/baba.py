@@ -118,6 +118,12 @@ MAX_SAME_DIRECTION:         int   = 3
 MAX_SAME_SECTOR_DIRECTION:  int   = 2
 MAX_INDEX_WEIGHT_SCORE:     float = 0.25
 
+# ── Risk hesaplama başlangıç tarihi ────────────────────────────────
+# Bu tarihten önceki risk snapshot ve trade verileri risk limitlerini
+# tetiklemez. Eski test/geliştirme dönemi verileri devre dışı kalır.
+# Değiştirmek için bu sabiti güncelleyin.
+RISK_BASELINE_DATE: str = "2026-02-23"
+
 # ── Kill-switch seviyeleri ───────────────────────────────────────────
 KILL_SWITCH_NONE: int = 0
 KILL_SWITCH_L1:   int = 1   # kontrat durdur
@@ -994,8 +1000,13 @@ class Baba:
 
         today = date.today()
         monday = today - timedelta(days=today.weekday())
+        # Baseline: eski veriler risk hesabını etkilemesin
+        since_str = max(
+            f"{monday.isoformat()}T00:00:00",
+            f"{RISK_BASELINE_DATE}T00:00:00",
+        )
         snapshots = self._db.get_risk_snapshots(
-            since=f"{monday.isoformat()}T00:00:00", limit=500,
+            since=since_str, limit=500,
         )
         if not snapshots:
             return None
@@ -1037,8 +1048,13 @@ class Baba:
 
         today = date.today()
         month_start = today.replace(day=1)
+        # Baseline: eski veriler risk hesabını etkilemesin
+        since_str = max(
+            f"{month_start.isoformat()}T00:00:00",
+            f"{RISK_BASELINE_DATE}T00:00:00",
+        )
         snapshots = self._db.get_risk_snapshots(
-            since=f"{month_start.isoformat()}T00:00:00", limit=1000,
+            since=since_str, limit=1000,
         )
         if not snapshots:
             return False
@@ -1116,11 +1132,16 @@ class Baba:
         return False
 
     def _update_consecutive_losses(self) -> None:
-        """Üst üste kayıp sayacını DB'den güncelle."""
+        """Üst üste kayıp sayacını DB'den güncelle.
+
+        Sadece RISK_BASELINE_DATE sonrası kapanmış işlemleri sayar.
+        """
         trades = self._db.get_trades(limit=10)
         closed = [
             t for t in trades
-            if t.get("pnl") is not None and t.get("exit_time") is not None
+            if t.get("pnl") is not None
+            and t.get("exit_time") is not None
+            and t.get("exit_time", "") >= RISK_BASELINE_DATE
         ]
 
         count = 0

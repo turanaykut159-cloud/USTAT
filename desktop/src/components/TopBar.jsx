@@ -6,7 +6,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { getStatus, getAccount } from '../services/api';
+import { getStatus, getAccount, acknowledgeKillSwitch } from '../services/api';
 
 // ── Faz etiketleri ──────────────────────────────────────────────
 const PHASE_LABELS = {
@@ -42,6 +42,7 @@ export default function TopBar() {
   });
   const [time, setTime] = useState(new Date());
   const [alwaysOnTop, setAlwaysOnTop] = useState(true);
+  const [ksResetting, setKsResetting] = useState(false);
 
   // ── Saat (1sn) ─────────────────────────────────────────────────
   useEffect(() => {
@@ -76,6 +77,18 @@ export default function TopBar() {
     }
   };
 
+  // ── Kill-Switch Sıfırla ───────────────────────────────────────
+  const handleKsReset = useCallback(async () => {
+    if (ksResetting) return;
+    setKsResetting(true);
+    try {
+      await acknowledgeKillSwitch('operator');
+      await fetchData();
+    } finally {
+      setKsResetting(false);
+    }
+  }, [ksResetting, fetchData]);
+
   // ── Hesaplanan değerler ────────────────────────────────────────
   const phase = status.phase || 'stopped';
   const phaseLabel = PHASE_LABELS[phase] || phase.toUpperCase();
@@ -95,6 +108,17 @@ export default function TopBar() {
         <span className={`tb-phase tb-phase--${phase}`}>
           {phaseLabel}
         </span>
+
+        {phase === 'killed' && (
+          <button
+            className="tb-ks-reset"
+            onClick={handleKsReset}
+            disabled={ksResetting}
+            title="Kill-Switch'i sıfırla ve sistemi yeniden başlat"
+          >
+            {ksResetting ? 'Sıfırlanıyor...' : 'Sıfırla'}
+          </button>
+        )}
 
         <span className={`tb-faz tb-faz--level${killLevel}`}>
           {fazLabel}
