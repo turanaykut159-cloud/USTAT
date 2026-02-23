@@ -964,14 +964,18 @@ class Ogul:
 
         if order_status == "filled":
             trade.state = TradeState.FILLED
-            trade.ticket = status.get("deal_ticket", trade.order_ticket)
+            # Netting modda position_ticket kullan (close_position bunu bekler)
+            trade.ticket = status.get(
+                "position_ticket",
+                status.get("deal_ticket", trade.order_ticket),
+            )
             trade.filled_volume = status.get(
                 "filled_volume", trade.volume,
             )
             trade.volume = trade.filled_volume
             self._update_fill_price(symbol, trade)
             logger.info(
-                f"LIMIT emir doldu [{symbol}]: ticket={trade.ticket}"
+                f"LIMIT emir doldu [{symbol}]: position_ticket={trade.ticket}"
             )
             self.db.insert_event(
                 event_type="ORDER_FILLED",
@@ -1111,13 +1115,13 @@ class Ogul:
             self._remove_trade(symbol, trade, "market_retry_send_failed")
             return
 
-        # Market retry başarılı
+        # Market retry başarılı — order ticket'ı kaydet
         trade.state = TradeState.MARKET_RETRY
-        trade.ticket = result.get("order", 0)
+        trade.order_ticket = result.get("order", 0)
         trade.retry_count += 1
 
         logger.info(
-            f"Market retry [{symbol}]: ticket={trade.ticket}"
+            f"Market retry [{symbol}]: order_ticket={trade.order_ticket}"
         )
         self.db.insert_event(
             event_type="MARKET_RETRY",
@@ -1145,10 +1149,10 @@ class Ogul:
             trade: MARKET_RETRY state'teki Trade.
             regime: Mevcut rejim.
         """
-        # MT5'te pozisyon var mı?
+        # MT5'te pozisyon var mı? (Netting: sembol bazlı eşleştir)
         positions = self.mt5.get_positions()
         pos = next(
-            (p for p in positions if p.get("ticket") == trade.ticket),
+            (p for p in positions if p.get("symbol") == symbol),
             None,
         )
 
@@ -1158,6 +1162,9 @@ class Ogul:
                 symbol, trade, "market_retry_no_position",
             )
             return
+
+        # Pozisyon ticket'ını kaydet (close_position için gerekli)
+        trade.ticket = pos.get("ticket", 0)
 
         # Dolum fiyatı ve slippage kontrolü
         fill_price = pos.get("price_open", 0.0)
@@ -1343,16 +1350,21 @@ class Ogul:
             if trade.state != TradeState.FILLED:
                 continue
 
-            # Pozisyon hâlâ MT5'te var mı?
+            # Pozisyon hâlâ MT5'te var mı? (Netting: sembol bazlı eşleştir)
             positions = self.mt5.get_positions()
             pos = next(
-                (p for p in positions if p.get("ticket") == trade.ticket),
+                (p for p in positions if p.get("symbol") == symbol),
                 None,
             )
             if pos is None:
                 # Pozisyon harici kapanmış (SL/TP hit)
                 self._handle_closed_trade(symbol, trade, "sl_tp")
                 continue
+
+            # Pozisyon ticket'ını güncelle (senkronizasyon)
+            pos_ticket = pos.get("ticket", 0)
+            if pos_ticket and pos_ticket != trade.ticket:
+                trade.ticket = pos_ticket
 
             # Strateji bazlı çıkış kontrolleri
             if trade.strategy == "trend_follow":
@@ -1485,20 +1497,21 @@ class Ogul:
     def _sync_positions(self) -> None:
         """MT5 pozisyonları ile active_trades senkronize et.
 
-        MT5'te olmayan ticket → harici kapanmış → DB güncelle.
+        Netting modda sembol bazlı kontrol: MT5'te o sembolde
+        açık pozisyon yoksa → harici kapanmış → DB güncelle.
         """
         if not self.active_trades:
             return
 
         positions = self.mt5.get_positions()
-        open_tickets = {p.get("ticket") for p in positions}
+        open_symbols = {p.get("symbol") for p in positions}
 
         for symbol in list(self.active_trades):
             trade = self.active_trades[symbol]
             # Sadece dolu pozisyonları senkronize et
             if trade.state != TradeState.FILLED:
                 continue
-            if trade.ticket not in open_tickets:
+            if symbol not in open_symbols:
                 logger.info(
                     f"Pozisyon harici kapanmış [{symbol}]: ticket={trade.ticket}"
                 )

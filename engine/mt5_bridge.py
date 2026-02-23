@@ -566,7 +566,10 @@ class MT5Bridge:
                 )
                 return None
 
-            if result.retcode != mt5.TRADE_RETCODE_DONE:
+            # Market emir → RETCODE_DONE (10009)
+            # LIMIT emir  → RETCODE_PLACED (10008)
+            accepted = {mt5.TRADE_RETCODE_DONE, mt5.TRADE_RETCODE_PLACED}
+            if result.retcode not in accepted:
                 logger.error(
                     f"Emir reddedildi [{symbol}]: retcode={result.retcode}, "
                     f"comment={result.comment}"
@@ -576,7 +579,8 @@ class MT5Bridge:
             order_result = result._asdict()
             logger.info(
                 f"Emir başarılı: ticket={order_result.get('order')}, "
-                f"{direction} {lot} lot {symbol} @ {price:.4f}"
+                f"{direction} {lot} lot {symbol} @ {price:.4f} "
+                f"retcode={result.retcode}"
             )
             return order_result
 
@@ -1096,11 +1100,14 @@ class MT5Bridge:
             vol_current = hist_order.volume_current
             filled_vol = vol_initial - vol_current
 
-            # Pozisyona dönüşmüş mü? (deal_ticket bul)
+            # Pozisyona dönüşmüş mü? (deal → position_id bul)
             deal_ticket = 0
+            position_ticket = 0
             deals = mt5.history_deals_get(order=order_ticket)
             if deals is not None and len(deals) > 0:
                 deal_ticket = deals[0].ticket
+                # Netting modda deal.position_id = pozisyon ticket'ı
+                position_ticket = getattr(deals[0], "position_id", 0)
                 # Birden fazla deal varsa (kısmi dolum), toplam hacmi hesapla
                 filled_vol = sum(d.volume for d in deals)
 
@@ -1116,6 +1123,7 @@ class MT5Bridge:
                 "filled_volume": filled_vol,
                 "remaining_volume": max(vol_initial - filled_vol, 0.0),
                 "deal_ticket": deal_ticket,
+                "position_ticket": position_ticket or deal_ticket,
             }
 
         except Exception as exc:
