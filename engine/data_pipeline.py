@@ -61,6 +61,11 @@ EXPECTED_INTERVALS: dict[str, int] = {
 ZSCORE_THRESHOLD: float = 5.0
 MAX_CONSECUTIVE_MISSING: int = 3
 
+# Deaktivasyon kontrolü sadece bu timeframe'lerde çalışır.
+# M1/M5 çok granüler — VİOP'ta gün içi likidite boşlukları (4+ dk)
+# normal olmasına rağmen 3+ missing bar eşiğini aşıp sahte deaktivasyon tetikler.
+DEACTIVATION_TIMEFRAMES: frozenset[str] = frozenset({"M15", "H1"})
+
 
 # ── Yardımcı veri sınıfı ────────────────────────────────────────────
 @dataclass
@@ -229,9 +234,13 @@ class DataPipeline:
         df = self._filter_outliers(df, symbol, timeframe)
 
         # ── 4. Ardışık eksik bar kontrolü ────────────────────────────
-        is_healthy = self._check_consecutive_missing(
-            df, symbol, timeframe, original_len
-        )
+        # M1/M5 atlanır: VİOP'ta gün içi likidite boşlukları normal
+        if timeframe in DEACTIVATION_TIMEFRAMES:
+            is_healthy = self._check_consecutive_missing(
+                df, symbol, timeframe, original_len
+            )
+        else:
+            is_healthy = True
 
         cleaned = original_len - len(df)
         if cleaned > 0:
