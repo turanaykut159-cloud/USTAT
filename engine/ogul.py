@@ -164,6 +164,7 @@ class Ogul:
         self.db = db
         self.baba = baba
         self.active_trades: dict[str, Trade] = {}
+        self.last_signals: dict[str, str] = {}  # symbol → "BUY"|"SELL"|"BEKLE"
 
     # ═════════════════════════════════════════════════════════════════
     #  ANA GİRİŞ
@@ -223,8 +224,12 @@ class Ogul:
                 continue
 
             signal = self._generate_signal(symbol, regime, strategies)
+            # Sinyal sonucunu kaydet (Dashboard Top 5 için)
             if signal:
+                self.last_signals[symbol] = signal.signal_type.value
                 self._execute_signal(signal, regime)
+            else:
+                self.last_signals[symbol] = "BEKLE"
 
     # ═════════════════════════════════════════════════════════════════
     #  SİNYAL ÜRETİMİ

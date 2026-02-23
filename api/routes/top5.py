@@ -37,16 +37,15 @@ async def get_top5():
     if baba and baba.current_regime:
         regime_str = baba.current_regime.regime_type.value
 
-    # Aktif trade'lerden sinyal yönü bilgisi (read-only)
-    active_trades = ogul.active_trades if ogul else {}
+    # Gerçek sinyal analizi sonuçları (indikatör bazlı)
+    last_signals = ogul.last_signals if ogul else {}
 
     # Top 5 listesi (sıralı)
     sorted_symbols = sorted(all_scores.items(), key=lambda x: x[1], reverse=True)
     contracts: list[Top5Item] = []
     for rank, (symbol, score) in enumerate(sorted_symbols[:5], start=1):
-        # Sinyal yönü: aktif trade varsa direction, yoksa BEKLE
-        trade = active_trades.get(symbol)
-        direction = trade.direction if trade else "BEKLE"
+        # Sinyal yönü: son indikatör analizi sonucu
+        direction = last_signals.get(symbol, "BEKLE")
         contracts.append(Top5Item(
             rank=rank,
             symbol=symbol,
