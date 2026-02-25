@@ -70,6 +70,7 @@ BO_LOOKBACK:       int   = 20       # 20-bar high/low
 BO_VOLUME_MULT:    float = 1.5      # hacim > ort × 1.5
 BO_ATR_EXPANSION:  float = 1.2      # ATR genişleme oranı
 BO_SL_ATR_MULT:    float = 1.5      # Breakout SL = entry ± 1.5 × ATR
+BO_TRAILING_ATR_MULT: float = 1.5  # Breakout trailing stop = fiyat ± 1.5 × ATR
 
 # ── Genel ─────────────────────────────────────────────────────────
 SWING_LOOKBACK:  int = 10           # swing high/low arama barı
@@ -1433,7 +1434,8 @@ class Ogul:
                 self._manage_trend_follow(symbol, trade, pos)
             elif trade.strategy == "mean_reversion":
                 self._manage_mean_reversion(symbol, trade, pos)
-            # breakout: sabit SL/TP, ek kontrol yok
+            elif trade.strategy == "breakout":
+                self._manage_breakout(symbol, trade, pos)
 
     def _manage_trend_follow(
         self,
@@ -1551,6 +1553,58 @@ class Ogul:
             )
             self.mt5.close_position(trade.ticket)
             self._handle_closed_trade(symbol, trade, "bb_middle_reached")
+
+    def _manage_breakout(
+        self,
+        symbol: str,
+        trade: Trade,
+        pos: dict[str, Any],
+    ) -> None:
+        """Breakout işlem yönetimi — trailing stop.
+
+        Her cycle'da FILLED breakout pozisyonları için çağrılır.
+        Fiyat lehte hareket ettikçe SL'i ATR bazlı sıkılaştırır.
+
+        Args:
+            symbol: Kontrat sembolü.
+            trade: Aktif Trade nesnesi.
+            pos: MT5 pozisyon bilgisi.
+        """
+        atr_val = self._get_current_atr(symbol)
+        if atr_val is None or atr_val <= 0:
+            return
+
+        current_price = float(pos.get("price_current", 0.0))
+        if current_price <= 0:
+            return
+
+        # Trailing stop güncelleme
+        if trade.direction == "BUY":
+            new_sl = current_price - BO_TRAILING_ATR_MULT * atr_val
+            if new_sl > trade.trailing_sl:
+                mod_result = self.mt5.modify_position(
+                    trade.ticket, sl=new_sl,
+                )
+                if mod_result:
+                    trade.trailing_sl = new_sl
+                    trade.sl = new_sl
+                    logger.debug(
+                        f"Breakout trailing SL güncellendi [{symbol}]: "
+                        f"{new_sl:.4f}"
+                    )
+        else:  # SELL
+            new_sl = current_price + BO_TRAILING_ATR_MULT * atr_val
+            if new_sl < trade.trailing_sl:
+                mod_result = self.mt5.modify_position(
+                    trade.ticket, sl=new_sl,
+                )
+                if mod_result:
+                    trade.trailing_sl = new_sl
+                    trade.sl = new_sl
+                    logger.debug(
+                        f"Breakout trailing SL güncellendi [{symbol}]: "
+                        f"{new_sl:.4f}"
+                    )
 
     # ═════════════════════════════════════════════════════════════════
     #  POZİSYON SENKRONİZASYONU
