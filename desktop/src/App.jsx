@@ -5,7 +5,7 @@
  * React Router v6 ile 5 sayfa yönlendirme.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { HashRouter, Routes, Route } from 'react-router-dom';
 import TopBar from './components/TopBar';
 import SideNav from './components/SideNav';
@@ -15,10 +15,19 @@ import TradeHistory from './components/TradeHistory';
 import OpenPositions from './components/OpenPositions';
 import Performance from './components/Performance';
 import RiskManagement from './components/RiskManagement';
+import ManualTrade from './components/ManualTrade';
 import Settings from './components/Settings';
 
 export default function App() {
   const [isLocked, setIsLocked] = useState(true);
+
+  // Sayfa yüklendiğinde localStorage'dan temayı uygula
+  useEffect(() => {
+    const saved = localStorage.getItem('ustat_theme');
+    if (saved === 'light') {
+      document.documentElement.setAttribute('data-theme', 'light');
+    }
+  }, []);
 
   if (isLocked) {
     return <LockScreen onUnlock={() => setIsLocked(false)} />;
@@ -33,6 +42,7 @@ export default function App() {
           <main className="app-content">
             <Routes>
               <Route path="/" element={<Dashboard />} />
+              <Route path="/manual" element={<ManualTrade />} />
               <Route path="/trades" element={<TradeHistory />} />
               <Route path="/positions" element={<OpenPositions />} />
               <Route path="/performance" element={<Performance />} />

@@ -191,6 +191,26 @@ export async function acknowledgeKillSwitch(user = 'operator') {
   }
 }
 
+// ── Manuel İşlem ─────────────────────────────────────────────────
+
+export async function checkManualTrade(symbol, direction) {
+  try {
+    const { data } = await client.post('/manual-trade/check', { symbol, direction });
+    return data;
+  } catch {
+    return { can_trade: false, reason: 'Bağlantı hatası.' };
+  }
+}
+
+export async function executeManualTrade(symbol, direction, lot) {
+  try {
+    const { data } = await client.post('/manual-trade/execute', { symbol, direction, lot });
+    return data;
+  } catch {
+    return { success: false, message: 'Bağlantı hatası.' };
+  }
+}
+
 // ── WebSocket ────────────────────────────────────────────────────
 
 /**

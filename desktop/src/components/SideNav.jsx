@@ -11,6 +11,7 @@ import { activateKillSwitch } from '../services/api';
 // ── Menü öğeleri ─────────────────────────────────────────────────
 const NAV_ITEMS = [
   { path: '/',            label: 'Dashboard',          icon: '📊' },
+  { path: '/manual',      label: 'İşlem Paneli',       icon: '🎯' },
   { path: '/trades',      label: 'İşlem Geçmişi',     icon: '📋' },
   { path: '/positions',   label: 'Açık Pozisyonlar',   icon: '📈' },
   { path: '/performance', label: 'Performans Analizi', icon: '🏆' },

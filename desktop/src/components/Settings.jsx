@@ -95,6 +95,21 @@ export default function Settings() {
   // MT5 şifre göster/gizle
   const [showLogin, setShowLogin] = useState(false);
 
+  // Tema (localStorage + DOM)
+  const [theme, setTheme] = useState(() => {
+    return localStorage.getItem('ustat_theme') || 'dark';
+  });
+
+  const applyTheme = useCallback((newTheme) => {
+    setTheme(newTheme);
+    localStorage.setItem('ustat_theme', newTheme);
+    if (newTheme === 'light') {
+      document.documentElement.setAttribute('data-theme', 'light');
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+    }
+  }, []);
+
   // ── Veri çekme ──────────────────────────────────────────────────
 
   const fetchData = useCallback(async () => {
@@ -232,11 +247,17 @@ export default function Settings() {
               <h3>Tema</h3>
             </div>
             <div className="st-theme-row">
-              <div className="st-theme-card active">
+              <div
+                className={`st-theme-card ${theme === 'dark' ? 'active' : ''}`}
+                onClick={() => applyTheme('dark')}
+              >
                 <div className="st-theme-preview dark" />
                 <span>Koyu Tema</span>
               </div>
-              <div className="st-theme-card disabled" title="Yakında...">
+              <div
+                className={`st-theme-card ${theme === 'light' ? 'active' : ''}`}
+                onClick={() => applyTheme('light')}
+              >
                 <div className="st-theme-preview light" />
                 <span>Açık Tema</span>
               </div>
