@@ -1502,6 +1502,14 @@ class Baba:
                     KILL_SWITCH_L2, "olay_regime",
                     "OLAY rejimi algılandı — L2 sistem pause",
                 )
+        # OLAY rejimi kalktıysa ve L2 olay_regime nedenli ise → temizle
+        elif (
+            self._kill_switch_level == KILL_SWITCH_L2
+            and self._kill_switch_details.get("reason") == "olay_regime"
+        ):
+            self._clear_kill_switch(
+                "OLAY rejimi sona erdi — L2 otomatik kaldırıldı"
+            )
 
     # ═════════════════════════════════════════════════════════════════
     #  FAKE SİNYAL ANALİZİ
