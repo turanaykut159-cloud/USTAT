@@ -6,7 +6,7 @@
     MEAN_REVERSION — RSI(14) aşırı bölge + BB bant teması + ADX<20
                      SL: BB bant ± 1 ATR, TP: BB orta bant
     BREAKOUT       — 20-bar high/low kırılımı + hacim>1.5× + ATR genişleme
-                     SL: range orta noktası, TP: %100 range genişliği
+                     SL: entry ± 1.5×ATR, TP: %100 range genişliği
 
 Rejim → Aktif sinyaller:
     TREND    → trend follow aktif, mean reversion deaktif
@@ -69,6 +69,7 @@ MR_SL_ATR_MULT:   float = 1.0       # BB bant ± 1 ATR
 BO_LOOKBACK:       int   = 20       # 20-bar high/low
 BO_VOLUME_MULT:    float = 1.5      # hacim > ort × 1.5
 BO_ATR_EXPANSION:  float = 1.2      # ATR genişleme oranı
+BO_SL_ATR_MULT:    float = 1.5      # Breakout SL = entry ± 1.5 × ATR
 
 # ── Genel ─────────────────────────────────────────────────────────
 SWING_LOOKBACK:  int = 10           # swing high/low arama barı
@@ -622,12 +623,12 @@ class Ogul:
 
         # SL / TP
         range_width = high_20 - low_20
-        range_mid = (high_20 + low_20) / 2.0
-        sl = range_mid
 
         if direction == SignalType.BUY:
+            sl = last_close - BO_SL_ATR_MULT * atr_val
             tp = price + range_width
         else:
+            sl = last_close + BO_SL_ATR_MULT * atr_val
             tp = price - range_width
 
         # Sinyal gücü: hacim patlaması (0-0.5) + ATR genişleme (0-0.3) + kırılım büyüklüğü (0-0.2)
