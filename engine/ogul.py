@@ -867,6 +867,310 @@ class Ogul:
             f"@ {signal.price:.4f} order_ticket={trade.order_ticket}"
         )
 
+    # ═════════════════════════════════════════════════════════════════
+    #  MANUEL İŞLEM (İŞLEM PANELİ)
+    # ═════════════════════════════════════════════════════════════════
+
+    def check_manual_trade(self, symbol: str, direction: str) -> dict:
+        """Manuel işlem için risk ön kontrolü (emir göndermez).
+
+        BABA risk limitlerini, korelasyon kurallarını, teminat ve
+        eş zamanlı pozisyon limitini kontrol eder.  Read-only.
+
+        Args:
+            symbol: Base sembol (ör. ``"F_THYAO"``).
+            direction: ``"BUY"`` veya ``"SELL"``.
+
+        Returns:
+            dict anahtarları:
+                can_trade, reason, suggested_lot, current_price,
+                atr_value, risk_summary.
+        """
+        result: dict[str, Any] = {
+            "can_trade": False,
+            "reason": "",
+            "suggested_lot": 0.0,
+            "current_price": 0.0,
+            "atr_value": 0.0,
+            "risk_summary": {},
+        }
+
+        # 1. İşlem saatleri
+        if not self._is_trading_allowed():
+            result["reason"] = "İşlem saatleri dışında (09:45-17:45)"
+            return result
+
+        # 2. Sembol active_trades'de mi? (netting çakışma)
+        if symbol in self.active_trades:
+            existing = self.active_trades[symbol]
+            result["reason"] = (
+                f"Bu sembolde zaten aktif pozisyon var "
+                f"({existing.direction} {existing.volume} lot)"
+            )
+            return result
+
+        # 3. BABA risk kontrolü
+        risk_params = RiskParams()
+        if not self.baba:
+            result["reason"] = "BABA başlatılmamış"
+            return result
+
+        verdict = self.baba.check_risk_limits(risk_params)
+        result["risk_summary"] = {
+            "regime": (
+                self.baba.current_regime.regime_type.value
+                if self.baba.current_regime else "UNKNOWN"
+            ),
+            "risk_multiplier": (
+                self.baba.current_regime.risk_multiplier
+                if self.baba.current_regime else 0
+            ),
+            "kill_switch_level": self.baba._kill_switch_level,
+            "daily_trade_count": self.baba._risk_state.get(
+                "daily_trade_count", 0,
+            ),
+            "max_daily_trades": risk_params.max_daily_trades,
+            "consecutive_losses": self.baba._risk_state.get(
+                "consecutive_losses", 0,
+            ),
+            "lot_multiplier": verdict.lot_multiplier,
+            "can_trade": verdict.can_trade,
+        }
+        if not verdict.can_trade:
+            result["reason"] = verdict.reason
+            return result
+
+        # 4. Korelasyon kontrolü
+        corr = self.baba.check_correlation_limits(
+            symbol, direction, risk_params,
+        )
+        if not corr.can_trade:
+            result["reason"] = corr.reason
+            return result
+
+        # 5. Eş zamanlı pozisyon limiti
+        active_states = (
+            TradeState.FILLED, TradeState.SENT,
+            TradeState.PARTIAL, TradeState.MARKET_RETRY,
+        )
+        active_count = sum(
+            1 for t in self.active_trades.values()
+            if t.state in active_states
+        )
+        if active_count >= MAX_CONCURRENT:
+            result["reason"] = (
+                f"Eş zamanlı pozisyon limiti doldu "
+                f"({active_count}/{MAX_CONCURRENT})"
+            )
+            return result
+
+        # 6. Teminat kontrolü
+        account = self.mt5.get_account_info()
+        if account is None:
+            result["reason"] = "Hesap bilgisi alınamadı"
+            return result
+        if account.free_margin < account.equity * MARGIN_RESERVE_PCT:
+            result["reason"] = (
+                f"Yetersiz teminat (serbest={account.free_margin:.0f})"
+            )
+            return result
+
+        # 7. ATR & lot hesaplama
+        atr_val = self._get_current_atr(symbol)
+        if atr_val is None or atr_val <= 0:
+            result["reason"] = f"ATR hesaplanamadı ({symbol})"
+            return result
+
+        lot = self.baba.calculate_position_size(
+            symbol, risk_params, atr_val, account.equity,
+        )
+        lot = min(lot, MAX_LOT_PER_CONTRACT)
+
+        # 8. Fiyat
+        tick = self.mt5.get_tick(symbol)
+        current_price = 0.0
+        if tick:
+            current_price = tick.ask if direction == "BUY" else tick.bid
+
+        result["can_trade"] = True
+        result["suggested_lot"] = lot
+        result["current_price"] = current_price
+        result["atr_value"] = atr_val
+        result["risk_summary"]["floating_pnl"] = (
+            account.profit if hasattr(account, "profit") else 0.0
+        )
+        result["risk_summary"]["equity"] = account.equity
+        result["risk_summary"]["free_margin"] = account.free_margin
+        return result
+
+    def open_manual_trade(
+        self,
+        symbol: str,
+        direction: str,
+        lot: float,
+    ) -> dict:
+        """Manuel market emri gönder ve active_trades'e kaydet.
+
+        ``_execute_signal()`` akışının basitleştirilmiş versiyonu.
+        MARKET emir gönderir, LIMIT değil.  SL = 2xATR, TP = 3xATR.
+
+        Args:
+            symbol: Base sembol (``"F_THYAO"``).
+            direction: ``"BUY"`` veya ``"SELL"``.
+            lot: Lot miktarı.
+
+        Returns:
+            dict anahtarları:
+                success, message, ticket, entry_price, sl, tp, lot.
+        """
+        result: dict[str, Any] = {
+            "success": False,
+            "message": "",
+            "ticket": 0,
+            "entry_price": 0.0,
+            "sl": 0.0,
+            "tp": 0.0,
+            "lot": 0.0,
+        }
+
+        # 1. Tekrar risk kontrolü (race condition önlemi)
+        check = self.check_manual_trade(symbol, direction)
+        if not check["can_trade"]:
+            result["message"] = check["reason"]
+            return result
+
+        # 2. ATR → SL/TP hesapla
+        atr_val = self._get_current_atr(symbol)
+        if atr_val is None or atr_val <= 0:
+            result["message"] = "ATR hesaplanamadı"
+            return result
+
+        tick_data = self.mt5.get_tick(symbol)
+        if tick_data is None:
+            result["message"] = "Fiyat alınamadı"
+            return result
+
+        price = tick_data.ask if direction == "BUY" else tick_data.bid
+
+        # SL = 2xATR, TP = 3xATR
+        if direction == "BUY":
+            sl = price - (atr_val * 2.0)
+            tp = price + (atr_val * 3.0)
+        else:
+            sl = price + (atr_val * 2.0)
+            tp = price - (atr_val * 3.0)
+
+        # 3. Lot sınırlama
+        lot = min(lot, MAX_LOT_PER_CONTRACT)
+        if lot <= 0:
+            result["message"] = "Geçersiz lot miktarı"
+            return result
+
+        # 4. Trade nesnesi oluştur
+        now = datetime.now()
+        regime = self.baba.current_regime if self.baba else None
+        regime_str = regime.regime_type.value if regime else "UNKNOWN"
+
+        trade = Trade(
+            symbol=symbol,
+            direction=direction,
+            volume=lot,
+            entry_price=price,
+            sl=sl,
+            tp=tp,
+            state=TradeState.SIGNAL,
+            opened_at=now,
+            strategy="manual",
+            trailing_sl=sl,
+            regime_at_entry=regime_str,
+            requested_volume=lot,
+        )
+
+        # 5. MARKET emir gönder
+        order_result = self.mt5.send_order(
+            symbol=symbol,
+            direction=direction,
+            lot=lot,
+            price=price,
+            sl=sl,
+            tp=tp,
+            order_type="market",
+        )
+
+        if order_result is None:
+            # ── KRİTİK: Spesifik MT5 hata mesajı ──────────────────
+            err = self.mt5._last_order_error
+            if err.get("retcode"):
+                error_detail = (
+                    f"MT5 retcode={err['retcode']}: "
+                    f"{err.get('comment', 'bilinmeyen hata')}"
+                )
+            elif err.get("reason"):
+                error_detail = err["reason"]
+            else:
+                error_detail = "Bilinmeyen MT5 hatası"
+
+            result["message"] = f"Emir gönderilemedi — {error_detail}"
+            self.db.insert_event(
+                event_type="MANUAL_TRADE_ERROR",
+                message=(
+                    f"Manuel emir başarısız: "
+                    f"{direction} {lot} lot {symbol} — {error_detail}"
+                ),
+                severity="ERROR",
+                action="manual_order_failed",
+            )
+            return result
+
+        # 6. Başarılı → state güncelle
+        trade.state = TradeState.SENT
+        trade.order_ticket = order_result.get("order", 0)
+        trade.sent_at = now
+
+        # 7. DB kayıt
+        db_id = self.db.insert_trade({
+            "strategy": "manual",
+            "symbol": symbol,
+            "direction": direction,
+            "entry_time": now.isoformat(),
+            "entry_price": price,
+            "lot": lot,
+            "regime": regime_str,
+        })
+        trade.db_id = db_id
+
+        # 8. active_trades'e ekle — OĞUL yönetimi devralır
+        self.active_trades[symbol] = trade
+
+        # 9. BABA sayaç güncelle
+        if self.baba:
+            self.baba.increment_daily_trade_count()
+
+        # 10. Event kaydet
+        self.db.insert_event(
+            event_type="MANUAL_ORDER_SENT",
+            message=(
+                f"Manuel MARKET emir: {direction} {lot} lot {symbol} "
+                f"@ {price:.4f} SL={sl:.4f} TP={tp:.4f}"
+            ),
+            severity="INFO",
+            action="manual_order_sent",
+        )
+
+        logger.info(
+            f"Manuel emir gönderildi [{symbol}]: "
+            f"{direction} {lot} lot @ {price:.4f}"
+        )
+
+        result["success"] = True
+        result["message"] = "Emir başarıyla gönderildi"
+        result["ticket"] = trade.order_ticket
+        result["entry_price"] = price
+        result["sl"] = round(sl, 4)
+        result["tp"] = round(tp, 4)
+        result["lot"] = lot
+        return result
+
     # ── Yardımcı metodlar ─────────────────────────────────────────
 
     def _calculate_lot(

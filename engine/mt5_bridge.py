@@ -97,6 +97,10 @@ class MT5Bridge:
         # Ters eşleme: MT5 gerçek ad → base (ör. F_THYAO0226 → F_THYAO)
         self._reverse_map: dict[str, str] = {}
 
+        # Son emir hatasının detayı — send_order() None döndüğünde
+        # çağıran kod buradan retcode/comment okuyabilir.
+        self._last_order_error: dict[str, Any] = {}
+
     # ── property ─────────────────────────────────────────────────────
     @property
     def is_connected(self) -> bool:
@@ -488,7 +492,12 @@ class MT5Bridge:
         tp: float,
         order_type: str = "market",
     ) -> dict[str, Any] | None:
-        """Emir gönder.
+        """Emir gönder (2 aşamalı: emir + SL/TP).
+
+        VİOP exchange execution modunda ilk emre SL/TP eklenemez.
+        Bu yüzden:
+            1) Emir SL/TP olmadan gönderilir.
+            2) Başarılıysa TRADE_ACTION_SLTP ile SL/TP eklenir.
 
         Args:
             symbol: Kontrat sembolü (ör. "F_THYAO").
@@ -500,9 +509,16 @@ class MT5Bridge:
             order_type: "market" (varsayılan) veya "limit".
 
         Returns:
-            Emir sonuç sözlüğü (ticket, retcode vb.) veya None.
+            Emir sonuç sözlüğü (ticket, retcode, sl_tp_applied vb.)
+            veya None.  Hata durumunda ``_last_order_error``
+            sözlüğünde retcode/comment detayı bulunur.
         """
+        self._last_order_error = {}
+
         if not self._ensure_connection():
+            self._last_order_error = {
+                "reason": "MT5 bağlantısı kurulamadı",
+            }
             return None
 
         try:
@@ -513,17 +529,49 @@ class MT5Bridge:
                 mt5_type = mt5.ORDER_TYPE_SELL
             else:
                 logger.error(f"Geçersiz yön: {direction}")
+                self._last_order_error = {"reason": f"Geçersiz yön: {direction}"}
                 return None
 
             mt5_name = self._to_mt5(symbol)
+
+            # Sembol bilgisi — tick_size ve filling_mode
+            sym_info = mt5.symbol_info(mt5_name)
+            if sym_info is None:
+                err = mt5.last_error()
+                logger.error(
+                    f"symbol_info alınamadı [{symbol}]: {err}"
+                )
+                self._last_order_error = {
+                    "reason": f"Sembol bilgisi alınamadı ({symbol})",
+                    "last_error": str(err),
+                }
+                return None
+
+            tick_size = sym_info.trade_tick_size
+            if tick_size <= 0:
+                tick_size = sym_info.point  # fallback
+
+            # Filling mode: sembolün desteklediğini kullan
+            # VİOP genelde RETURN destekler
+            if sym_info.filling_mode & mt5.SYMBOL_FILLING_FOK:
+                filling = mt5.ORDER_FILLING_FOK
+            elif sym_info.filling_mode & mt5.SYMBOL_FILLING_IOC:
+                filling = mt5.ORDER_FILLING_IOC
+            else:
+                filling = mt5.ORDER_FILLING_RETURN
 
             # Market ise güncel fiyatı al
             if order_type == "market":
                 tick = mt5.symbol_info_tick(mt5_name)
                 if tick is None:
+                    err = mt5.last_error()
                     logger.error(
-                        f"Emir fiyatı alınamadı [{symbol}]: {mt5.last_error()}"
+                        f"Emir fiyatı alınamadı [{symbol}]: {err}"
                     )
+                    self._last_order_error = {
+                        "reason": f"Fiyat alınamadı ({symbol})",
+                        "last_error": str(err),
+                    }
                     return None
                 price = tick.ask if direction.upper() == "BUY" else tick.bid
                 action = mt5.TRADE_ACTION_DEAL
@@ -534,36 +582,34 @@ class MT5Bridge:
                 else:
                     mt5_type = mt5.ORDER_TYPE_SELL_LIMIT
 
-            # LIMIT emirlerde RETURN (emirde kal), market emirlerde IOC
-            filling = (
-                mt5.ORDER_FILLING_RETURN
-                if order_type == "limit"
-                else mt5.ORDER_FILLING_IOC
-            )
-
+            # ── ADIM 1: Emir SL/TP OLMADAN gönder ──────────────────
             request: dict[str, Any] = {
                 "action": action,
-                "symbol": mt5_name,  # MT5 gerçek sembol adı
+                "symbol": mt5_name,
                 "volume": lot,
                 "type": mt5_type,
                 "price": price,
-                "sl": sl,
-                "tp": tp,
                 "type_filling": filling,
                 "type_time": mt5.ORDER_TIME_GTC,
                 "comment": "USTAT",
             }
 
             logger.info(
-                f"Emir gönderiliyor: {direction} {lot} lot {symbol} "
-                f"@ {price:.4f} SL={sl:.4f} TP={tp:.4f} [{order_type}]"
+                f"Emir gönderiliyor (SL/TP ayrı): {direction} {lot} lot "
+                f"{symbol} @ {price:.4f} [{order_type}] "
+                f"filling={filling} request={request}"
             )
 
             result = mt5.order_send(request)
             if result is None:
+                err = mt5.last_error()
                 logger.error(
-                    f"order_send None döndü [{symbol}]: {mt5.last_error()}"
+                    f"order_send None döndü [{symbol}]: {err}"
                 )
+                self._last_order_error = {
+                    "reason": "MT5 order_send None döndü",
+                    "last_error": str(err),
+                }
                 return None
 
             # Market emir → RETCODE_DONE (10009)
@@ -574,18 +620,73 @@ class MT5Bridge:
                     f"Emir reddedildi [{symbol}]: retcode={result.retcode}, "
                     f"comment={result.comment}"
                 )
+                self._last_order_error = {
+                    "reason": f"Emir reddedildi",
+                    "retcode": result.retcode,
+                    "comment": result.comment,
+                }
                 return None
 
             order_result = result._asdict()
+            order_result["sl_tp_applied"] = False
+
             logger.info(
                 f"Emir başarılı: ticket={order_result.get('order')}, "
                 f"{direction} {lot} lot {symbol} @ {price:.4f} "
                 f"retcode={result.retcode}"
             )
+
+            # ── ADIM 2: SL/TP ekle (TRADE_ACTION_SLTP) ─────────────
+            if sl > 0 or tp > 0:
+                # tick_size'a yuvarla
+                sl_rounded = (
+                    round(sl / tick_size) * tick_size if sl > 0 else 0.0
+                )
+                tp_rounded = (
+                    round(tp / tick_size) * tick_size if tp > 0 else 0.0
+                )
+
+                # Pozisyon ticket'ını bul
+                position_ticket = order_result.get("order", 0)
+
+                sltp_request: dict[str, Any] = {
+                    "action": mt5.TRADE_ACTION_SLTP,
+                    "symbol": mt5_name,
+                    "position": position_ticket,
+                    "sl": sl_rounded,
+                    "tp": tp_rounded,
+                }
+
+                logger.info(
+                    f"SL/TP ekleniyor [{symbol}]: position={position_ticket} "
+                    f"SL={sl_rounded:.4f} TP={tp_rounded:.4f} "
+                    f"request={sltp_request}"
+                )
+
+                sltp_result = mt5.order_send(sltp_request)
+                if sltp_result is not None and sltp_result.retcode == mt5.TRADE_RETCODE_DONE:
+                    order_result["sl_tp_applied"] = True
+                    logger.info(
+                        f"SL/TP başarılı [{symbol}]: "
+                        f"SL={sl_rounded:.4f} TP={tp_rounded:.4f}"
+                    )
+                else:
+                    sltp_err = (
+                        sltp_result.comment
+                        if sltp_result else str(mt5.last_error())
+                    )
+                    logger.warning(
+                        f"SL/TP eklenemedi [{symbol}]: {sltp_err} "
+                        f"— pozisyon SL/TP'siz açık kalacak"
+                    )
+
             return order_result
 
         except Exception as exc:
             logger.error(f"send_order istisnası [{symbol}]: {exc}")
+            self._last_order_error = {
+                "reason": f"Beklenmeyen hata: {exc}",
+            }
             return None
 
     # ── close_position ───────────────────────────────────────────────

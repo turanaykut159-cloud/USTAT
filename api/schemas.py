@@ -362,3 +362,38 @@ class SuccessResponse(BaseModel):
     """Başarılı işlem response."""
     success: bool = True
     message: str = ""
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  MANUEL İŞLEM (İŞLEM PANELİ)
+# ═══════════════════════════════════════════════════════════════════
+
+class ManualTradeCheckRequest(BaseModel):
+    """Manuel işlem risk ön kontrolü — istek."""
+    symbol: str
+    direction: str
+
+class ManualTradeCheckResponse(BaseModel):
+    """Manuel işlem risk ön kontrolü — yanıt."""
+    can_trade: bool = False
+    reason: str = ""
+    suggested_lot: float = 0.0
+    current_price: float = 0.0
+    atr_value: float = 0.0
+    risk_summary: dict = {}
+
+class ManualTradeExecuteRequest(BaseModel):
+    """Manuel işlem emir gönder — istek."""
+    symbol: str
+    direction: str
+    lot: float
+
+class ManualTradeExecuteResponse(BaseModel):
+    """Manuel işlem emir gönder — yanıt."""
+    success: bool = False
+    message: str = ""
+    ticket: int = 0
+    entry_price: float = 0.0
+    sl: float = 0.0
+    tp: float = 0.0
+    lot: float = 0.0

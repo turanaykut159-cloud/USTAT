@@ -34,6 +34,7 @@ from api.routes import (
     events,
     killswitch,
     live,
+    manual_trade,
     performance,
     positions,
     risk,
@@ -138,6 +139,7 @@ app.include_router(performance.router, prefix="/api", tags=["performance"])
 app.include_router(top5.router, prefix="/api", tags=["top5"])
 app.include_router(killswitch.router, prefix="/api", tags=["killswitch"])
 app.include_router(events.router, prefix="/api", tags=["events"])
+app.include_router(manual_trade.router, prefix="/api", tags=["manual-trade"])
 app.include_router(live.router, tags=["websocket"])
 
 
