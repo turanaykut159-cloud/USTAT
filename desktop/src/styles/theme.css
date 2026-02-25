@@ -1,18 +1,39 @@
-/* ÜSTAT v5.0 — Koyu Tema */
+/* ÜSTAT v5.0 — Tema Değişkenleri */
 
+/* ── Koyu Tema (varsayılan) ──────────────────────────────────── */
 :root {
   --bg-primary: #0d1117;
   --bg-secondary: #161b22;
+  --bg-tertiary: #21262d;
   --bg-card: #1c2128;
   --bg-hover: #21262d;
   --border: #30363d;
   --text-primary: #e6edf3;
   --text-secondary: #8b949e;
+  --text-dim: #6e7681;
   --accent: #58a6ff;
   --accent-dim: rgba(88, 166, 255, 0.15);
   --profit: #3fb950;
   --loss: #f85149;
   --warning: #d29922;
+}
+
+/* ── Açık Tema ───────────────────────────────────────────────── */
+:root[data-theme="light"] {
+  --bg-primary: #f6f8fa;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #e8ebed;
+  --bg-card: #ffffff;
+  --bg-hover: #eaeef2;
+  --border: #d0d7de;
+  --text-primary: #1f2328;
+  --text-secondary: #656d76;
+  --text-dim: #8c959f;
+  --accent: #0969da;
+  --accent-dim: rgba(9, 105, 218, 0.12);
+  --profit: #1a7f37;
+  --loss: #cf222e;
+  --warning: #9a6700;
 }
 
 * {
@@ -24,6 +45,11 @@
 html, body {
   background-color: var(--bg-primary);
   color-scheme: dark;
+}
+
+:root[data-theme="light"],
+:root[data-theme="light"] body {
+  color-scheme: light;
 }
 
 body {
@@ -1155,87 +1181,79 @@ h2 {
 }
 
 /* ── Charts Row (2 adet, yan yana) ───────────────────────────── */
-.dash-charts-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
-
-.dash-chart-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 14px 16px 8px;
+/* ── Dashboard Açık Pozisyonlar ──────────────────────────── */
+.dash-positions-row {
   display: flex;
-  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 16px;
 }
 
-.dash-chart-header {
+.dash-card--full {
+  flex: 1;
+  min-width: 0;
+}
+
+.dash-card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: 12px;
 }
 
-.dash-chart-header h3 {
-  color: var(--text-secondary);
-  font-size: 12px;
+.dash-card-header h3 {
+  margin: 0;
+}
+
+.dash-card-badge {
+  background: var(--surface-2, #30363d);
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 13px;
+  color: var(--text-secondary, #8b949e);
+}
+
+.dash-positions-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.dash-positions-table th {
+  text-align: left;
+  padding: 8px 10px;
+  color: var(--text-secondary, #8b949e);
+  font-weight: 600;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  font-weight: 600;
+  border-bottom: 1px solid var(--border, #30363d);
 }
 
-.dash-chart-value {
-  font-size: 15px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  font-family: 'Cascadia Code', 'Fira Code', monospace;
+.dash-positions-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-dim, #21262d);
 }
 
-.dash-chart-value small {
-  font-size: 11px;
-  color: var(--text-secondary);
-  font-weight: 400;
+.dash-positions-table tbody tr:hover {
+  background: var(--surface-hover, rgba(88, 166, 255, 0.04));
 }
 
-.dash-chart-body {
-  flex: 1;
-  min-height: 220px;
+.dash-positions-footer td {
+  padding: 10px 10px;
+  border-top: 2px solid var(--border, #30363d);
+  border-bottom: none;
 }
 
-.dash-chart-empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  min-height: 220px;
-  color: var(--text-secondary);
-  font-size: 13px;
-  opacity: 0.5;
+.dash-positions-empty {
+  text-align: center;
+  padding: 40px 0;
+  color: var(--text-secondary, #8b949e);
+  font-size: 14px;
 }
 
-/* ── Chart Tooltip ───────────────────────────────────────────── */
-.chart-tooltip {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 8px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  font-size: 12px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-}
-
-.chart-tooltip-date {
-  color: var(--text-secondary);
-  font-size: 11px;
-  font-weight: 500;
-  margin-bottom: 2px;
-}
-
-.chart-tooltip b {
-  font-family: 'Cascadia Code', 'Fira Code', monospace;
+.dash-positions-empty span {
+  font-size: 24px;
+  margin-right: 8px;
 }
 
 /* ── Bottom Row (İşlemler + Rejim/Top5) ──────────────────────── */
@@ -2872,4 +2890,210 @@ h2 {
 ::selection {
   background: var(--accent);
   color: #fff;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   İŞLEM PANELİ (Manuel İşlem)
+   ═══════════════════════════════════════════════════════════════ */
+
+.manual-trade { padding: 16px; }
+.manual-trade h2 { margin-bottom: 16px; color: var(--text-primary); }
+
+.mt-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+/* ── Sol panel: Form ─────────────────────────────────────────── */
+
+.mt-form {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.mt-form-group { margin-bottom: 14px; }
+.mt-form-group label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.mt-select {
+  width: 100%;
+  padding: 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+.mt-select:disabled { opacity: 0.5; }
+
+/* ── BUY / SELL butonları ────────────────────────────────────── */
+
+.mt-dir-buttons { display: flex; gap: 8px; }
+
+.mt-dir-btn {
+  flex: 1;
+  padding: 10px;
+  border: 2px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary);
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.mt-dir-btn:hover { border-color: var(--text-secondary); }
+.mt-dir-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.mt-dir-btn.active-buy {
+  background: rgba(63, 185, 80, 0.15);
+  border-color: var(--profit);
+  color: var(--profit);
+}
+.mt-dir-btn.active-sell {
+  background: rgba(248, 81, 73, 0.15);
+  border-color: var(--loss);
+  color: var(--loss);
+}
+
+/* ── Lot input ───────────────────────────────────────────────── */
+
+.mt-lot-input {
+  width: 80px;
+  padding: 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* ── Fiyat bilgi satırları ───────────────────────────────────── */
+
+.mt-price-info {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+/* ── Aksiyon butonları ───────────────────────────────────────── */
+
+.mt-check-btn,
+.mt-execute-btn {
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  margin-top: 8px;
+  transition: opacity 0.2s;
+}
+
+.mt-check-btn {
+  background: var(--accent);
+  color: #fff;
+}
+.mt-check-btn:hover { opacity: 0.9; }
+.mt-check-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.mt-execute-btn {
+  background: var(--profit);
+  color: #fff;
+}
+.mt-execute-btn.sell { background: var(--loss); }
+.mt-execute-btn:hover { opacity: 0.9; }
+.mt-execute-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── Sağ panel: Risk özeti ───────────────────────────────────── */
+
+.mt-risk-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.mt-risk-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+}
+.mt-risk-row:last-child { border-bottom: none; }
+.mt-risk-label { color: var(--text-secondary); }
+.mt-risk-value { font-weight: 600; color: var(--text-primary); }
+
+/* ── Durum göstergeleri ──────────────────────────────────────── */
+
+.mt-status-ok {
+  color: var(--profit);
+  font-weight: 700;
+  padding: 8px;
+  background: rgba(63, 185, 80, 0.1);
+  border-radius: 6px;
+  margin-top: 12px;
+  text-align: center;
+}
+
+.mt-status-fail {
+  color: var(--loss);
+  font-weight: 600;
+  padding: 8px;
+  background: rgba(248, 81, 73, 0.1);
+  border-radius: 6px;
+  margin-top: 12px;
+  text-align: center;
+  font-size: 12px;
+}
+
+/* ── Sonuç mesajı ────────────────────────────────────────────── */
+
+.mt-result {
+  padding: 12px;
+  border-radius: 6px;
+  font-weight: 600;
+  text-align: center;
+  margin-top: 12px;
+  font-size: 13px;
+}
+.mt-result.success {
+  background: rgba(63, 185, 80, 0.15);
+  color: var(--profit);
+  border: 1px solid var(--profit);
+}
+.mt-result.error {
+  background: rgba(248, 81, 73, 0.15);
+  color: var(--loss);
+  border: 1px solid var(--loss);
+}
+
+/* ── Son işlemler tablosu ────────────────────────────────────── */
+
+.mt-history {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+}
+.mt-history h3 {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }

@@ -3,23 +3,18 @@
  *
  * Layout:
  *   Üst:    4 stat kartı (Toplam İşlem, Başarı Oranı, Net K/Z, Profit Factor)
- *   Orta:   Sol — Equity eğrisi (AreaChart), Sağ — Günlük K/Z çubuk grafiği (BarChart)
+ *   Orta:   Açık Pozisyonlar tablosu (tam genişlik)
  *   Alt:    Sol — Son 5 işlem tablosu, Sağ — Aktif rejim + Top 5 kontrat listesi
  *
  * Veri kaynakları:
- *   REST:  getTradeStats, getPerformance, getTrades, getTop5, getStatus (10sn poll)
- *   WS:    connectLiveWS → equity + status gerçek zamanlı güncelleme
+ *   REST:  getTradeStats, getPerformance, getTrades, getTop5, getStatus, getPositions (10sn poll)
+ *   WS:    connectLiveWS → equity + status + position gerçek zamanlı güncelleme
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  AreaChart, Area,
-  BarChart, Bar, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
-} from 'recharts';
-import {
   getTradeStats, getPerformance, getTrades, getTop5, getStatus,
-  getAccount, connectLiveWS, reactivateSymbols,
+  getAccount, getPositions, connectLiveWS, reactivateSymbols,
 } from '../services/api';
 
 // ── Yardımcılar ──────────────────────────────────────────────────
@@ -50,17 +45,6 @@ function pnlClass(val) {
   return '';
 }
 
-/** Timestamp → kısa tarih (gün.ay) */
-function shortDate(ts) {
-  if (!ts) return '';
-  try {
-    const d = new Date(ts);
-    return `${d.getDate().toString().padStart(2, '0')}.${(d.getMonth() + 1).toString().padStart(2, '0')}`;
-  } catch {
-    return ts.slice(5, 10);
-  }
-}
-
 /** Timestamp → saat:dakika */
 function shortTime(ts) {
   if (!ts) return '';
@@ -80,33 +64,13 @@ const REGIME_META = {
   OLAY:     { color: 'var(--loss)',    bg: 'rgba(248,81,73,0.1)',  label: 'Olay'     },
 };
 
-// ── Recharts özel tooltip ────────────────────────────────────────
-
-function EquityTooltip({ active, payload }) {
-  if (!active || !payload?.[0]) return null;
-  const d = payload[0].payload;
-  return (
-    <div className="chart-tooltip">
-      <span className="chart-tooltip-date">{shortDate(d.timestamp)}</span>
-      <span>Equity: <b>{formatMoney(d.equity)}</b></span>
-      <span className={pnlClass(d.daily_pnl)}>
-        Günlük: <b>{formatMoney(d.daily_pnl)}</b>
-      </span>
-    </div>
-  );
-}
-
-function BarTooltip({ active, payload }) {
-  if (!active || !payload?.[0]) return null;
-  const d = payload[0].payload;
-  return (
-    <div className="chart-tooltip">
-      <span className="chart-tooltip-date">{d.date}</span>
-      <span className={pnlClass(d.pnl)}>
-        K/Z: <b>{formatMoney(d.pnl)}</b>
-      </span>
-    </div>
-  );
+/** Fiyat formatla (2-5 ondalık) */
+function formatPrice(val) {
+  if (val == null || isNaN(val) || val === 0) return '—';
+  return val.toLocaleString('tr-TR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 5,
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -128,6 +92,7 @@ export default function Dashboard() {
     engine_running: false, daily_trade_count: 0,
   });
   const [account, setAccount] = useState({ equity: 0 });
+  const [livePositions, setLivePositions] = useState([]);
 
   // WebSocket kaynak canlı veri
   const [liveEquity, setLiveEquity] = useState(null);
@@ -135,13 +100,14 @@ export default function Dashboard() {
 
   // ── REST veri çekme (10sn) ───────────────────────────────────────
   const fetchAll = useCallback(async () => {
-    const [s, p, t, t5, st, acc] = await Promise.all([
+    const [s, p, t, t5, st, acc, pos] = await Promise.all([
       getTradeStats(),
       getPerformance(30),
       getTrades({ limit: 5 }),
       getTop5(),
       getStatus(),
       getAccount(),
+      getPositions(),
     ]);
     setStats(s);
     setPerf(p);
@@ -149,6 +115,7 @@ export default function Dashboard() {
     setTop5(t5);
     setStatus(st);
     setAccount(acc);
+    setLivePositions(pos.positions || []);
   }, []);
 
   useEffect(() => {
@@ -173,6 +140,9 @@ export default function Dashboard() {
             kill_switch_level: msg.kill_switch_level,
           }));
         }
+        if (msg.type === 'position') {
+          setLivePositions(msg.positions || []);
+        }
       }
     });
 
@@ -183,43 +153,6 @@ export default function Dashboard() {
   }, []);
 
   // ── Hesaplamalar ─────────────────────────────────────────────────
-
-  // Equity eğrisi verisini chart'a hazırla
-  const equityCurve = (perf.equity_curve || []).map((pt) => ({
-    timestamp: pt.timestamp,
-    equity: pt.equity,
-    daily_pnl: pt.daily_pnl,
-  }));
-
-  // Son 30 gün günlük K/Z bar verisi (equity_curve'den türet)
-  const dailyBars = (() => {
-    const curve = perf.equity_curve || [];
-    if (curve.length === 0) return [];
-
-    // Günlük PnL grupla
-    const dayMap = {};
-    for (const pt of curve) {
-      const day = (pt.timestamp || '').slice(0, 10);
-      if (!day) continue;
-      // Son kaydı al (gün sonu değeri)
-      dayMap[day] = pt.daily_pnl || 0;
-    }
-
-    return Object.entries(dayMap)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .slice(-30)
-      .map(([date, pnl]) => ({
-        date: date.slice(5), // "MM-DD"
-        pnl,
-        fill: pnl >= 0 ? 'var(--profit)' : 'var(--loss)',
-      }));
-  })();
-
-  // Gösterilecek equity: canlı WS → perf eğrisi → account API fallback
-  const displayEquity = liveEquity?.equity
-    ?? perf.equity_curve?.[perf.equity_curve.length - 1]?.equity
-    ?? account.equity
-    ?? 0;
 
   // Rejim bilgisi
   const regime = status.regime || 'TREND';
@@ -258,103 +191,70 @@ export default function Dashboard() {
         />
       </div>
 
-      {/* ═══ ORTA: 2 Grafik ═══════════════════════════════════════ */}
-      <div className="dash-charts-row">
-
-        {/* ── Sol: Equity Eğrisi ────────────────────────────────── */}
-        <div className="dash-chart-card">
-          <div className="dash-chart-header">
-            <h3>Equity Eğrisi</h3>
-            <span className="dash-chart-value">
-              {formatMoney(displayEquity)} <small>TRY</small>
+      {/* ═══ ORTA: Açık Pozisyonlar ═════════════════════════════════ */}
+      <div className="dash-positions-row">
+        <div className="dash-card dash-card--full">
+          <div className="dash-card-header">
+            <h3>Açık Pozisyonlar</h3>
+            <span className="dash-card-badge">
+              {(livePositions || []).length} / 5
             </span>
           </div>
-          <div className="dash-chart-body">
-            {equityCurve.length > 0 ? (
-              <ResponsiveContainer width="100%" height={220}>
-                <AreaChart data={equityCurve} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="eqGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#58a6ff" stopOpacity={0.25} />
-                      <stop offset="95%" stopColor="#58a6ff" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#30363d" />
-                  <XAxis
-                    dataKey="timestamp"
-                    tickFormatter={shortDate}
-                    stroke="#8b949e"
-                    fontSize={11}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    stroke="#8b949e"
-                    fontSize={11}
-                    tickLine={false}
-                    tickFormatter={(v) => `${(v / 1000).toFixed(0)}K`}
-                    width={48}
-                  />
-                  <Tooltip content={<EquityTooltip />} />
-                  <Area
-                    type="monotone"
-                    dataKey="equity"
-                    stroke="#58a6ff"
-                    strokeWidth={2}
-                    fill="url(#eqGrad)"
-                    dot={false}
-                    activeDot={{ r: 4, fill: '#58a6ff' }}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="dash-chart-empty">Equity verisi yok</div>
-            )}
-          </div>
-        </div>
-
-        {/* ── Sağ: Günlük K/Z Çubuk Grafiği ─────────────────────── */}
-        <div className="dash-chart-card">
-          <div className="dash-chart-header">
-            <h3>Günlük Kâr/Zarar</h3>
-            <span className="dash-chart-value">
-              Son 30 gün
-            </span>
-          </div>
-          <div className="dash-chart-body">
-            {dailyBars.length > 0 ? (
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={dailyBars} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#30363d" vertical={false} />
-                  <XAxis
-                    dataKey="date"
-                    stroke="#8b949e"
-                    fontSize={10}
-                    tickLine={false}
-                    interval="preserveStartEnd"
-                  />
-                  <YAxis
-                    stroke="#8b949e"
-                    fontSize={11}
-                    tickLine={false}
-                    tickFormatter={(v) => v >= 1000 || v <= -1000 ? `${(v / 1000).toFixed(1)}K` : v.toFixed(0)}
-                    width={48}
-                  />
-                  <Tooltip content={<BarTooltip />} />
-                  <ReferenceLine y={0} stroke="#30363d" />
-                  <Bar dataKey="pnl" radius={[2, 2, 0, 0]} maxBarSize={16}>
-                    {dailyBars.map((entry, idx) => (
-                      <Cell
-                        key={idx}
-                        fill={entry.pnl >= 0 ? '#3fb950' : '#f85149'}
-                      />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="dash-chart-empty">Günlük K/Z verisi yok</div>
-            )}
-          </div>
+          {(livePositions || []).length === 0 ? (
+            <div className="dash-positions-empty">
+              <span>📭</span> Açık pozisyon yok
+            </div>
+          ) : (
+            <table className="dash-positions-table">
+              <thead>
+                <tr>
+                  <th>Sembol</th>
+                  <th>Yön</th>
+                  <th>Lot</th>
+                  <th>Giriş Fiy.</th>
+                  <th>Anlık Fiy.</th>
+                  <th>SL</th>
+                  <th>TP</th>
+                  <th>K/Z</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(livePositions || []).map((pos) => {
+                  const pnl = pos.pnl || 0;
+                  return (
+                    <tr key={pos.ticket || pos.symbol}>
+                      <td className="mono">{pos.symbol}</td>
+                      <td>
+                        <span className={`dir-badge dir-badge--${(pos.direction || '').toLowerCase()}`}>
+                          {pos.direction}
+                        </span>
+                      </td>
+                      <td className="mono">{pos.volume?.toFixed(2) ?? '—'}</td>
+                      <td className="mono">{formatPrice(pos.entry_price)}</td>
+                      <td className="mono">{formatPrice(pos.current_price)}</td>
+                      <td className="mono text-dim">{formatPrice(pos.sl)}</td>
+                      <td className="mono text-dim">{formatPrice(pos.tp)}</td>
+                      <td className={`mono ${pnl > 0 ? 'profit' : pnl < 0 ? 'loss' : ''}`}>
+                        <b>{formatMoney(pnl)}</b>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr className="dash-positions-footer">
+                  <td colSpan={2}><b>TOPLAM</b></td>
+                  <td className="mono">
+                    <b>{(livePositions || []).reduce((s, p) => s + (p.volume || 0), 0).toFixed(2)}</b>
+                  </td>
+                  <td colSpan={4}></td>
+                  <td className={`mono ${(livePositions || []).reduce((s, p) => s + (p.pnl || 0), 0) >= 0 ? 'profit' : 'loss'}`}>
+                    <b>{formatMoney((livePositions || []).reduce((s, p) => s + (p.pnl || 0), 0))}</b>
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          )}
         </div>
       </div>
 
