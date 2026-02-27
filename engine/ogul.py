@@ -70,7 +70,8 @@ BO_LOOKBACK:       int   = 20       # 20-bar high/low
 BO_VOLUME_MULT:    float = 1.5      # hacim > ort × 1.5
 BO_ATR_EXPANSION:  float = 1.2      # ATR genişleme oranı
 BO_SL_ATR_MULT:    float = 1.5      # Breakout SL = entry ± 1.5 × ATR
-BO_TRAILING_ATR_MULT: float = 1.5  # Breakout trailing stop = fiyat ± 1.5 × ATR
+BO_TRAILING_ATR_MULT: float = 2.0   # trailing stop: fiyat ± 2×ATR (trend follow'dan geniş)
+BO_REENTRY_BARS: int = 3            # son 3 bar range içine dönmüşse = false breakout
 
 # ── Genel ─────────────────────────────────────────────────────────
 SWING_LOOKBACK:  int = 10           # swing high/low arama barı
@@ -95,6 +96,41 @@ MARGIN_RESERVE_PCT: float    = 0.20    # test süreci: %20 teminat ayırma
 MAX_CONCURRENT: int          = 5       # test süreci: eş zamanlı maks 5 pozisyon
 TRADING_OPEN: time           = time(9, 45)   # işlem başlangıç
 TRADING_CLOSE: time          = time(17, 45)  # işlem bitiş + tüm pozisyonlar kapatılır
+
+# ── Likidite Sınıfı Bazlı Parametreler ───────────────────────
+# A sınıfı: yüksek likidite (F_THYAO, F_AKBNK, F_ASELS, F_TCELL, F_PGSUS)
+# B sınıfı: orta likidite (F_HALKB, F_GUBRF, F_EKGYO, F_SOKM, F_TKFEN)
+# C sınıfı: düşük likidite (F_OYAKC, F_BRSAN, F_AKSEN, F_ASTOR, F_KONTR)
+
+LIQUIDITY_CLASSES: dict[str, str] = {
+    "F_THYAO": "A", "F_AKBNK": "A", "F_ASELS": "A",
+    "F_TCELL": "A", "F_PGSUS": "A",
+    "F_HALKB": "B", "F_GUBRF": "B", "F_EKGYO": "B",
+    "F_SOKM": "B", "F_TKFEN": "B",
+    "F_OYAKC": "C", "F_BRSAN": "C", "F_AKSEN": "C",
+    "F_ASTOR": "C", "F_KONTR": "C",
+}
+
+# Breakout: volume çarpanı (likidite bazlı)
+BO_VOLUME_MULT_BY_CLASS: dict[str, float] = {
+    "A": 1.5,    # A sınıfında 1.5x yeterli (zaten likit)
+    "B": 2.0,    # B sınıfında daha yüksek eşik (gürültü filtrele)
+    "C": 3.0,    # C sınıfında çok yüksek eşik (gerçek kırılım filtresi)
+}
+
+# ATR genişleme çarpanı (likidite bazlı)
+BO_ATR_EXPANSION_BY_CLASS: dict[str, float] = {
+    "A": 1.2,    # standart
+    "B": 1.3,    # biraz daha sıkı
+    "C": 1.5,    # C sınıfında ATR zaten geniş, daha sıkı filtre
+}
+
+# Trailing stop ATR çarpanı (likidite bazlı) — tüm stratejiler
+TRAILING_ATR_BY_CLASS: dict[str, float] = {
+    "A": 1.5,    # dar stop (likit, hızlı çıkış mümkün)
+    "B": 1.8,    # biraz geniş
+    "C": 2.5,    # geniş stop (düşük likidite, spread geniş, fakeout riski)
+}
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -237,6 +273,11 @@ class Ogul:
     # ═════════════════════════════════════════════════════════════════
     #  YÖN EĞİLİMİ (BIAS)
     # ═════════════════════════════════════════════════════════════════
+
+    @staticmethod
+    def _get_liq_class(symbol: str) -> str:
+        """Sembolün likidite sınıfını döndür (A/B/C)."""
+        return LIQUIDITY_CLASSES.get(symbol, "C")  # bilinmeyen = C (en muhafazakâr)
 
     def _calculate_bias(self, symbol: str) -> str:
         """İndikatör bazlı yön eğilimi (sinyal eşiği olmadan).
@@ -594,7 +635,9 @@ class Ogul:
         vol_avg = float(np.mean(valid_vol))
         current_vol = float(volume[-1])
 
-        if vol_avg <= 0 or current_vol <= vol_avg * BO_VOLUME_MULT:
+        liq_class = self._get_liq_class(symbol)
+        vol_mult = BO_VOLUME_MULT_BY_CLASS.get(liq_class, BO_VOLUME_MULT)
+        if vol_avg <= 0 or current_vol <= vol_avg * vol_mult:
             return None
 
         # ATR genişleme kontrolü
@@ -602,7 +645,8 @@ class Ogul:
         if len(atr_valid) < 5:
             return None
         atr_mean = float(np.mean(atr_valid[:-1])) if len(atr_valid) > 1 else atr_val
-        if atr_mean <= 0 or atr_val <= atr_mean * BO_ATR_EXPANSION:
+        atr_exp = BO_ATR_EXPANSION_BY_CLASS.get(liq_class, BO_ATR_EXPANSION)
+        if atr_mean <= 0 or atr_val <= atr_mean * atr_exp:
             return None
 
         last_close = float(close[-1])
@@ -1805,9 +1849,11 @@ class Ogul:
             self._handle_closed_trade(symbol, trade, "ema_violation")
             return
 
-        # Trailing stop güncelleme
+        # Trailing stop güncelleme — likidite bazlı çarpan
+        liq_class = self._get_liq_class(symbol)
+        trail_mult = TRAILING_ATR_BY_CLASS.get(liq_class, TF_TRAILING_ATR_MULT)
         if trade.direction == "BUY":
-            new_sl = current_price - TF_TRAILING_ATR_MULT * atr_val
+            new_sl = current_price - trail_mult * atr_val
             if new_sl > trade.trailing_sl:
                 mod_result = self.mt5.modify_position(
                     trade.ticket, sl=new_sl,
@@ -1819,7 +1865,7 @@ class Ogul:
                         f"Trailing SL güncellendi [{symbol}]: {new_sl:.4f}"
                     )
         else:  # SELL
-            new_sl = current_price + TF_TRAILING_ATR_MULT * atr_val
+            new_sl = current_price + trail_mult * atr_val
             if new_sl < trade.trailing_sl:
                 mod_result = self.mt5.modify_position(
                     trade.ticket, sl=new_sl,
@@ -1881,25 +1927,58 @@ class Ogul:
         trade: Trade,
         pos: dict[str, Any],
     ) -> None:
-        """Breakout işlem yönetimi — trailing stop.
+        """Breakout işlem yönetimi — false breakout tespiti + trailing stop.
 
-        Her cycle'da FILLED breakout pozisyonları için çağrılır.
-        Fiyat lehte hareket ettikçe SL'i ATR bazlı sıkılaştırır.
+        İki savunma katmanı:
+        1. False breakout tespiti: fiyat kırılım range'inin içine geri döndüyse kapat
+        2. Trailing stop: 2×ATR (trend follow'dan geniş, breakout'a alan tanı)
 
         Args:
             symbol: Kontrat sembolü.
             trade: Aktif Trade nesnesi.
             pos: MT5 pozisyon bilgisi.
         """
-        atr_val = self._get_current_atr(symbol)
+        df = self.db.get_bars(symbol, "M15", limit=MIN_BARS_M15)
+        if df.empty or len(df) < BO_LOOKBACK + 2:
+            return
+
+        close = df["close"].values.astype(np.float64)
+        high_arr = df["high"].values.astype(np.float64)
+        low_arr = df["low"].values.astype(np.float64)
+
+        atr_arr = calc_atr(high_arr, low_arr, close, ATR_PERIOD)
+        atr_val = _last_valid(atr_arr)
         if atr_val is None or atr_val <= 0:
             return
 
-        current_price = float(pos.get("price_current", 0.0))
-        if current_price <= 0:
+        current_price = float(pos.get("price_current", close[-1]))
+
+        # ── False breakout tespiti ────────────────────────────────
+        # Son BO_REENTRY_BARS bar'ın tamamı kırılım seviyesinin
+        # gerisine dönmüşse = false breakout
+        recent_closes = close[-BO_REENTRY_BARS:]
+
+        # Kırılım seviyesi: trade açılırken kaydedilen entry_price
+        # BUY breakout: fiyat entry altına düştüyse false
+        # SELL breakout: fiyat entry üstüne çıktıysa false
+        false_breakout = False
+        if trade.direction == "BUY":
+            if all(c < trade.entry_price for c in recent_closes):
+                false_breakout = True
+        else:
+            if all(c > trade.entry_price for c in recent_closes):
+                false_breakout = True
+
+        if false_breakout:
+            logger.info(
+                f"False breakout tespit [{symbol}]: fiyat={current_price:.4f} "
+                f"entry={trade.entry_price:.4f} — pozisyon kapatılıyor"
+            )
+            self.mt5.close_position(trade.ticket)
+            self._handle_closed_trade(symbol, trade, "false_breakout")
             return
 
-        # Trailing stop güncelleme
+        # ── Trailing stop ─────────────────────────────────────────
         if trade.direction == "BUY":
             new_sl = current_price - BO_TRAILING_ATR_MULT * atr_val
             if new_sl > trade.trailing_sl:
@@ -1910,10 +1989,9 @@ class Ogul:
                     trade.trailing_sl = new_sl
                     trade.sl = new_sl
                     logger.debug(
-                        f"Breakout trailing SL güncellendi [{symbol}]: "
-                        f"{new_sl:.4f}"
+                        f"Breakout trailing SL [{symbol}]: {new_sl:.4f}"
                     )
-        else:  # SELL
+        else:
             new_sl = current_price + BO_TRAILING_ATR_MULT * atr_val
             if new_sl < trade.trailing_sl:
                 mod_result = self.mt5.modify_position(
@@ -1923,8 +2001,7 @@ class Ogul:
                     trade.trailing_sl = new_sl
                     trade.sl = new_sl
                     logger.debug(
-                        f"Breakout trailing SL güncellendi [{symbol}]: "
-                        f"{new_sl:.4f}"
+                        f"Breakout trailing SL [{symbol}]: {new_sl:.4f}"
                     )
 
     # ═════════════════════════════════════════════════════════════════
