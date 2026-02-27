@@ -285,12 +285,16 @@ class Engine:
         # çağrılır çünkü advance_orders ve manage_active_trades
         # her zaman çalışmalı. Sinyal üretimi process_signals()
         # içindeki rejim + saat kontrollerinde durur.
+        # process_signals her zaman çağrılır (emir yönetimi + trailing stop).
+        # risk kapalıyken top5 yerine boş liste → sinyal üretilmez.
+        # Ama bias her zaman güncellenmeli (Dashboard doğru göstersin).
         if risk_verdict.can_trade:
             self.ogul.process_signals(top5, regime)
         else:
-            # Risk kapalı: sadece emir yönetimi + trade yönetimi çalışsın
-            # Boş liste = yeni sinyal üretme, ama mevcut emirleri yönet
             self.ogul.process_signals([], regime)
+            # Risk kapalıyken de bias güncelle (Dashboard için)
+            for sym in top5:
+                self.ogul.last_signals[sym] = self.ogul._calculate_bias(sym)
 
         # ── 7. Cycle Loglama ──────────────────────────────────────
         self._log_cycle_summary(regime, risk_verdict, top5)

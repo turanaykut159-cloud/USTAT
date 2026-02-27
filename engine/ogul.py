@@ -845,10 +845,6 @@ class Ogul:
         # Aktif işlemlere ekle
         self.active_trades[symbol] = trade
 
-        # Risk sayacı güncelle
-        if self.baba:
-            self.baba.increment_daily_trade_count()
-
         # Event kaydet
         self.db.insert_event(
             event_type="ORDER_SENT",
@@ -1353,6 +1349,9 @@ class Ogul:
                 severity="INFO",
                 action="order_filled",
             )
+            # Günlük işlem sayacı — sadece gerçek dolumda artır
+            if self.baba:
+                self.baba.increment_daily_trade_count()
 
         elif order_status == "partial":
             trade.state = TradeState.PARTIAL
@@ -1420,6 +1419,9 @@ class Ogul:
                 severity="INFO",
                 action="partial_accepted",
             )
+            # Günlük işlem sayacı — kısmi dolum kabul edildi
+            if self.baba:
+                self.baba.increment_daily_trade_count()
         else:
             # Yetersiz — kısmi pozisyonu kapat
             if trade.ticket:
@@ -1556,6 +1558,9 @@ class Ogul:
         trade.state = TradeState.FILLED
         trade.entry_price = fill_price
         trade.filled_volume = trade.volume
+        # Günlük işlem sayacı — market retry dolum
+        if self.baba:
+            self.baba.increment_daily_trade_count()
 
         if trade.db_id > 0:
             self.db.update_trade(trade.db_id, {
@@ -1579,13 +1584,16 @@ class Ogul:
     def _update_fill_price(self, symbol: str, trade: Trade) -> None:
         """MT5 pozisyondan gerçek dolum fiyatını al ve DB güncelle.
 
+        Netting mode: sembol bazlı eşleştirme (ticket değişebilir).
+
         Args:
             symbol: Kontrat sembolü.
             trade: Güncellenecek Trade.
         """
         positions = self.mt5.get_positions()
+        # Netting mode: sembol bazlı eşleştir
         pos = next(
-            (p for p in positions if p.get("ticket") == trade.ticket),
+            (p for p in positions if p.get("symbol") == symbol),
             None,
         )
 
@@ -1593,6 +1601,14 @@ class Ogul:
             trade.entry_price = pos.get(
                 "price_open", trade.entry_price,
             )
+            # Ticket güncellemesi — netting merge sonrası farklı olabilir
+            new_ticket = pos.get("ticket", 0)
+            if new_ticket and new_ticket != trade.ticket:
+                logger.debug(
+                    f"Ticket güncellendi [{symbol}]: "
+                    f"{trade.ticket} → {new_ticket}"
+                )
+                trade.ticket = new_ticket
 
         if trade.db_id > 0:
             self.db.update_trade(trade.db_id, {
@@ -1687,12 +1703,19 @@ class Ogul:
         """Mevcut açık işlemleri yönet — trailing stop, çıkış kontrolleri.
 
         Her cycle'da ``process_signals()`` başında çağrılır.
+        MT5 pozisyonları tek seferde alınır (performans).
 
         Args:
             regime: Mevcut piyasa rejimi.
         """
         if not self.active_trades:
             return
+
+        # MT5 pozisyonlarını BİR KERE al, sembol bazlı indexle
+        positions = self.mt5.get_positions()
+        pos_by_symbol: dict[str, dict] = {
+            p.get("symbol"): p for p in positions
+        }
 
         # VOLATILE / OLAY → FILLED pozisyonları kapat
         if regime.regime_type in (RegimeType.VOLATILE, RegimeType.OLAY):
@@ -1713,22 +1736,16 @@ class Ogul:
         for symbol in list(self.active_trades):
             trade = self.active_trades[symbol]
 
-            # Sadece dolu pozisyonları yönet
             if trade.state != TradeState.FILLED:
                 continue
 
-            # Pozisyon hâlâ MT5'te var mı? (Netting: sembol bazlı eşleştir)
-            positions = self.mt5.get_positions()
-            pos = next(
-                (p for p in positions if p.get("symbol") == symbol),
-                None,
-            )
+            # Pozisyon hâlâ MT5'te var mı?
+            pos = pos_by_symbol.get(symbol)
             if pos is None:
-                # Pozisyon harici kapanmış (SL/TP hit)
                 self._handle_closed_trade(symbol, trade, "sl_tp")
                 continue
 
-            # Pozisyon ticket'ını güncelle (senkronizasyon)
+            # Ticket senkronizasyonu
             pos_ticket = pos.get("ticket", 0)
             if pos_ticket and pos_ticket != trade.ticket:
                 trade.ticket = pos_ticket
@@ -1967,12 +1984,17 @@ class Ogul:
             if not df.empty:
                 trade.exit_price = float(df["close"].values[-1])
 
-        # PnL hesapla
+        # PnL hesapla — kontrat bazlı çarpan
         if trade.entry_price > 0 and trade.exit_price > 0:
+            contract_size = CONTRACT_SIZE  # varsayılan fallback
+            sym_info = self.mt5.get_symbol_info(symbol)
+            if sym_info and hasattr(sym_info, "trade_contract_size"):
+                contract_size = sym_info.trade_contract_size
+
             if trade.direction == "BUY":
-                trade.pnl = (trade.exit_price - trade.entry_price) * trade.volume * CONTRACT_SIZE
+                trade.pnl = (trade.exit_price - trade.entry_price) * trade.volume * contract_size
             else:
-                trade.pnl = (trade.entry_price - trade.exit_price) * trade.volume * CONTRACT_SIZE
+                trade.pnl = (trade.entry_price - trade.exit_price) * trade.volume * contract_size
 
         # DB güncelle
         if trade.db_id > 0:
