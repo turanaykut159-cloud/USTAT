@@ -1,6 +1,6 @@
 # BABA_YAPI.md — BABA (Risk Yoneticisi + Rejim Algilama)
 
-Kaynak: `engine/baba.py` (1981 satir)
+Kaynak: `engine/baba.py` (1987 satir)
 
 ---
 
@@ -455,8 +455,11 @@ def _check_olay(self) -> dict[str, Any] | None:
 2025-01-31, 2025-02-28, 2025-03-31, 2025-04-30, 2025-05-30, 2025-06-30,
 2025-07-31, 2025-08-29, 2025-09-30, 2025-10-31, 2025-11-28, 2025-12-31
 
-# 2026 (3 tarih)
-2026-01-30, 2026-02-27, 2026-03-31
+# 2026 (12 tarih)
+2026-01-30, 2026-02-27, 2026-03-31, 2026-04-30, 2026-05-25*, 2026-06-30,
+2026-07-31, 2026-08-31, 2026-09-30, 2026-10-28**, 2026-11-30, 2026-12-31
+# * Mayis: Kurban Bayrami cakismasi nedeniyle 25'e cekildi
+# ** Ekim: Cumhuriyet Bayrami + hafta sonu nedeniyle 28'e cekildi
 ```
 
 ### Esikler

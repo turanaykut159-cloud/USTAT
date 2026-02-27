@@ -1,6 +1,6 @@
 # OGUL_YAPI.md — OGUL (Sinyal Uretici + Emir State Machine)
 
-Kaynak: `engine/ogul.py` (1704 satir)
+Kaynak: `engine/ogul.py` (2161 satir)
 
 ---
 
@@ -70,12 +70,14 @@ def __init__(
 | `_advance_partial` | `symbol: str, trade: Trade, regime: Regime` | `None` | Kismi dolum degerlendirme: >=50% kabul -> FILLED; <50% -> kapat ve iptal |
 | `_advance_timeout` | `symbol: str, trade: Trade, regime: Regime` | `None` | LIMIT timeout: VOLATILE/OLAY -> iptal; TREND/RANGE ve retry_count<1 -> MARKET retry |
 | `_advance_market_retry` | `symbol: str, trade: Trade, regime: Regime` | `None` | Market retry sonucu: MT5'te pozisyon varsa slippage kontrol; asimissa kapat, yoksa FILLED |
-| `_update_fill_price` | `symbol: str, trade: Trade` | `None` | MT5 pozisyonundan gercek dolum fiyatini alir, DB gunceller |
+| `_update_fill_price` | `symbol: str, trade: Trade` | `None` | MT5 pozisyonundan gercek dolum fiyatini alir, DB gunceller. **Sembol bazli eslestirme** (netting mode): ticket degil symbol ile pozisyon bulur, ticket degismisse gunceller |
 | `_is_trading_allowed` | `now: datetime \| None = None` | `bool` | 09:45-17:45 arasi ve piyasa acik mi kontrol |
 | `_check_end_of_day` | `now: datetime \| None = None` | `None` | 17:45 sonrasi: tum FILLED pozisyonlari kapat, bekleyen emirleri iptal et |
-| `_manage_active_trades` | `regime: Regime` | `None` | FILLED pozisyon yonetimi: VOLATILE/OLAY -> tumu kapat; digerleri strateji bazli cikis |
-| `_manage_trend_follow` | `symbol: str, trade: Trade, pos: dict[str, Any]` | `None` | Trend follow cikis: fiyat EMA(20) ihlali veya trailing stop guncelleme (1.5*ATR) |
+| `_manage_active_trades` | `regime: Regime` | `None` | FILLED pozisyon yonetimi: dongu oncesi **tek `get_positions()` cagrisi** -> `pos_by_symbol` dict. VOLATILE/OLAY -> tumu kapat; digerleri strateji bazli cikis (trend_follow, mean_reversion, breakout) |
+| `_manage_trend_follow` | `symbol: str, trade: Trade, pos: dict[str, Any]` | `None` | Trend follow cikis: fiyat EMA(20) ihlali veya **likidite bazli trailing stop** (A=1.5, B=1.8, C=2.5 ATR) |
 | `_manage_mean_reversion` | `symbol: str, trade: Trade, pos: dict[str, Any]` | `None` | Mean reversion cikis: fiyat BB orta bandina ulasti mi (programatik TP yedegi) |
+| `_manage_breakout` | `symbol: str, trade: Trade, pos: dict[str, Any]` | `None` | Breakout cikis: **false breakout tespiti** (son BO_REENTRY_BARS=3 bar entry gerisine donmusse kapat) + trailing stop (BO_TRAILING_ATR_MULT=2.0 ATR) |
+| `_get_liq_class` (static) | `symbol: str` | `str` | Sembolun likidite sinifini doner: "A"/"B"/"C" (LIQUIDITY_CLASSES dict'inden) |
 | `_sync_positions` | (yok) | `None` | `active_trades` FILLED kayitlarini MT5 acik pozisyonlarla karsilastirir; harici kapanis tespit |
 | `_handle_closed_trade` | `symbol: str, trade: Trade, exit_reason: str` | `None` | Kapanan islemi isle: PnL hesapla, DB guncelle, event yaz, `active_trades`'den cikar |
 
@@ -134,18 +136,18 @@ MARKET_RETRY -> CANCELLED  MT5 pozisyon bulunamadi veya slippage asimi
 MARKET_RETRY -> REJECTED   send_order None dondu (hemen cikarilir)
 
 FILLED -> CLOSED           gun_sonu, rejim_degisimi (VOLATILE/OLAY),
-                           ema_ihlali, bb_orta_bandi, sl_tp_harici, harici_kapanis
+                           ema_ihlali, bb_orta_bandi, false_breakout, sl_tp_harici, harici_kapanis
 ```
 
 ### Her State'de Ne Yapiliyor
 
 - **SIGNAL:** Trade nesnesi olusturulur, BABA `check_correlation_limits()` cagrilir
 - **PENDING:** On-ucus kontrolleri: islem saati, esanli pozisyon limiti (max 5), margin kontrolu (free_margin >= %20 equity), lot hesaplama. Hepsi gecerse LIMIT emir gonderilir
-- **SENT:** `_advance_sent` MT5 `check_order_status()` sorgular. Doldu -> FILLED. Kismi -> PARTIAL. Beklemede ve >5sn -> TIMEOUT
-- **FILLED:** Pozisyon aktif. `_manage_active_trades` strateji bazli cikis mantigi calistirir. `_sync_positions` MT5'te pozisyonun hala var mi kontrol eder
-- **PARTIAL:** `_advance_partial` kalan emri iptal eder. >=50% dolmus -> FILLED (kabul). <50% -> kismi pozisyonu kapat, CANCELLED
+- **SENT:** `_advance_sent` MT5 `check_order_status()` sorgular. Doldu -> FILLED + **`increment_daily_trade_count()`** cagrilir (Faz 1.3). Kismi -> PARTIAL. Beklemede ve >5sn -> TIMEOUT
+- **FILLED:** Pozisyon aktif. `_manage_active_trades` strateji bazli cikis mantigi calistirir (`_manage_trend_follow`, `_manage_mean_reversion`, `_manage_breakout`). `_sync_positions` MT5'te pozisyonun hala var mi kontrol eder
+- **PARTIAL:** `_advance_partial` kalan emri iptal eder. >=50% dolmus -> FILLED + **`increment_daily_trade_count()`** (Faz 1.3). <50% -> kismi pozisyonu kapat, CANCELLED
 - **TIMEOUT:** `_advance_timeout` bekleyen emri iptal eder. VOLATILE/OLAY rejim -> CANCELLED. TREND/RANGE ve retry_count<1 -> MARKET emri gonder -> MARKET_RETRY
-- **MARKET_RETRY:** `_advance_market_retry` MT5'te sembol icin pozisyon var mi kontrol eder. Varsa slippage dogrulama (fill_price vs limit_price). Kabul edilebilir -> FILLED. Asim -> pozisyonu kapat, CANCELLED
+- **MARKET_RETRY:** `_advance_market_retry` MT5'te sembol icin pozisyon var mi kontrol eder. Varsa slippage dogrulama (fill_price vs limit_price). Kabul edilebilir -> FILLED + **`increment_daily_trade_count()`** (Faz 1.3). Asim -> pozisyonu kapat, CANCELLED
 - **REJECTED:** Trade hemen cikarilir (market retry basarisizliginda)
 - **CLOSED:** Islem sonlandirilir. PnL hesaplanir, DB guncellenir, `active_trades`'den cikarilir
 - **CANCELLED:** Trade loglanir, event yazilir, `active_trades`'den cikarilir
@@ -174,7 +176,7 @@ REGIME_STRATEGIES: dict[RegimeType, list[StrategyType]] = {
 
 **Cikis Kosullari:**
 - EMA(20) ihlali: BUY kapanir fiyat < EMA(20); SELL kapanir fiyat > EMA(20)
-- Trailing stop: her cycle `current_price +/- 1.5 * ATR` ile guncellenir
+- **Likidite bazli trailing stop:** her cycle `current_price +/- TRAILING_ATR_BY_CLASS[liq] * ATR` ile guncellenir (A=1.5, B=1.8, C=2.5)
 - Gun sonu (17:45)
 - Rejim degisimi (VOLATILE/OLAY)
 
@@ -230,12 +232,14 @@ strength = min(rsi_str + bb_touch + adx_str, 1.0)
 
 ### Breakout (`_check_breakout`)
 
-**Giris Kosullari:**
-- BUY: close > 20-bar high (son bar haric) VE volume > ort_volume * 1.5 VE ATR > ort_ATR * 1.2
-- SELL: close < 20-bar low (son bar haric) VE volume > ort_volume * 1.5 VE ATR > ort_ATR * 1.2
+**Giris Kosullari (likidite bazli esikler):**
+- BUY: close > 20-bar high (son bar haric) VE volume > ort_volume * **BO_VOLUME_MULT_BY_CLASS[liq]** VE ATR > ort_ATR * **BO_ATR_EXPANSION_BY_CLASS[liq]**
+- SELL: close < 20-bar low (son bar haric) VE volume > ort_volume * **BO_VOLUME_MULT_BY_CLASS[liq]** VE ATR > ort_ATR * **BO_ATR_EXPANSION_BY_CLASS[liq]**
+- Likidite sinifi `_get_liq_class(symbol)` ile belirlenir
 
-**Cikis Kosullari:**
-- Sabit SL/TP (ek programatik yonetim yok — kod yorumu: "breakout: sabit SL/TP, ek kontrol yok")
+**Cikis Kosullari (`_manage_breakout`):**
+- **False breakout tespiti:** Son `BO_REENTRY_BARS`(3) bar entry fiyatinin gerisine donmusse pozisyon kapatilir
+- **Trailing stop:** `BO_TRAILING_ATR_MULT`(2.0) * ATR ile guncellenir
 - Gun sonu (17:45)
 - Rejim degisimi (VOLATILE/OLAY)
 
@@ -277,6 +281,7 @@ Strateji bazli — yukari Bolum 5'e bak.
 - VOLATILE/OLAY rejim degisimi
 - EMA ihlali (trend follow)
 - BB orta bandi ulasimi (mean reversion)
+- False breakout tespiti (breakout — son 3 bar entry gerisine donmus)
 - Slippage asimi (market retry)
 - Yetersiz kismi dolum (<50%)
 
@@ -289,19 +294,26 @@ Strateji bazli — yukari Bolum 5'e bak.
 
 - Pozisyon ticket MT5'ten `trade.ticket` olarak saklanir (`trade.order_ticket`'ten farkli)
 - SENT->FILLED gecisinde: MT5 durumundan `position_ticket` kullanilir (emir ticket'i degil) — netting icin kritik
+- `_update_fill_price` pozisyonlari **sembol** ile eslestirir (Faz 1.1: ticket bazli -> sembol bazli). Ticket degismisse otomatik gunceller ve loglar
 - `_advance_market_retry` pozisyonlari **sembol** ile eslestirir (netting: sembol basina tek pozisyon)
 - `_sync_positions` pozisyonlari **sembol** ile eslestirir
-- `_manage_active_trades` varlik kontrolu **sembol** bazli
+- `_manage_active_trades` dongu oncesi tek `get_positions()` cagrisi + `pos_by_symbol` dict (Faz 1.2 optimizasyonu)
 - MT5 farkli ticket bildirirse pozisyon ticket guncellenir
 
 ### PnL Hesaplama
 
 ```python
+# Dinamik contract_size: MT5 sembol bilgisinden alinir, fallback CONTRACT_SIZE=100
+contract_size = CONTRACT_SIZE  # varsayilan fallback
+sym_info = self.mt5.get_symbol_info(symbol)
+if sym_info and hasattr(sym_info, "trade_contract_size"):
+    contract_size = sym_info.trade_contract_size
+
 # BUY:
-pnl = (exit_price - entry_price) * volume * CONTRACT_SIZE  # CONTRACT_SIZE = 100
+pnl = (exit_price - entry_price) * volume * contract_size
 
 # SELL:
-pnl = (entry_price - exit_price) * volume * CONTRACT_SIZE
+pnl = (entry_price - exit_price) * volume * contract_size
 ```
 
 ---
@@ -350,7 +362,7 @@ Her indikator tam olarak +1 veya -1 katki yapar (sinirda 0). 3 oylayici ile mumk
 | `TF_MACD_CONFIRM_BARS` | `int` | `2` | Histogram ayni isaret 2 bar olmali |
 | `TF_SL_ATR_MULT` | `float` | `1.5` | Fallback SL = giris +/- 1.5*ATR |
 | `TF_TP_ATR_MULT` | `float` | `2.0` | TP = giris +/- 2*ATR |
-| `TF_TRAILING_ATR_MULT` | `float` | `1.5` | Trailing stop = fiyat +/- 1.5*ATR |
+| `TF_TRAILING_ATR_MULT` | `float` | `1.5` | Trailing stop varsayilan (likidite bazli override: TRAILING_ATR_BY_CLASS) |
 
 ### Mean Reversion Sabitleri
 
@@ -369,8 +381,32 @@ Her indikator tam olarak +1 veya -1 katki yapar (sinirda 0). 3 oylayici ile mumk
 | Sabit | Tip | Deger | Aciklama |
 |---|---|---|---|
 | `BO_LOOKBACK` | `int` | `20` | High/low geriye bakis periyodu |
-| `BO_VOLUME_MULT` | `float` | `1.5` | Volume ort * 1.5 asmali |
-| `BO_ATR_EXPANSION` | `float` | `1.2` | ATR ort * 1.2 asmali |
+| `BO_VOLUME_MULT` | `float` | `1.5` | Volume ort carpani (varsayilan fallback) |
+| `BO_ATR_EXPANSION` | `float` | `1.2` | ATR ort carpani (varsayilan fallback) |
+| `BO_TRAILING_ATR_MULT` | `float` | `2.0` | Breakout trailing stop ATR carpani |
+| `BO_REENTRY_BARS` | `int` | `3` | False breakout kontrolu icin bar sayisi |
+
+### Likidite Sinifi Sabitleri (Faz 2.2)
+
+| Sabit | Tip | Deger | Aciklama |
+|---|---|---|---|
+| `LIQUIDITY_CLASSES` | `dict[str, str]` | 15 kontrat -> "A"/"B"/"C" | Sembol bazli likidite sinifi |
+| `BO_VOLUME_MULT_BY_CLASS` | `dict[str, float]` | `{"A": 1.5, "B": 2.0, "C": 3.0}` | Breakout volume esigi (likidite bazli) |
+| `BO_ATR_EXPANSION_BY_CLASS` | `dict[str, float]` | `{"A": 1.2, "B": 1.3, "C": 1.5}` | Breakout ATR genisleme esigi (likidite bazli) |
+| `TRAILING_ATR_BY_CLASS` | `dict[str, float]` | `{"A": 1.5, "B": 1.8, "C": 2.5}` | Trend follow trailing stop (likidite bazli) |
+
+### LIQUIDITY_CLASSES Esleme
+
+```python
+LIQUIDITY_CLASSES = {
+    # A sinifi (yuksek likidite)
+    "F_THYAO": "A", "F_AKBNK": "A", "F_ASELS": "A", "F_TCELL": "A", "F_PGSUS": "A",
+    # B sinifi (orta likidite)
+    "F_HALKB": "B", "F_GUBRF": "B", "F_EKGYO": "B", "F_SOKM": "B", "F_TKFEN": "B",
+    # C sinifi (dusuk likidite)
+    "F_OYAKC": "C", "F_BRSAN": "C", "F_AKSEN": "C", "F_ASTOR": "C", "F_KONTR": "C",
+}
+```
 
 ### Genel Sabitler
 
@@ -434,7 +470,7 @@ import numpy as np
 |---|---|---|
 | `baba.check_correlation_limits(symbol, direction, risk_params)` | `.can_trade: bool, .reason: str` | Sinyal calistirilmadan once korelasyon kontrolu |
 | `baba.calculate_position_size(symbol, risk_params, atr_val, equity)` | `float` (lot) | Pozisyon boyutlama |
-| `baba.increment_daily_trade_count()` | `None` | Islem acildiginda gunluk sayac artirma |
+| `baba.increment_daily_trade_count()` | `None` | Islem **FILLED** oldugunda gunluk sayac artirma (`_advance_sent`, `_advance_partial`, `_advance_market_retry` icinden cagrilir) |
 | `baba.is_symbol_killed(symbol)` | `bool` | Sembol bazli L1 kill-switch kontrolu |
 
 ### MT5Bridge'den Ne Aliyor
@@ -462,4 +498,5 @@ import numpy as np
 
 ### Config'den Ne Aliyor
 
-- Dogrudan kullanilmiyor (saklanir ama hicbir metotta erisim yok)
+- `config/default.json` uzerinden: `strategies.trend_follow`, `strategies.mean_reversion`, `strategies.breakout`, `liquidity_overrides` bolumleri (Faz 2.3)
+- Ogul sabitleri hala hardcoded — config override mekanizmasi henuz aktif degil (gelecek gelistirme)
