@@ -95,18 +95,8 @@ EXPIRY_OBSERVATION_DAYS: int = 2    # yeni vadede ilk 2 gün gözlem
 # ── Takvim verileri (baba.py'den) ───────────────────────────────────
 from engine.baba import VIOP_EXPIRY_DATES, CENTRAL_BANK_DATES  # noqa: E402
 
-# ── Tatil günleri (time_utils'den + 2026) ───────────────────────────
-from engine.utils.time_utils import HOLIDAYS_2025  # noqa: E402
-
-ALL_HOLIDAYS: set[date] = set(HOLIDAYS_2025) | {
-    date(2026, 1, 1),    # Yılbaşı
-    date(2026, 4, 23),   # Ulusal Egemenlik ve Çocuk Bayramı
-    date(2026, 5, 1),    # İşçi Bayramı
-    date(2026, 5, 19),   # Atatürk'ü Anma, Gençlik ve Spor Bayramı
-    date(2026, 7, 15),   # Demokrasi ve Milli Birlik Günü
-    date(2026, 8, 30),   # Zafer Bayramı
-    date(2026, 10, 29),  # Cumhuriyet Bayramı
-}
+# ── Tatil günleri (merkezi tanım: time_utils) ─────────────────────
+from engine.utils.time_utils import ALL_HOLIDAYS  # noqa: E402
 
 
 # ═════════════════════════════════════════════════════════════════════

@@ -1,7 +1,7 @@
 # USTAT v5.0 — GELISIM TARIHCESI
 
 **Olusturulma Tarihi:** 2026-02-23
-**Son Guncelleme:** 2026-02-23
+**Son Guncelleme:** 2026-02-27
 **Amac:** Projenin kurulumundan itibaren tum degisikliklerin, eklemelerin ve cikartmalarin kaydi
 
 > Bu dosya her gelistirme sonrasi guncellenecek canli bir gelistirme gunlugudur.
@@ -366,6 +366,89 @@ Her kayit su bilgileri icerir:
 ---
 
 ## BUNDAN SONRAKI KAYITLAR ASAGIYA EKLENECEK
+
+## #14 — FAZ 1: BUG DUZELTMELERI
+
+| Bilgi | Deger |
+|-------|-------|
+| **Tarih** | 2026-02-27 10:25:00 +03:00 |
+| **Commit** | `fb94471` |
+| **Baslik** | Faz 1 — Bug duzeltmeleri (netting, sayac, contract_size, bias) |
+
+**Neden:** Canli sistemdeki guvenilirlik sorunlarini gidermek. Netting mode ticket tutarsizligi, gunluk islem sayacinin yanlis zamanda artmasi, sabit CONTRACT_SIZE ile yanlis PnL, risk kapaliyken eski bias gosterimi.
+
+**Degisiklikler (2 dosya, +45 -19 satir):**
+- `engine/ogul.py` — _update_fill_price sembol bazli eslestirme, _manage_active_trades tek MT5 cagrisi, increment_daily_trade_count FILLED'a tasindi (3 metoda eklendi), _handle_closed_trade kontrat bazli PnL
+- `engine/main.py` — Risk kapaliyken bias guncelleme (Dashboard icin)
+
+**Eklenenler:**
+- Sembol bazli pozisyon eslestirme (_update_fill_price)
+- pos_by_symbol dict ile MT5 cagri optimizasyonu
+- FILLED'da sayac artirma (_advance_sent, _advance_partial, _advance_market_retry)
+- get_symbol_info ile kontrat bazli PnL hesaplama
+- Risk kapaliyken _calculate_bias cagrisi
+
+**Cikartilan:**
+- _execute_signal icindeki increment_daily_trade_count (SENT'te artirma)
+- Dongu ici get_positions cagrisi
+
+---
+
+## #15 — FAZ 2: STRATEJI IYILESTIRMELERI
+
+| Bilgi | Deger |
+|-------|-------|
+| **Tarih** | 2026-02-27 10:30:00 +03:00 |
+| **Commit** | `0d32bcc` |
+| **Baslik** | Faz 2 — Strateji iyilestirmeleri (breakout, likidite, config) |
+
+**Neden:** Breakout pozisyonlarinda false breakout korumasinin olmamasi, tum kontratlarin ayni parametrelerle degerlendirilmesi, config altyapisinin kullanilmamasi.
+
+**Degisiklikler (3 dosya, +166 -24 satir):**
+- `engine/ogul.py` — _manage_breakout false breakout tespiti, BO_TRAILING_ATR_MULT 1.5→2.0, BO_REENTRY_BARS=3, LIQUIDITY_CLASSES, _get_liq_class, _check_breakout likidite bazli, _manage_trend_follow likidite bazli
+- `config/default.json` — strategies + liquidity_overrides bolumleri eklendi
+- `engine/config.py` — Parse hatasi korumasi, config summary loglama
+
+**Eklenenler:**
+- False breakout tespiti (son 3 bar entry gerisine donmusse kapat)
+- Likidite sinifi sistemi (A/B/C): 15 kontrat siniflandirildi
+- BO_VOLUME_MULT_BY_CLASS, BO_ATR_EXPANSION_BY_CLASS, TRAILING_ATR_BY_CLASS
+- Config'de strategies ve liquidity_overrides bolumleri
+- Config parse hatasi korumasi (bozuk JSON engine cokertmez)
+
+---
+
+## #16 — FAZ 3: BACKTEST + VADE GECISI
+
+| Bilgi | Deger |
+|-------|-------|
+| **Tarih** | 2026-02-27 11:30:00 +03:00 |
+| **Commit** | (bu commit) |
+| **Baslik** | Faz 3 — Backtest senaryolari, vade gecisi, takvim guncellemesi |
+
+**Neden:** Faz 1/2 iyilestirmelerinin performans etkisini olcmek, 0226 vadesi sonunda 0526 vadesi icin sistemi hazirlamak.
+
+**Degisiklikler (5 dosya):**
+- `backtest/run_faz3.py` — YENI: 4 senaryo backtest calistiricisi (per-sembol ve senaryo bazli raporlama)
+- `engine/baba.py` — VIOP_EXPIRY_DATES 2026 Nisan-Aralik eklendi (9 tarih)
+- `engine/utils/time_utils.py` — HOLIDAYS_2026 eklendi, ALL_HOLIDAYS merkezi set, is_market_open guncellendi
+- `engine/ustat.py` — Yerel ALL_HOLIDAYS kaldirildi, merkezi import kullanildi
+- `docs/2026-02-27_faz3_backtest_raporu.md` — YENI: Detayli backtest analiz raporu
+
+**Eklenenler:**
+- Faz 3.1 backtest scripti (4 senaryo, 14 sembol, 3 ay M15 verisi)
+- VIOP_EXPIRY_DATES: 2026 Nisan-Aralik (Kurban Bayrami cakismasi dikkate alindi)
+- HOLIDAYS_2026 (resmi + dini bayramlar tahmini)
+- Merkezi ALL_HOLIDAYS seti (time_utils.py tek kaynak)
+- Backtest analiz raporu: sembol siniflandirmasi (YESIL/SARI/KIRMIZI), kararlar
+
+**Sonuclar:**
+- Trend Follow (A sinifi): +9,064 TRY, PF=1.18 — EN IYI
+- Mean Reversion (tumu): -1,577 TRY, PF=1.01 — NÖTR
+- Sorunlu semboller: F_HALKB (PF=0.60), F_EKGYO (PF=0.58), F_OYAKC (PF=0.53), F_BRSAN (DD=13.2%)
+- Walk-forward: YAPILAMADI (3 ay vs 10 ay minimum gereksinim)
+
+---
 
 <!-- Yeni kayit sablonu:
 

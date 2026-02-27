@@ -199,13 +199,20 @@ CENTRAL_BANK_DATES: set[date] = {
     date(2026, 4, 16), date(2026, 5, 21), date(2026, 6, 18),
 }
 
-# VİOP vade bitiş tarihleri (güncellenmeli)
+# VİOP vade bitiş tarihleri (her ayın son iş günü)
+# NOT: Ramazan/Kurban Bayramı tarihleri yıla göre değişir — tatile
+#       denk gelen vade tarihleri önceki iş gününe çekilmelidir.
 VIOP_EXPIRY_DATES: set[date] = {
+    # 2025
     date(2025, 1, 31), date(2025, 2, 28), date(2025, 3, 31),
     date(2025, 4, 30), date(2025, 5, 30), date(2025, 6, 30),
     date(2025, 7, 31), date(2025, 8, 29), date(2025, 9, 30),
     date(2025, 10, 31), date(2025, 11, 28), date(2025, 12, 31),
+    # 2026
     date(2026, 1, 30), date(2026, 2, 27), date(2026, 3, 31),
+    date(2026, 4, 30), date(2026, 5, 25), date(2026, 6, 30),
+    date(2026, 7, 31), date(2026, 8, 31), date(2026, 9, 30),
+    date(2026, 10, 28), date(2026, 11, 30), date(2026, 12, 31),
 }
 
 
