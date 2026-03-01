@@ -152,12 +152,12 @@ export default function RiskManagement() {
         <div className="risk-bars">
           <RiskBar
             label="Günlük Kayıp"
-            current={risk.daily_drawdown_pct || (risk.daily_pnl < 0 ? Math.abs(risk.daily_pnl) / 12389 : 0)}
+            current={risk.daily_drawdown_pct ?? 0}
             limit={risk.max_daily_loss}
           />
           <RiskBar
             label="Haftalık Kayıp"
-            current={risk.weekly_drawdown_pct || 0}
+            current={risk.weekly_drawdown_pct ?? 0}
             limit={risk.max_weekly_loss}
           />
           <RiskBar
@@ -172,7 +172,7 @@ export default function RiskManagement() {
           />
           <RiskBar
             label="Floating Kayıp"
-            current={risk.floating_pnl < 0 ? Math.abs(risk.floating_pnl) / 12389 : 0}
+            current={risk.equity > 0 && risk.floating_pnl < 0 ? Math.abs(risk.floating_pnl) / risk.equity : 0}
             limit={risk.max_floating_loss}
           />
         </div>

@@ -100,10 +100,10 @@ function formatDuration(entryTs, exitTs) {
     if (totalMin < 60) return `${totalMin}dk`;
     const h = Math.floor(totalMin / 60);
     const m = totalMin % 60;
-    if (h < 24) return `${h}s ${m}dk`;
+    if (h < 24) return `${h}sa ${m}dk`;
     const days = Math.floor(h / 24);
     const rh = h % 24;
-    return `${days}g ${rh}s`;
+    return `${days}g ${rh}sa`;
   } catch {
     return '—';
   }
@@ -114,7 +114,7 @@ function formatMinutes(mins) {
   if (mins < 60) return `${mins.toFixed(0)} dk`;
   const h = Math.floor(mins / 60);
   const m = Math.round(mins % 60);
-  return `${h}s ${m}dk`;
+  return `${h}sa ${m}dk`;
 }
 
 /** Dönem filtresine göre başlangıç tarihi */
@@ -381,7 +381,7 @@ export default function TradeHistory() {
           onClick={() => scrollToTrade(stats?.shortest_trade)}
           disabled={!stats?.shortest_trade}
         >
-          ⚡ En Kısa
+          ⏱ En Kısa
         </button>
       </div>
 
@@ -490,7 +490,7 @@ export default function TradeHistory() {
               value={stats?.worst_trade ? `${formatMoney(stats.worst_trade.pnl)} (${stats.worst_trade.symbol})` : '—'}
               cls="loss"
             />
-            <PanelRow label="Maks. Ardışık Kayıp" value={maxConsecLosses} />
+            <PanelRow label="Maks. Ardışık Kayıp" value={maxConsecLosses != null ? `${maxConsecLosses} işlem` : '—'} />
             <PanelRow label="Sharpe Oranı" value={perf?.sharpe_ratio?.toFixed(2) ?? '—'} />
             <PanelRow label="Maks. Drawdown" value={perf?.max_drawdown_pct != null ? `%${perf.max_drawdown_pct.toFixed(2)}` : '—'} cls="loss" />
             <PanelRow label="Ort. İşlem Süresi" value={formatMinutes(stats?.avg_duration_minutes)} />

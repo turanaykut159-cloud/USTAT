@@ -179,6 +179,7 @@ class RiskResponse(BaseModel):
     weekly_drawdown_pct: float = 0.0
     total_drawdown_pct: float = 0.0
     floating_pnl: float = 0.0
+    equity: float = 0.0  # Snapshot equity (floating kayıp oranı hesabı için)
 
     # Limitler
     max_daily_loss: float = 0.02
@@ -285,6 +286,7 @@ class KillSwitchResponse(BaseModel):
     success: bool
     kill_switch_level: int = 0
     message: str = ""
+    failed_tickets: list[int] = []  # L3 kapanışta kapatılamayan pozisyon ticket'ları
 
 
 # ═══════════════════════════════════════════════════════════════════

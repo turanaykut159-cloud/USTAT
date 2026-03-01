@@ -23,7 +23,8 @@ export async function getStatus() {
   try {
     const { data } = await client.get('/status');
     return data;
-  } catch {
+  } catch (err) {
+    console.error('[ÜSTAT API] getStatus:', err?.message ?? err);
     return {
       engine_running: false,
       mt5_connected: false,
@@ -45,7 +46,8 @@ export async function getAccount() {
   try {
     const { data } = await client.get('/account');
     return data;
-  } catch {
+  } catch (err) {
+    console.error('[ÜSTAT API] getAccount:', err?.message ?? err);
     return {
       balance: 0, equity: 0, margin: 0, free_margin: 0,
       floating_pnl: 0, daily_pnl: 0, margin_level: 0,
@@ -60,7 +62,8 @@ export async function getPositions() {
   try {
     const { data } = await client.get('/positions');
     return data;
-  } catch {
+  } catch (err) {
+    console.error('[ÜSTAT API] getPositions:', err?.message ?? err);
     return { count: 0, positions: [] };
   }
 }
@@ -71,7 +74,8 @@ export async function getTrades(params = {}) {
   try {
     const { data } = await client.get('/trades', { params });
     return data;
-  } catch {
+  } catch (err) {
+    console.error('[ÜSTAT API] getTrades:', err?.message ?? err);
     return { count: 0, trades: [] };
   }
 }
@@ -80,7 +84,8 @@ export async function getTradeStats(limit = 500) {
   try {
     const { data } = await client.get('/trades/stats', { params: { limit } });
     return data;
-  } catch {
+  } catch (err) {
+    console.error('[ÜSTAT API] getTradeStats:', err?.message ?? err);
     return { total_trades: 0, win_rate: 0, total_pnl: 0 };
   }
 }
@@ -93,7 +98,8 @@ export async function approveTrade(tradeId, approvedBy = 'operator', notes = '')
       notes,
     });
     return data;
-  } catch {
+  } catch (err) {
+    console.error('[ÜSTAT API] approveTrade:', err?.message ?? err);
     return { success: false, message: 'Bağlantı hatası.' };
   }
 }
@@ -102,7 +108,8 @@ export async function syncTrades(days = 90) {
   try {
     const { data } = await client.post('/trades/sync', null, { params: { days } });
     return data;
-  } catch {
+  } catch (err) {
+    console.error('[ÜSTAT API] syncTrades:', err?.message ?? err);
     return { success: false, message: 'Senkronizasyon hatası.' };
   }
 }
@@ -113,7 +120,8 @@ export async function getRisk() {
   try {
     const { data } = await client.get('/risk');
     return data;
-  } catch {
+  } catch (err) {
+    console.error('[ÜSTAT API] getRisk:', err?.message ?? err);
     return {
       daily_pnl: 0, can_trade: true, kill_switch_level: 0,
       regime: 'TREND', risk_multiplier: 1, open_positions: 0,
@@ -127,7 +135,8 @@ export async function getPerformance(days = 30) {
   try {
     const { data } = await client.get('/performance', { params: { days } });
     return data;
-  } catch {
+  } catch (err) {
+    console.error('[ÜSTAT API] getPerformance:', err?.message ?? err);
     return { total_pnl: 0, win_rate: 0, equity_curve: [] };
   }
 }
@@ -138,7 +147,8 @@ export async function getTop5() {
   try {
     const { data } = await client.get('/top5');
     return data;
-  } catch {
+  } catch (err) {
+    console.error('[ÜSTAT API] getTop5:', err?.message ?? err);
     return { contracts: [], all_scores: {} };
   }
 }
@@ -149,7 +159,8 @@ export async function getEvents(params = {}) {
   try {
     const { data } = await client.get('/events', { params });
     return data;
-  } catch {
+  } catch (err) {
+    console.error('[ÜSTAT API] getEvents:', err?.message ?? err);
     return { count: 0, events: [] };
   }
 }
@@ -160,7 +171,8 @@ export async function reactivateSymbols() {
   try {
     const { data } = await client.post('/reactivate');
     return data;
-  } catch {
+  } catch (err) {
+    console.error('[ÜSTAT API] reactivateSymbols:', err?.message ?? err);
     return { success: false, message: 'Bağlantı hatası.' };
   }
 }
@@ -174,7 +186,8 @@ export async function activateKillSwitch(user = 'operator') {
       user,
     });
     return data;
-  } catch {
+  } catch (err) {
+    console.error('[ÜSTAT API] activateKillSwitch:', err?.message ?? err);
     return { success: false, message: 'Bağlantı hatası.' };
   }
 }
@@ -186,7 +199,8 @@ export async function acknowledgeKillSwitch(user = 'operator') {
       user,
     });
     return data;
-  } catch {
+  } catch (err) {
+    console.error('[ÜSTAT API] acknowledgeKillSwitch:', err?.message ?? err);
     return { success: false, message: 'Bağlantı hatası.' };
   }
 }
@@ -197,7 +211,8 @@ export async function checkManualTrade(symbol, direction) {
   try {
     const { data } = await client.post('/manual-trade/check', { symbol, direction });
     return data;
-  } catch {
+  } catch (err) {
+    console.error('[ÜSTAT API] checkManualTrade:', err?.message ?? err);
     return { can_trade: false, reason: 'Bağlantı hatası.' };
   }
 }
@@ -206,7 +221,8 @@ export async function executeManualTrade(symbol, direction, lot) {
   try {
     const { data } = await client.post('/manual-trade/execute', { symbol, direction, lot });
     return data;
-  } catch {
+  } catch (err) {
+    console.error('[ÜSTAT API] executeManualTrade:', err?.message ?? err);
     return { success: false, message: 'Bağlantı hatası.' };
   }
 }

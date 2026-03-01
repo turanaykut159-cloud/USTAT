@@ -1,8 +1,8 @@
 /**
  * ÜSTAT v5.0 — Üst bilgi çubuğu.
  *
- * Sol:  ÜSTAT v5.0 logosu | Faz göstergesi (FAZ 0–3) | Bağlantı durumu (yeşil/kırmızı nokta)
- * Sağ:  Bakiye | Equity | Floating | Günlük K/Z (canlı, 2sn güncelleme) | Pin | Saat
+ * Sol:  ÜSTAT v5.0 logosu | Kill-switch (L1/L2/L3) | Bağlantı durumu (yeşil/kırmızı nokta)
+ * Sağ:  Bakiye | Equity | Floating | Günlük K/Z (MT5, 2sn) | Pin | Saat
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
@@ -43,6 +43,7 @@ export default function TopBar() {
   const [time, setTime] = useState(new Date());
   const [alwaysOnTop, setAlwaysOnTop] = useState(true);
   const [ksResetting, setKsResetting] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
 
   // ── Saat (1sn) ─────────────────────────────────────────────────
   useEffect(() => {
@@ -55,6 +56,7 @@ export default function TopBar() {
     const [s, a] = await Promise.all([getStatus(), getAccount()]);
     setStatus(s);
     setAccount(a);
+    setInitialLoading(false);
   }, []);
 
   useEffect(() => {
@@ -93,7 +95,7 @@ export default function TopBar() {
   const phase = status.phase || 'stopped';
   const phaseLabel = PHASE_LABELS[phase] || phase.toUpperCase();
   const killLevel = status.kill_switch_level || 0;
-  const fazLabel = `FAZ ${killLevel}`;
+  const fazLabel = killLevel === 0 ? '—' : `L${killLevel}`;
   const isConnected = status.mt5_connected;
   const floatingPnl = account.floating_pnl || 0;
   const dailyPnl = account.daily_pnl || 0;
@@ -104,6 +106,7 @@ export default function TopBar() {
       {/* ── SOL: Logo + Faz + Bağlantı ─────────────────────────── */}
       <div className="top-bar-left">
         <h1>ÜSTAT <span className="version">v5.0</span></h1>
+        {initialLoading && <span className="tb-loading">Yükleniyor...</span>}
 
         <span className={`tb-phase tb-phase--${phase}`}>
           {phaseLabel}
@@ -156,8 +159,8 @@ export default function TopBar() {
 
         <div className="tb-divider" />
 
-        <div className="tb-metric">
-          <span className="tb-metric-label">Günlük K/Z</span>
+        <div className="tb-metric" title="MT5 günlük P/L (gerçek zamanlı)">
+          <span className="tb-metric-label">Günlük K/Z (MT5)</span>
           <span className={`tb-metric-value ${dailyPnl >= 0 ? 'profit' : 'loss'}`}>
             {formatMoney(dailyPnl)}
           </span>

@@ -46,9 +46,9 @@ function elapsed(openTime) {
     if (totalMin < 60) return `${totalMin}dk`;
     const h = Math.floor(totalMin / 60);
     const m = totalMin % 60;
-    if (h < 24) return `${h}s ${m}dk`;
+    if (h < 24) return `${h}sa ${m}dk`;
     const d = Math.floor(h / 24);
-    return `${d}g ${h % 24}s`;
+    return `${d}g ${h % 24}sa`;
   } catch {
     return '—';
   }
@@ -73,6 +73,7 @@ export default function OpenPositions() {
   });
   const [regime, setRegime] = useState('TREND');
   const [tick, setTick] = useState(new Date()); // süre güncelleme tetikleyici
+  const [initialLoading, setInitialLoading] = useState(true);
   const wsRef = useRef(null);
 
   // ── REST fallback (5sn) ──────────────────────────────────────────
@@ -85,6 +86,7 @@ export default function OpenPositions() {
     setPositions(p.positions || []);
     setAccount(a);
     setRegime(s.regime || 'TREND');
+    setInitialLoading(false);
   }, []);
 
   useEffect(() => {
@@ -128,6 +130,14 @@ export default function OpenPositions() {
   const totalFloating = positions.reduce((s, p) => s + (p.pnl || 0), 0);
   const totalLot = positions.reduce((s, p) => s + (p.volume || 0), 0);
   const marginPct = marginUsagePct(account.margin, account.equity);
+
+  if (initialLoading) {
+    return (
+      <div className="open-positions">
+        <p className="op-loading">Yükleniyor...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="open-positions">

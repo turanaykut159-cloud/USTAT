@@ -32,10 +32,15 @@ async def trigger_killswitch(req: KillSwitchRequest):
     if action == "activate":
         try:
             baba.activate_kill_switch_l3_manual(user=req.user)
+            failed = getattr(baba, "_last_l3_failed_tickets", [])
+            msg = f"L3 kill-switch aktif — {req.user}"
+            if failed:
+                msg += f"; kapatılamayan pozisyonlar: {failed}"
             return KillSwitchResponse(
                 success=True,
                 kill_switch_level=3,
-                message=f"L3 kill-switch aktif — {req.user}",
+                message=msg,
+                failed_tickets=failed,
             )
         except Exception as e:
             return KillSwitchResponse(

@@ -44,7 +44,8 @@ logger = get_logger(__name__)
 # ═════════════════════════════════════════════════════════════════════
 
 CYCLE_INTERVAL: int = 10          # ana döngü aralığı (saniye)
-MAX_MT5_RECONNECT: int = 5        # MT5 kopma → reconnect deneme sayısı
+# MT5 kopma: heartbeat'ta tek reconnect (launch=False); çoklu deneme MT5Bridge içinde
+MAX_MT5_RECONNECT: int = 5        # Dokümantasyon / ileride kullanım için (heartbeat'ta kullanılmıyor)
 DB_ERROR_THRESHOLD: int = 3       # art arda DB hatası → sistem durdur
 SHUTDOWN_TIMEOUT: int = 30        # graceful shutdown bekleme (saniye)
 
@@ -332,9 +333,10 @@ class Engine:
         return self.mt5.connect(launch=True)
 
     def _heartbeat_mt5(self) -> bool:
-        """MT5 bağlantı kontrolü — kopmuşsa reconnect dener.
+        """MT5 bağlantı kontrolü — kopmuşsa bir kez reconnect dener.
 
-        MT5Bridge.heartbeat() zaten reconnect dener (launch=False).
+        Heartbeat başarısızsa yalnızca bir kez connect(launch=False) çağrılır.
+        Çoklu reconnect denemesi MT5Bridge içinde yapılır; burada tek deneme.
         MT5 kapalıysa açmaz, sadece çalışan MT5'e bağlanmaya çalışır.
 
         Returns:

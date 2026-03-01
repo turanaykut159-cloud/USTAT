@@ -2,7 +2,7 @@
  * ÜSTAT v5.0 — Ana Dashboard ekranı.
  *
  * Layout:
- *   Üst:    4 stat kartı (Toplam İşlem, Başarı Oranı, Net K/Z, Profit Factor)
+ *   Üst:    4 stat kartı (Günlük İşlem, Başarı Oranı, Net K/Z, Profit Factor)
  *   Orta:   Açık Pozisyonlar tablosu (tam genişlik)
  *   Alt:    Sol — Son 5 işlem tablosu, Sağ — Aktif rejim + Top 5 kontrat listesi
  *
@@ -93,6 +93,7 @@ export default function Dashboard() {
   });
   const [account, setAccount] = useState({ equity: 0 });
   const [livePositions, setLivePositions] = useState([]);
+  const [initialLoading, setInitialLoading] = useState(true);
 
   // WebSocket kaynak canlı veri
   const [liveEquity, setLiveEquity] = useState(null);
@@ -116,6 +117,7 @@ export default function Dashboard() {
     setStatus(st);
     setAccount(acc);
     setLivePositions(pos.positions || []);
+    setInitialLoading(false);
   }, []);
 
   useEffect(() => {
@@ -158,13 +160,23 @@ export default function Dashboard() {
   const regime = status.regime || 'TREND';
   const regimeMeta = REGIME_META[regime] || REGIME_META.TREND;
 
+  if (initialLoading) {
+    return (
+      <div className="dashboard">
+        <div className="dash-loading-wrap">
+          <p className="dash-loading">Yükleniyor...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="dashboard">
 
       {/* ═══ ÜST: 4 Stat Kartı ════════════════════════════════════ */}
       <div className="dash-stats-row">
         <StatCard
-          label="Toplam İşlem"
+          label="Günlük İşlem"
           sublabel="bugün"
           value={status.daily_trade_count || 0}
           total={stats.total_trades}
@@ -180,6 +192,7 @@ export default function Dashboard() {
         <StatCard
           label="Net Kâr/Zarar"
           value={formatMoney(stats.total_pnl)}
+          detail="Kapanan işlemler toplamı (DB)"
           icon="💰"
           color={stats.total_pnl >= 0 ? 'var(--profit)' : 'var(--loss)'}
         />

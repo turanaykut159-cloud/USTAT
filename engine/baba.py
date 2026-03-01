@@ -262,6 +262,8 @@ class Baba:
         self._kill_switch_level: int = KILL_SWITCH_NONE
         self._kill_switch_details: dict[str, Any] = {}
         self._killed_symbols: set[str] = set()
+        # L3 kapanışta kapatılamayan pozisyon ticket'ları (API'ye iletilir)
+        self._last_l3_failed_tickets: list[int] = []
 
     # ── public: ana cycle ────────────────────────────────────────────
     def run_cycle(self, pipeline=None) -> Regime:
@@ -763,7 +765,10 @@ class Baba:
         drawdown  = snap.get("drawdown", 0.0)
 
         if equity <= 0:
-            return True
+            logger.warning(
+                "Equity/bakiye geçersiz (<=0) — işlem durduruluyor"
+            )
+            return False
 
         daily_loss_pct = abs(daily_pnl / equity) if daily_pnl < 0 else 0.0
 
@@ -1362,9 +1367,9 @@ class Baba:
             action=f"LEVEL_{level}",
         )
 
-        # L3: tüm pozisyonları kapat
+        # L3: tüm pozisyonları kapat; başarısız ticket listesi saklanır
         if level == KILL_SWITCH_L3:
-            self._close_all_positions("KILL_SWITCH_L3")
+            self._last_l3_failed_tickets = self._close_all_positions("KILL_SWITCH_L3")
 
     def _clear_kill_switch(self, reason: str) -> None:
         """Kill-switch'i temizle.
@@ -1461,15 +1466,19 @@ class Baba:
         """
         return symbol in self._killed_symbols
 
-    def _close_all_positions(self, reason: str) -> None:
+    def _close_all_positions(self, reason: str) -> list[int]:
         """Tüm açık pozisyonları kapat (L3 için).
 
         Args:
             reason: Kapanış nedeni.
+
+        Returns:
+            Kapatılamayan pozisyon ticket listesi (boş ise hepsi kapatıldı).
         """
+        failed_tickets: list[int] = []
         if self._mt5 is None:
             logger.error("MT5 bağlantısı yok — pozisyonlar kapatılamadı")
-            return
+            return failed_tickets
 
         positions = self._mt5.get_positions()
         closed_count = 0
@@ -1481,6 +1490,7 @@ class Baba:
                     closed_count += 1
                     logger.info(f"Pozisyon kapatıldı: {ticket} ({reason})")
                 else:
+                    failed_tickets.append(ticket)
                     logger.error(f"Pozisyon kapatılamadı: {ticket}")
 
         if closed_count > 0:
@@ -1490,6 +1500,14 @@ class Baba:
                 severity="CRITICAL",
                 action="positions_closed",
             )
+        if failed_tickets:
+            self._db.insert_event(
+                event_type="KILL_SWITCH",
+                message=f"Kapatılamayan pozisyonlar: {failed_tickets}",
+                severity="CRITICAL",
+                action="positions_close_failed",
+            )
+        return failed_tickets
 
     def _evaluate_kill_switch_triggers(self) -> None:
         """Erken uyarılardan L1 tetikleyicilerini değerlendir."""
