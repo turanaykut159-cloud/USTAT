@@ -48,8 +48,12 @@ function shortDate(ts) {
   if (!ts) return '';
   try {
     const d = new Date(ts);
-    return `${d.getDate().toString().padStart(2, '0')}.${(d.getMonth() + 1).toString().padStart(2, '0')}`;
-  } catch { return ts.slice(5, 10); }
+    const dd = d.getDate().toString().padStart(2, '0');
+    const mm = (d.getMonth() + 1).toString().padStart(2, '0');
+    const hh = d.getHours().toString().padStart(2, '0');
+    const min = d.getMinutes().toString().padStart(2, '0');
+    return `${dd}.${mm} ${hh}:${min}`;
+  } catch { return ts.slice(5, 16); }
 }
 
 function monthLabel(key) {
@@ -81,6 +85,9 @@ function EquityTip({ active, payload }) {
     <div className="chart-tooltip">
       <span className="chart-tooltip-date">{shortDate(d.timestamp)}</span>
       <span>Equity: <b>{fmt(d.equity)}</b></span>
+      {d.balance > 0 && (
+        <span>Bakiye: <b>{fmt(d.balance)}</b></span>
+      )}
       {d.daily_pnl != null && (
         <span className={pnlCls(d.daily_pnl)}>Günlük: <b>{fmt(d.daily_pnl)}</b></span>
       )}
@@ -291,6 +298,16 @@ export default function Performance() {
         <div className="pf-chart-header">
           <h3>Equity Eğrisi</h3>
           <span className="pf-chart-sub">{eq.length} veri noktası</span>
+          <div className="pf-chart-legend">
+            <span className="pf-legend-item">
+              <span className="pf-legend-line" style={{ background: '#58a6ff' }} />
+              Equity
+            </span>
+            <span className="pf-legend-item">
+              <span className="pf-legend-line pf-legend-dashed" />
+              Bakiye
+            </span>
+          </div>
         </div>
         {eq.length > 0 ? (
           <ResponsiveContainer width="100%" height={260}>
@@ -300,11 +317,16 @@ export default function Performance() {
                   <stop offset="5%" stopColor="#58a6ff" stopOpacity={0.25} />
                   <stop offset="95%" stopColor="#58a6ff" stopOpacity={0} />
                 </linearGradient>
+                <linearGradient id="balGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#3fb950" stopOpacity={0.15} />
+                  <stop offset="95%" stopColor="#3fb950" stopOpacity={0} />
+                </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#30363d" />
               <XAxis dataKey="timestamp" tickFormatter={shortDate} stroke="#8b949e" fontSize={10} tickLine={false} />
               <YAxis stroke="#8b949e" fontSize={10} tickLine={false} tickFormatter={(v) => `${(v / 1000).toFixed(0)}K`} width={48} />
               <Tooltip content={<EquityTip />} />
+              <Area type="monotone" dataKey="balance" stroke="#3fb950" strokeWidth={1.5} strokeDasharray="4 4" fill="url(#balGrad)" dot={false} activeDot={{ r: 3 }} />
               <Area type="monotone" dataKey="equity" stroke="#58a6ff" strokeWidth={2} fill="url(#eqGradPf)" dot={false} activeDot={{ r: 3 }} />
             </AreaChart>
           </ResponsiveContainer>

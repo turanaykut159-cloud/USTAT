@@ -133,6 +133,11 @@ CREATE TABLE IF NOT EXISTS liquidity_classes (
     PRIMARY KEY (date, symbol)
 );
 
+CREATE TABLE IF NOT EXISTS app_state (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_bars_symbol        ON bars (symbol);
 CREATE INDEX IF NOT EXISTS idx_trades_symbol       ON trades (symbol);
 CREATE INDEX IF NOT EXISTS idx_trades_strategy     ON trades (strategy);
@@ -184,6 +189,13 @@ class Database:
             try:
                 self._conn.execute(
                     "ALTER TABLE trades ADD COLUMN mt5_position_id INTEGER"
+                )
+            except Exception:
+                pass  # kolon zaten varsa hata verir, sorun yok
+            # Madde 3.5: risk_snapshots tablosuna balance kolonu ekle
+            try:
+                self._conn.execute(
+                    "ALTER TABLE risk_snapshots ADD COLUMN balance REAL DEFAULT 0"
                 )
             except Exception:
                 pass  # kolon zaten varsa hata verir, sorun yok
@@ -287,6 +299,36 @@ class Database:
     def _now() -> str:
         """ISO-8601 şu-an damgası."""
         return datetime.now().isoformat(timespec="seconds")
+
+    # ═════════════════════════════════════════════════════════════════
+    #  APP STATE (key-value)
+    # ═════════════════════════════════════════════════════════════════
+
+    def get_state(self, key: str) -> str | None:
+        """app_state tablosundan değer oku.
+
+        Args:
+            key: Anahtar adı.
+
+        Returns:
+            Değer veya None.
+        """
+        row = self._fetch_one(
+            "SELECT value FROM app_state WHERE key=?", (key,),
+        )
+        return row["value"] if row else None
+
+    def set_state(self, key: str, value: str) -> None:
+        """app_state tablosuna değer yaz (upsert).
+
+        Args:
+            key: Anahtar adı.
+            value: Kaydedilecek değer.
+        """
+        self._execute(
+            "INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)",
+            (key, value),
+        )
 
     # ═════════════════════════════════════════════════════════════════
     #  BARS
@@ -653,13 +695,14 @@ class Database:
         self._execute(
             """INSERT OR REPLACE INTO risk_snapshots
                (timestamp, equity, floating_pnl, daily_pnl,
-                positions_json, regime, drawdown, margin_usage)
-               VALUES (?,?,?,?,?,?,?,?)""",
+                positions_json, regime, drawdown, margin_usage, balance)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
             (
                 snap.get("timestamp", self._now()),
                 snap["equity"], snap["floating_pnl"], snap["daily_pnl"],
                 positions or "[]",
                 snap.get("regime"), snap.get("drawdown"), snap.get("margin_usage"),
+                snap.get("balance", 0.0),
             ),
         )
         logger.debug(f"Risk snapshot kaydedildi: equity={snap['equity']:.2f}")
@@ -691,6 +734,53 @@ class Database:
             )
         for r in rows:
             r["positions_json"] = json.loads(r.get("positions_json") or "[]")
+            if not r.get("balance"):
+                r["balance"] = r.get("equity", 0.0) - r.get("floating_pnl", 0.0)
+        return rows
+
+    def get_daily_end_snapshots(
+        self,
+        since: str | None = None,
+        limit: int = 365,
+    ) -> list[dict[str, Any]]:
+        """Her işlem günü için son risk snapshot'ını döndür.
+
+        SQL GROUP BY ile gün bazlı gruplama yapar. Sharpe ratio hesabı
+        için yüzde getiri türetmede kullanılır (Madde 2.2).
+
+        SQLite özelliği: MAX(timestamp) ile birlikte bare column'lar
+        aynı satırdan gelir (documented extension to SQL).
+
+        Args:
+            since: Başlangıç timestamp (ISO-8601).
+            limit: Maksimum gün sayısı.
+
+        Returns:
+            Gün bazlı son snapshot listesi (kronolojik sırada).
+        """
+        if since:
+            rows = self._fetch_all(
+                """SELECT *, MAX(timestamp) AS _max_ts
+                   FROM risk_snapshots
+                   WHERE timestamp >= ?
+                   GROUP BY substr(timestamp, 1, 10)
+                   ORDER BY _max_ts ASC
+                   LIMIT ?""",
+                (since, limit),
+            )
+        else:
+            rows = self._fetch_all(
+                """SELECT *, MAX(timestamp) AS _max_ts
+                   FROM risk_snapshots
+                   GROUP BY substr(timestamp, 1, 10)
+                   ORDER BY _max_ts ASC
+                   LIMIT ?""",
+                (limit,),
+            )
+        for r in rows:
+            r["positions_json"] = json.loads(r.get("positions_json") or "[]")
+            if not r.get("balance"):
+                r["balance"] = r.get("equity", 0.0) - r.get("floating_pnl", 0.0)
         return rows
 
     def get_latest_risk_snapshot(self) -> dict[str, Any] | None:
@@ -704,6 +794,9 @@ class Database:
         )
         if row:
             row["positions_json"] = json.loads(row.get("positions_json") or "[]")
+            # Geriye uyumluluk: eski kayıtlarda balance=0/None ise hesapla
+            if not row.get("balance"):
+                row["balance"] = row.get("equity", 0.0) - row.get("floating_pnl", 0.0)
         return row
 
     def delete_risk_snapshots(self, before: str) -> int:

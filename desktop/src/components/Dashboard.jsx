@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.0 — Ana Dashboard ekranı.
+ * ÜSTAT v5.1 — Ana Dashboard ekranı.
  *
  * Layout:
  *   Üst:    4 stat kartı (Günlük İşlem, Başarı Oranı, Net K/Z, Profit Factor)
@@ -204,6 +204,28 @@ export default function Dashboard() {
         />
       </div>
 
+      {/* ═══ HESAP DURUMU (canlı) ═════════════════════════════════ */}
+      <div className="dash-account-strip">
+        <AccountItem
+          label="Bakiye"
+          value={formatMoney(liveEquity?.balance ?? account.balance)}
+        />
+        <AccountItem
+          label="Varlık"
+          value={formatMoney(liveEquity?.equity ?? account.equity)}
+        />
+        <AccountItem
+          label="Floating K/Z"
+          value={formatMoney(liveEquity?.floating_pnl ?? account.floating_pnl)}
+          cls={pnlClass(liveEquity?.floating_pnl ?? account.floating_pnl)}
+        />
+        <AccountItem
+          label="Günlük K/Z"
+          value={formatMoney(liveEquity?.daily_pnl ?? account.daily_pnl)}
+          cls={pnlClass(liveEquity?.daily_pnl ?? account.daily_pnl)}
+        />
+      </div>
+
       {/* ═══ ORTA: Açık Pozisyonlar ═════════════════════════════════ */}
       <div className="dash-positions-row">
         <div className="dash-card dash-card--full">
@@ -404,6 +426,18 @@ export default function Dashboard() {
 // ═══════════════════════════════════════════════════════════════════
 //  STAT CARD ALT BİLEŞENİ
 // ═══════════════════════════════════════════════════════════════════
+
+function AccountItem({ label, value, cls }) {
+  return (
+    <div className="dash-account-item">
+      <span className="dash-account-label">{label}</span>
+      <span className={`dash-account-value ${cls || ''}`}>
+        {value} <span className="dash-account-suffix">TRY</span>
+      </span>
+    </div>
+  );
+}
+
 
 function StatCard({ label, sublabel, value, total, detail, icon, color }) {
   return (

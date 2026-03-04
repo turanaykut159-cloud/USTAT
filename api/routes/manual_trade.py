@@ -46,8 +46,11 @@ async def execute_manual_trade(req: ManualTradeExecuteRequest):
     if direction not in ("BUY", "SELL"):
         return ManualTradeExecuteResponse(message="Geçersiz yön (BUY/SELL)")
 
-    if req.lot <= 0 or req.lot > 10:
-        return ManualTradeExecuteResponse(message="Geçersiz lot (0-10 arası)")
+    if req.lot <= 0:
+        return ManualTradeExecuteResponse(message="Lot 0'dan büyük olmalı")
 
-    result = ogul.open_manual_trade(req.symbol, direction, req.lot)
+    # Sembol bazlı lot limiti ogul.open_manual_trade() içinde kontrol edilir (Madde 2.5)
+    result = ogul.open_manual_trade(
+        req.symbol, direction, req.lot, sl=req.sl, tp=req.tp,
+    )
     return ManualTradeExecuteResponse(**result)

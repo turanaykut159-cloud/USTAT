@@ -1,7 +1,7 @@
-# USTAT v5.0 — GELISIM TARIHCESI
+# USTAT v5.1 — GELISIM TARIHCESI
 
 **Olusturulma Tarihi:** 2026-02-23
-**Son Guncelleme:** 2026-02-27
+**Son Guncelleme:** 2026-03-04
 **Amac:** Projenin kurulumundan itibaren tum degisikliklerin, eklemelerin ve cikartmalarin kaydi
 
 > Bu dosya her gelistirme sonrasi guncellenecek canli bir gelistirme gunlugudur.
@@ -447,6 +447,427 @@ Her kayit su bilgileri icerir:
 - Mean Reversion (tumu): -1,577 TRY, PF=1.01 — NÖTR
 - Sorunlu semboller: F_HALKB (PF=0.60), F_EKGYO (PF=0.58), F_OYAKC (PF=0.53), F_BRSAN (DD=13.2%)
 - Walk-forward: YAPILAMADI (3 ay vs 10 ay minimum gereksinim)
+
+---
+
+## #11 — Madde 2.2: Sharpe Ratio Yuzde Getiri Duzeltmesi
+
+| Bilgi | Deger |
+|-------|-------|
+| **Tarih** | 2026-03-03 |
+| **Baslik** | Sharpe Ratio TRY → yuzde getiri bazli duzeltme |
+
+**Neden:** Sharpe ratio hesabi TRY cinsinden mutlak gunluk PnL kullaniyordu. Farkli equity buyuklukleri icin ayni TRY PnL farkli yuzde getiri demek. Ornegin 100K TRY hesapta 100 TRY = %0.1, 10K TRY hesapta 100 TRY = %1 — ama eski kod ikisini ayni degerlendiriyordu.
+
+**Degisiklikler (2 dosya):**
+- `engine/database.py` — Yeni `get_daily_end_snapshots()` metodu: SQL GROUP BY ile gun bazli son snapshot'i dondurur (verimli, binlerce snapshot yerine gun basina 1 row)
+- `api/routes/performance.py` — Sharpe hesabi: snapshot'tan day_start_equity = equity - daily_pnl, yuzde getiri = daily_pnl / day_start_equity, Sharpe bu yuzde getiriler uzerinden hesaplanir
+
+**Eklenenler:**
+- `Database.get_daily_end_snapshots()` — gun bazli aggregate risk snapshot metodu
+- Yuzde getiri bazli Sharpe ratio hesabi (Madde 1.2 day_start_equity formuluyle tutarli)
+
+**Cikartilan:**
+- TRY bazli Sharpe hesabi (mutlak PnL / std, olcege duyarli yanlis hesap)
+
+---
+
+## #12 — Madde 2.3: Equity Egrisi Timestamp Duzeltmesi
+
+| Bilgi | Deger |
+|-------|-------|
+| **Tarih** | 2026-03-03 |
+| **Baslik** | Equity egrisi: limit=500 → gunluk snapshot + saat gosterimi |
+
+**Neden:** Equity egrisi icin `get_risk_snapshots(limit=500)` kullaniliyordu. 10sn'de 1 snapshot × 500 = sadece ~83 dakika veri. Tum noktalar ayni gunde → XAxis'te hep "03.03" tekrarliyordu. Ayrica saat bilgisi gosterilmiyordu.
+
+**Degisiklikler (2 dosya):**
+- `api/routes/performance.py` — Equity curve + max drawdown icin ayri `get_risk_snapshots(limit=500)` kaldirildi, yerine Sharpe icin zaten cekilen `daily_snapshots` (get_daily_end_snapshots) kullanildi. Bir DB call eliminate edildi. Kullanilmayan `datetime` import kaldirildi.
+- `desktop/src/components/Performance.jsx` — `shortDate()`: "DD.MM" → "DD.MM HH:mm" formatina guncellendi
+
+**Eklenenler:**
+- Equity egrisi 30+ gun kapsam (onceki: ~83 dakika)
+- XAxis'te anlamli tarih-saat gosterimi
+
+**Cikartilan:**
+- `get_risk_snapshots(limit=500)` cagirisi (gereksiz DB sorgusu)
+- `from datetime import datetime` (kullanilmiyordu)
+
+---
+
+## #13 — Madde 2.4: WebSocket MT5 Cache Mekanizmasi
+
+| Bilgi | Deger |
+|-------|-------|
+| **Tarih** | 2026-03-03 |
+| **Baslik** | WebSocket: dogrudan MT5 erisimi → DataPipeline cache |
+
+**Neden:** WebSocket her 2 saniyede dogrudan MT5'e 3 senkron cagri yapiyordu (get_account_info, get_positions, get_tick × 5). Engine cycle'i da ayni cagrilari yapiyordu. MT5 Python kutuphanesi thread-safe degil → cakisma riski.
+
+**Degisiklikler (2 dosya):**
+- `engine/data_pipeline.py` — `latest_account`, `latest_positions`, `_cache_time` cache alanlari eklendi. `is_cache_stale(max_age_seconds=15)` metodu eklendi. `update_risk_snapshot()` icinde MT5'ten alinan account+positions cache'e yaziliyor.
+- `api/routes/live.py` — `_send_all_updates()`: MT5'e dogrudan erisim kaldirildi, `pipeline.latest_account`, `pipeline.latest_positions`, `pipeline.latest_ticks` cache'inden okunuyor. `get_mt5` import kaldirildi, `get_pipeline` eklendi. 15sn stale kontrolu eklendi.
+
+**Eklenenler:**
+- DataPipeline cache (account, positions, cache_time)
+- `is_cache_stale()` metodu (15sn esik)
+- Thread-safe MT5 erisim mimari (tek erisim noktasi: DataPipeline)
+
+**Cikartilan:**
+- WebSocket'ten dogrudan MT5 erisimi (get_account_info, get_positions, get_tick)
+- `get_mt5` import (live.py'de artik gerekli degil)
+
+---
+
+## #14 — Madde 2.5: Manuel Islem Lot Validasyonu
+
+| Bilgi | Deger |
+|-------|-------|
+| **Tarih** | 2026-03-03 |
+| **Baslik** | Manuel islem: sabit 10 lot → sembol bazli volume_max |
+
+**Neden:** API'de sabit `req.lot > 10` kontrolu vardi. VIOP'ta her sembolun `volume_max` degeri farkli. Sabit limit gercek MT5 limitleriyle uyusmayabilir.
+
+**Degisiklikler (3 dosya):**
+- `api/schemas.py` — `ManualTradeCheckResponse`'a `max_lot: float = 0.0` alani eklendi
+- `engine/ogul.py` — `check_manual_trade()`: MT5 `get_symbol_info()` ile `volume_max` alinip response'a yaziliyor. `open_manual_trade()`: Sabit `MAX_LOT_PER_CONTRACT` yerine sembol bazli `volume_min/volume_max/volume_step` kontrolu ve yuvarlama eklendi
+- `api/routes/manual_trade.py` — Sabit `req.lot > 10` kontrolu kaldirildi, lot validasyonu ogul.py'ye devredildi
+
+**Eklenenler:**
+- Sembol bazli lot limiti (MT5 SymbolInfo.volume_max)
+- Volume_step yuvarlama (lot miktari adim buyuklugune uygun hale getirilir)
+- `max_lot` alani check response'ta (frontend'e gonder)
+
+**Cikartilan:**
+- Sabit `req.lot > 10` kontrolu (API katmani)
+
+---
+
+## #15 — Madde 2.6: Config Yoksa Uyari Mekanizmasi
+
+| Bilgi | Deger |
+|-------|-------|
+| **Tarih** | 2026-03-03 |
+| **Baslik** | Config dosyasi yoksa CRITICAL log + event |
+
+**Neden:** Config dosyasi yoksa sessizce bos dict ile devam ediyordu. Kullanici durumdan haberdar olmuyordu.
+
+**Degisiklikler (2 dosya):**
+- `engine/config.py` — `_is_loaded` flag eklendi, `is_loaded` property eklendi. Config yoksa WARNING → CRITICAL seviyesine yukseltildi.
+- `engine/main.py` — Engine baslarken `config.is_loaded` kontrol, yoksa CONFIG_MISSING event'i loglanir.
+
+**Eklenenler:**
+- `Config._is_loaded` flag + `Config.is_loaded` property
+- CRITICAL log seviyesi (config bulunamadiginda)
+- CONFIG_MISSING event (engine baslatma sirasinda)
+
+**Cikartilan:**
+- WARNING log seviyesi (config yoksa)
+
+---
+
+## #16 — Madde 2.7: VIOP Vade Tarihleri Dogrulama
+
+| Bilgi | Deger |
+|-------|-------|
+| **Tarih** | 2026-03-03 |
+| **Baslik** | Engine baslarken VIOP vade tarihlerini is gunu olarak dogrula |
+
+**Neden:** VIOP_EXPIRY_DATES listesindeki tarihler hafta sonuna veya resmi tatile denk gelebilir. Bu durumda vade gecisi/rollover mantigi bozulabilir. Engine baslarken erken uyari verilmeli.
+
+**Degisiklikler (2 dosya):**
+- `engine/baba.py` — `validate_expiry_dates()` fonksiyonu eklendi. VIOP_EXPIRY_DATES'teki tarihleri hafta sonu ve ALL_HOLIDAYS'e karsi kontrol eder.
+- `engine/main.py` — `start()` metodunda config kontrolundan sonra, MT5 baglantisindan once `validate_expiry_dates()` cagrisi eklendi. Sorun varsa WARNING event loglanir.
+
+**Eklenenler:**
+- `validate_expiry_dates()` fonksiyonu (engine/baba.py)
+- EXPIRY_DATE_WARNING event tipi (engine baslatma sirasinda)
+- Basarili dogrulama icin INFO log mesaji
+
+**Cikartilan:**
+- Yok
+
+**Test:** 381 passed, 28 failed (pre-existing). Regresyon yok.
+**Tespit:** 2025-03-31 tatil gunune denk geliyor (Ramazan Bayrami).
+
+---
+
+## #17 — Madde 3.1: Tekrarlanan Fonksiyonlari Birlestirme
+
+| Bilgi | Deger |
+|-------|-------|
+| **Tarih** | 2026-03-03 |
+| **Baslik** | _last_valid, _last_n_valid, _nanmean fonksiyonlarini tek noktada birlestirme |
+
+**Neden:** `_last_valid()` 3 dosyada (baba, ogul, ustat) birebir ayni tanimliydi. `_nanmean()` baba'da, `_last_n_valid()` ogul'da. Tekrar = bakim zorluklari.
+
+**Degisiklikler (7 dosya):**
+- `engine/utils/helpers.py` — YENI: `last_valid`, `last_n_valid`, `nanmean` fonksiyonlari
+- `engine/baba.py` — Import eklendi, yerel `_last_valid` + `_nanmean` tanimlari silindi
+- `engine/ogul.py` — Import eklendi, yerel `_last_valid` + `_last_n_valid` tanimlari silindi
+- `engine/ustat.py` — Import eklendi, yerel `_last_valid` tanimi silindi
+- `tests/test_baba.py` — Import kaynagi `engine.utils.helpers` olarak guncellendi
+- `tests/test_ogul.py` — Import kaynagi `engine.utils.helpers` olarak guncellendi
+- `tests/test_ustat.py` — Import kaynagi `engine.utils.helpers` olarak guncellendi
+
+**Eklenenler:**
+- `engine/utils/helpers.py` (yeni dosya, 3 fonksiyon)
+
+**Cikartilan:**
+- 3 dosyadan toplam 5 yerel fonksiyon tanimi (baba: 2, ogul: 2, ustat: 1)
+
+**Test:** 454 passed, 30 failed (28 + 2 pre-existing test_ustat). Regresyon yok.
+
+---
+
+## #18 — Madde 3.2+3.3: Fake Analiz Optimizasyonu + Spread Sabiti
+
+| Bilgi | Deger |
+|-------|-------|
+| **Tarih** | 2026-03-03 |
+| **Baslik** | Fake sinyal analizi frekans azaltma + SPREAD_HISTORY_LEN modul sabiti |
+
+**Neden:** Fake sinyal analizi her 10 sn calisiyordu (gereksiz yuk). _SPREAD_HISTORY_LEN instance degiskeni olmamali, modul sabiti olmali.
+
+**Degisiklikler (1 dosya):**
+- `engine/baba.py` — `_cycle_count` eklendi, fake analiz her 3 cycle'da bir (30 sn). `_SPREAD_HISTORY_LEN` instance degiskeni kaldirildi, `SPREAD_HISTORY_LEN` modul sabiti eklendi.
+
+**Test:** 381 passed, 28 failed (pre-existing). Regresyon yok.
+
+---
+
+## #19 — Madde 3.4: Error Handling Standardizasyonu
+
+| Bilgi | Deger |
+|-------|-------|
+| **Tarih** | 2026-03-03 |
+| **Baslik** | MT5 cagrilarinda try/except sarmalama |
+
+**Neden:** ogul.py ve baba.py'de toplam ~21 korumasiz MT5 cagrisi vardi. Herhangi bir MT5 hatasi tum engine'i dusuruyordu.
+
+**Degisiklikler (2 dosya):**
+- `engine/ogul.py` — 14+ MT5 cagrisi try/except ile sarildi: cancel_order, close_position, modify_position, get_positions, get_tick. Hatalar loglanir, islem akisi korunur.
+- `engine/baba.py` — 7 MT5 cagrisi try/except ile sarildi: get_positions (fake+close_all), close_position (fake+L3), get_tick (USDTRY).
+
+**Eklenenler:**
+- Tum korumasiz MT5 cagrilarina try/except + logger.error
+
+**Cikartilan:**
+- Yok (mevcut davranis korundu)
+
+**Test:** 381 passed, 28 failed (pre-existing). Regresyon yok.
+
+---
+
+## #20 — Madde 3.5: Database Snapshot Balance Alani
+
+| Bilgi | Deger |
+|-------|-------|
+| **Tarih** | 2026-03-03 |
+| **Baslik** | risk_snapshots tablosuna balance kolonu eklenmesi |
+
+**Neden:** Floating loss hesabinda balance lazim ancak tabloda balance alani yoktu. equity - floating_pnl ile hesap yapiliyordu.
+
+**Degisiklikler (2 dosya):**
+- `engine/database.py` — ALTER TABLE ile balance kolonu eklendi (DEFAULT 0). insert_risk_snapshot'a balance parametresi eklendi. Uc okuma metoduna geriye uyumluluk fallback eklendi.
+- `engine/data_pipeline.py` — update_risk_snapshot snapshot'ina `account.balance` eklendi.
+
+**Test:** 381 passed, 28 failed (pre-existing). Regresyon yok.
+
+---
+
+## #21 — Madde 3.6: Kapsamli Test Suite
+
+| Bilgi | Deger |
+|-------|-------|
+| **Tarih** | 2026-03-03 |
+| **Baslik** | Risk hesaplama, consecutive loss, cooldown, manuel islem ve peak equity testleri |
+
+**Neden:** Mevcut test suite'i risk fonksiyonlarinin sinir degerlerini, cooldown mekanizmasini, manuel islem kontrol akisini ve peak equity kaliciliğini yeterince test etmiyordu.
+
+**Degisiklikler (4 yeni dosya, +243 satir):**
+- `tests/test_risk_calculations.py` (YENI) — _check_hard_drawdown (soft/hard esik, sifir drawdown, DB'den okuma), _check_floating_loss (pozitif/sifir/esik/balance-sifir), _check_weekly_loss (halved flag).
+- `tests/test_consecutive_loss.py` (YENI) — _update_consecutive_losses (sifir trade, 3 ust uste kayip, kazanc kirma), cooldown (baslat, sure ici, sure dolma, sifir sayac), cooldown sonrasi sayac (Madde 1.6 dogrulamasi).
+- `tests/test_manual_trade.py` (YENI) — check_manual_trade (donus tipi, gecersiz sembol, netting), SL/TP formul dogrulama (BUY/SELL icin 1.5xATR ve 2.0xATR), lot validasyonu (min/max/sifir).
+- `tests/test_peak_equity.py` (YENI) — peak equity ilk ayar, yukari guncelleme, asagi koruma, drawdown hesabi, DB'de kalicilik, sifir equity, negatif olmama, hassasiyet.
+
+**Eklenenler:**
+- 38 yeni test (12 risk hesaplama + 8 consecutive/cooldown + 10 manuel islem + 8 peak equity)
+- Toplam test sayisi: 613 passed (onceki: ~575)
+
+**Cikartilan:**
+- Yok
+
+**Test:** 613 passed, 31 failed (pre-existing), 8 errors (MT5 baglanti). 38/38 yeni test PASSED. Regresyon yok.
+
+---
+
+## #22 — Masaustu Uygulamasi Balance Entegrasyonu
+
+| Bilgi | Deger |
+|-------|-------|
+| **Tarih** | 2026-03-03 |
+| **Baslik** | Engine balance verisinin API ve frontend'e yansitilmasi |
+
+**Neden:** Engine tarafinda risk_snapshots'a eklenen balance kolonu API ve frontend'e ulasmiyordu. Kullanici bakiye, equity ve floating K/Z verilerini canli goremiyordu.
+
+**Degisiklikler (7 dosya):**
+- `api/schemas.py` — EquityPoint ve RiskResponse modellerine `balance: float = 0.0` eklendi.
+- `api/routes/performance.py` — Equity curve dongusunde balance okunuyor ve EquityPoint'e aktariliyor.
+- `api/routes/risk.py` — Risk snapshot'tan balance degeri RiskResponse'a eklendi.
+- `desktop/src/components/Dashboard.jsx` — Stat kartlari ile pozisyon tablosu arasina "Hesap Durumu" seridi eklendi (Bakiye, Varlik, Floating K/Z, Gunluk K/Z). WebSocket canli veri + REST fallback.
+- `desktop/src/components/RiskManagement.jsx` — "Anlik Durum" bolumune Bakiye karti eklendi (4. kart).
+- `desktop/src/components/Performance.jsx` — Equity grafikine yesil kesikli balance cizgisi + gradient + legend + tooltip guncellendi.
+- `desktop/src/styles/theme.css` — .dash-account-strip ve .pf-chart-legend stilleri eklendi.
+
+**Eklenenler:**
+- Dashboard canli hesap durumu seridi (4 metrik, WebSocket 2sn guncelleme)
+- Risk sayfasinda Bakiye karti
+- Performans equity grafikinde balance cizgisi (yesil, kesikli)
+- Chart legend (Equity=mavi, Bakiye=yesil)
+
+**Cikartilan:**
+- Yok (mevcut davranis korundu)
+
+**Test:** Backend: 252 passed, 1 failed (pre-existing). Frontend: Vite build basarili (0 hata). Regresyon yok.
+
+---
+
+## #23 — Peak Equity Baseline Validasyonu (Drawdown Fix)
+
+| Bilgi | Deger |
+|-------|-------|
+| **Tarih** | 2026-03-03 |
+| **Baslik** | _calculate_drawdown RISK_BASELINE_DATE filtresi eksikligi duzeltmesi |
+
+**Neden:** peak_equity DB'de 200.000 TRY olarak kayitliydi ancak hicbir gercek snapshot'ta bu deger yoktu (test/gelistirme doneminden kalma). Gercek equity ~14.000 TRY oldugu icin drawdown %93 olarak hesaplaniyor ve Kill-Switch L2 tetikleniyordu. _calculate_drawdown, RISK_BASELINE_DATE filtresi kullanmayan TEK fonksiyondu.
+
+**Kok neden:** Tum risk fonksiyonlari (weekly loss, monthly loss, consecutive losses, trades, performance) RISK_BASELINE_DATE filtresini kullaniyor ancak _calculate_drawdown() kullaNMIyordu. Peak equity DB state tablosunda kalici saklandigi icin eski degerler hic temizlenmiyordu.
+
+**Degisiklikler (1 dosya + DB temizlik):**
+- `engine/data_pipeline.py` — `_validate_peak_equity()` metodu eklendi. DataPipeline.__init__ icinde cagrilir. RISK_BASELINE_DATE sonrasi max equity ile stored peak'i karsilastirir, 1.5x asimda sifirlar.
+- DB temizlik: 2 anomali snapshot silindi (balance=0, equity=100K/90K — test verisi). peak_equity 200.000 → 14.127,53 olarak duzeltildi.
+
+**Eklenenler:**
+- `_validate_peak_equity()` — Engine baslatmada peak equity tutarliligi kontrolu
+
+**Cikartilan:**
+- DB'den 2 test snapshot (balance=0, equity 100K ve 90K)
+
+**Etki:** Drawdown %93 → %0.8. Kill-Switch L2 engine yeniden baslatildiginda kalkar. Islem izni acilir.
+
+**Test:** 234 passed, 1 failed (pre-existing). Regresyon yok.
+
+---
+
+## #19 — Dokuman-Kod Karsilastirma Raporu (v13.0)
+
+| Bilgi | Deger |
+|-------|-------|
+| **Tarih** | 2026-03-04 |
+| **Baslik** | BABA_OGUL_Trading_Sistemi_v13.0.docx ile mevcut kod karsilastirmasi |
+
+**Neden:** Canli teste gecis oncesi dokuman ile kod arasindaki uyumsuzluklarin tespiti. Dogrulanmis parametrelerin kayit altina alinmasi.
+
+**Degisiklikler (1 dosya):**
+- `USTAT-PROJE GELISTIRME/PROJE GELISTIRME/KARSILASTIRMA_RAPORU.md` — 22 farklilik tespiti (7 kritik, 6 yuksek, 5 orta, 4 dusuk)
+
+**Temel Bulgular:**
+- Kontrat havuzu uyumsuz: Dokuman 8, kod 15
+- Kill-switch yapisi uyumsuz: Dokuman 5 katman (K0-K4), kod 3 seviye (L1-L3) + OLAY rejimi
+- Risk parametreleri farkli: Gunluk kayip %1.8 vs %2, hard drawdown %12 vs %15, cooldown 2h vs 4h
+- P0 aciklarin 4/5'i kodda tam kapatilmamis (SL/TP retry yok, hedge yok, startup recover yok, takvim hardcoded)
+- Kod fazlaliklari (fake sinyal, korelasyon, manuel islem) guvenligi artirir — silinmemeli, belgelenmeli
+
+**Eklenenler:**
+- `KARSILASTIRMA_RAPORU.md` — 10 bolumlu profesyonel analiz raporu
+
+**Cikartilan:**
+- Yok
+
+---
+
+## #20 — Ogul Sinyal Motoru Gercek Piyasa Analizi
+
+| Bilgi | Deger |
+|-------|-------|
+| **Tarih** | 2026-03-04 |
+| **Baslik** | Ogul sinyal motorunun VIOP perspektifinden parametrik analizi + guclendirme yol haritasi |
+
+**Neden:** Canli teste gecis oncesi sinyal motorunun gercek piyasa kosullarinda performansini degerlendirmek. Her indikator ve parametre VIOP pay vadeli seans yapisina gore sorgulanmistir.
+
+**Degisiklikler (1 dosya):**
+- `docs/2026-03-04_ogul_sinyal_analizi.md` — 7 bolumlu analiz raporu
+
+**Temel Bulgular:**
+- EMA(20)/EMA(50) M15'te fazla yavas — EMA(9)/EMA(21) veya adaptif MA onerilir
+- ADX(14) cift yumusatma gecikmesi — Hurst Exponent alternatifi onerilir
+- RSI 30/70 esikleri 20/80'e sikilastirilmali
+- Keltner Channel eklenmesi en yuksek degerli tamamlayici
+- 5 kod zayifligi tespit edildi (breakout strength likidite, trailing stop, MR trailing, bias-lot, seans zamanlama)
+- 3 fazli guclendirme yol haritasi ciziildi (A: optimizasyon, B: yeni indikatorler, C: mimari)
+
+**Eklenenler:**
+- `docs/2026-03-04_ogul_sinyal_analizi.md`
+
+**Cikartilan:**
+- Yok
+
+---
+
+## #21 — USTAT v5.1: Sinyal Motoru + Risk Guclendirilmesi (Faz 4)
+
+| Bilgi | Deger |
+|-------|-------|
+| **Tarih** | 2026-03-04 12:00:00 +03:00 |
+| **Commit** | (beklemede) |
+| **Baslik** | USTAT v5.0 → v5.1: 22 iyilestirme (3 P0 + 6 indikator + 8 sinyal/mimari + 3 risk + 2 config) |
+
+**Neden:** Karsilastirma raporu (v13.0) ve sinyal analiz raporundaki eksiklikler dogrultusunda:
+- P0-1 SL/TP retry yok (pozisyon korumasiz)
+- P0-2 L3 close retry yok
+- P0-3 startup recovery yetersiz
+- RSI 30/70 VİOP M15 icin cok genis
+- Breakout strength/trailing likidite sinifini kullanmiyor
+- Bias hesaplaniyor ama lot'a yansimyor
+- MR'da trailing stop yok
+- Yeni indikatorler eksik (KC, squeeze, W%R, NATR, ADX slope, Hurst)
+- Risk parametreleri tasarim dokümanından sapma
+
+**Degisiklikler (13 dosya):**
+- `engine/utils/indicators.py` — +6 yeni indikator (KC, squeeze, W%R, NATR, ADX slope, Hurst)
+- `engine/mt5_bridge.py` — P0-1: SL/TP 3-retry + force close
+- `engine/baba.py` — P0-2: L3 3-retry, HARD_DD 0.15→0.12, graduated lot
+- `engine/ogul.py` — RSI 20/80, breakout fix, bias-lot, MR breakeven, seans filtresi, squeeze, W%R, P0-3
+- `engine/models/risk.py` — daily_loss 0.018, hard_dd 0.12
+- `engine/__init__.py` — VERSION = "5.1.0"
+- `config/default.json` — v5.1 yapi (yeni bolumler + parametreler)
+- `api/server.py` — versiyon 5.1
+- `api/schemas.py` — version alani, risk limitleri, graduated_lot_mult
+- `desktop/src/components/Dashboard.jsx` — versiyon 5.1
+- `tests/test_indicators.py` — +22 yeni test
+- `tests/test_integration.py` — bias-lot mock duzeltme
+- `tests/test_risk_calculations.py` — hard_dd 0.12 uyumu
+
+**Eklenenler:**
+- 6 yeni indikator fonksiyonu
+- SL/TP retry mekanizmasi (3 deneme + force close)
+- L3 close retry mekanizmasi (3 deneme)
+- Graduated lot schedule (1 kayip: x0.75, 2 kayip: x0.50, 3+: cooldown)
+- Bias-lot entegrasyonu
+- MR breakeven trailing
+- Seans zamanlama filtresi
+- BB/KC squeeze breakout bonusu
+- Williams %R cift onay (MR)
+- 22 yeni test
+- `engine/__init__.py` VERSION
+- `docs/CHANGELOG_FAZ4.md`
+- `docs/2026-03-04_v5_1_gelistirme_plani.md`
+
+**Cikartilan:**
+- Yok (tum degisiklikler ekleme/guncelleme)
+
+**Test Sonucu:** 665 passed, 0 failed, 1 skipped, 1 warning
 
 ---
 

@@ -25,6 +25,7 @@ class Config:
     def __init__(self, config_path: str | None = None):
         self._path = Path(config_path) if config_path else CONFIG_PATH
         self._data: dict = {}
+        self._is_loaded: bool = False
         self._load()
 
     def _load(self) -> None:
@@ -33,6 +34,7 @@ class Config:
             try:
                 with open(self._path, "r", encoding="utf-8") as f:
                     self._data = json.load(f)
+                self._is_loaded = True
                 logger.info(f"Konfigürasyon yüklendi: {self._path}")
                 self._log_summary()
             except (json.JSONDecodeError, OSError) as exc:
@@ -41,7 +43,10 @@ class Config:
                 )
                 self._data = {}
         else:
-            logger.warning(f"Konfigürasyon dosyası bulunamadı: {self._path}")
+            logger.critical(
+                f"Konfigürasyon dosyası bulunamadı: {self._path} — "
+                f"Varsayılan değerlerle çalışılacak!"
+            )
 
     def _log_summary(self) -> None:
         """Yüklenen config bölümlerini logla."""
@@ -58,6 +63,11 @@ class Config:
         liq = self._data.get("liquidity_overrides")
         if liq:
             logger.info(f"  liquidity_overrides: {liq}")
+
+    @property
+    def is_loaded(self) -> bool:
+        """Config dosyası başarıyla yüklendi mi?"""
+        return self._is_loaded
 
     def get(self, key: str, default=None):
         """Konfigürasyon değeri getir.

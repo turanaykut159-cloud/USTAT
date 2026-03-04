@@ -58,6 +58,7 @@ from engine.models.risk import (
     FakeLayerResult,
 )
 from engine.mt5_bridge import MT5Bridge, WATCHED_SYMBOLS
+from engine.utils.helpers import last_valid, nanmean
 from engine.utils.indicators import (
     adx as calc_adx,
     atr as calc_atr,
@@ -106,7 +107,7 @@ ATR_LOOKBACK: int  = 100
 # ── Çok katmanlı kayıp limit sabitleri ───────────────────────────────
 MAX_WEEKLY_LOSS_PCT:     float = 0.04
 MAX_MONTHLY_LOSS_PCT:    float = 0.07
-HARD_DRAWDOWN_PCT:       float = 0.15
+HARD_DRAWDOWN_PCT:       float = 0.12
 CONSECUTIVE_LOSS_LIMIT:  int   = 3
 COOLDOWN_HOURS:          int   = 4
 MAX_FLOATING_LOSS_PCT:   float = 0.015
@@ -137,6 +138,9 @@ FAKE_VOLUME_LOOKBACK:  int   = 20      # hacim ortalaması bar sayısı
 FAKE_SPREAD_MULT: dict[str, float] = {"A": 2.5, "B": 3.5, "C": 5.0}
 FAKE_MTF_EMA_PERIOD:   int   = 9       # multi-TF EMA periyodu
 FAKE_MTF_AGREEMENT_MIN: int  = 2       # en az 2/3 TF uyumu gerekli
+
+# ── Spread / USDTRY geçmiş buffer uzunluğu ──────────────────────────
+SPREAD_HISTORY_LEN: int = 30            # son 30 veri noktası (Madde 3.3)
 FAKE_RSI_OVERBOUGHT:   float = 80.0
 FAKE_RSI_OVERSOLD:     float = 20.0
 FAKE_RSI_PERIOD:       int   = 14
@@ -216,6 +220,28 @@ VIOP_EXPIRY_DATES: set[date] = {
 }
 
 
+def validate_expiry_dates() -> list[str]:
+    """VİOP vade tarihlerinin iş günü olduğunu doğrula (Madde 2.7).
+
+    Hafta sonu (Cumartesi/Pazar) veya tatile denk gelen tarihleri tespit eder.
+    Engine başlangıcında çağrılır.
+
+    Returns:
+        Sorunlu tarihlerin açıklama listesi. Boş liste = tümü geçerli.
+    """
+    from engine.utils.time_utils import ALL_HOLIDAYS
+
+    issues: list[str] = []
+    for expiry in sorted(VIOP_EXPIRY_DATES):
+        weekday = expiry.weekday()  # 0=Pazartesi, 5=Cumartesi, 6=Pazar
+        if weekday >= 5:
+            day_name = "Cumartesi" if weekday == 5 else "Pazar"
+            issues.append(f"{expiry.isoformat()} - {day_name} (hafta sonu)")
+        elif expiry in ALL_HOLIDAYS:
+            issues.append(f"{expiry.isoformat()} - Tatil gunu")
+    return issues
+
+
 # ═════════════════════════════════════════════════════════════════════
 #  BABA
 # ═════════════════════════════════════════════════════════════════════
@@ -240,8 +266,6 @@ class Baba:
         self._spread_history: dict[str, list[float]] = {
             s: [] for s in WATCHED_SYMBOLS
         }
-        self._SPREAD_HISTORY_LEN: int = 30
-
         # USD/TRY ring buffer
         self._usdtry_history: list[float] = []
 
@@ -256,7 +280,11 @@ class Baba:
             "consecutive_losses": 0,
             "last_trade_count": 0,
             "cooldown_until": None,
+            "last_cooldown_end": None,
         }
+
+        # ── Cycle sayacı (fake analiz frekansı için) ──────────────────
+        self._cycle_count: int = 0
 
         # ── Kill-switch durumu ───────────────────────────────────────
         self._kill_switch_level: int = KILL_SWITCH_NONE
@@ -283,6 +311,8 @@ class Baba:
         Returns:
             Algılanan Regime.
         """
+        self._cycle_count += 1
+
         if pipeline:
             self._update_spread_history(pipeline)
             self._update_usdtry_history()
@@ -292,7 +322,9 @@ class Baba:
 
         self.active_warnings = self.check_early_warnings()
 
-        self.analyze_fake_signals()
+        # Fake sinyal analizi: her 3 cycle'da bir (30 sn) — Madde 3.2
+        if self._cycle_count % 3 == 0:
+            self.analyze_fake_signals()
 
         self._check_period_resets()
         self._evaluate_kill_switch_triggers()
@@ -399,12 +431,12 @@ class Baba:
         ema_slow = ema(close, EMA_SLOW)
         bb_u, _, bb_l = bollinger_bands(close, BB_PERIOD, BB_STD)
 
-        adx_val  = _last_valid(adx_arr)
-        atr_val  = _last_valid(atr_arr)
-        atr_mean = _nanmean(atr_arr)
+        adx_val  = last_valid(adx_arr)
+        atr_val  = last_valid(atr_arr)
+        atr_mean = nanmean(atr_arr)
 
-        bb_width      = (_last_valid(bb_u) or 0) - (_last_valid(bb_l) or 0)
-        bb_width_mean = _nanmean(bb_u - bb_l)
+        bb_width      = (last_valid(bb_u) or 0) - (last_valid(bb_l) or 0)
+        bb_width_mean = nanmean(bb_u - bb_l)
 
         if adx_val is None or atr_val is None or atr_mean == 0:
             return None
@@ -735,6 +767,25 @@ class Baba:
         if lot > risk_params.max_position_size:
             lot = risk_params.max_position_size
 
+        # Graduated lot schedule — kademeli kayıp azaltma (R3)
+        # 1 kayıp: lot*0.75, 2 kayıp: lot*0.5, 3+ kayıp: cooldown (lot=0)
+        consec = self._risk_state.get("consecutive_losses", 0)
+        if consec >= risk_params.consecutive_loss_limit:
+            logger.info(
+                f"Graduated lot: {consec} üst üste kayıp ≥ limit "
+                f"({risk_params.consecutive_loss_limit}) → lot=0"
+            )
+            return 0.0
+        elif consec == 2:
+            lot = lot * 0.5
+            logger.debug(f"Graduated lot: 2 üst üste kayıp → lot*0.5={lot:.2f}")
+        elif consec == 1:
+            lot = lot * 0.75
+            logger.debug(f"Graduated lot: 1 kayıp → lot*0.75={lot:.2f}")
+
+        if vol_step > 0:
+            lot = math.floor(lot / vol_step) * vol_step
+
         # Haftalık yarılama
         if self._risk_state.get("weekly_loss_halved"):
             lot = math.floor(lot * 0.5 / vol_step) * vol_step if vol_step > 0 else lot * 0.5
@@ -743,20 +794,23 @@ class Baba:
         logger.debug(
             f"Pozisyon [{symbol}]: {lot} lot "
             f"(eq={account_equity:.0f}, ATR={atr_value:.4f}, "
-            f"mult={mult}, rejim={self.current_regime.regime_type.value})"
+            f"mult={mult}, consec_loss={consec}, "
+            f"rejim={self.current_regime.regime_type.value})"
         )
         return round(lot, 2)
 
-    def check_drawdown_limits(self, risk_params: RiskParams) -> bool:
+    def check_drawdown_limits(self, risk_params: RiskParams, snap: dict | None = None) -> bool:
         """Günlük ve toplam drawdown limitlerini kontrol et.
 
         Args:
             risk_params: Risk parametreleri.
+            snap: Önceden alınmış risk snapshot'ı. None ise DB'den çekilir.
 
         Returns:
             True → trading devam, False → durdur.
         """
-        snap = self._db.get_latest_risk_snapshot()
+        if snap is None:
+            snap = self._db.get_latest_risk_snapshot()
         if not snap:
             return True
 
@@ -770,7 +824,13 @@ class Baba:
             )
             return False
 
-        daily_loss_pct = abs(daily_pnl / equity) if daily_pnl < 0 else 0.0
+        # Madde 1.2: Gün başı equity bazlı hesaplama
+        # day_start_equity = anlık_equity - daily_pnl (daily_pnl = current - start)
+        day_start_equity = equity - daily_pnl
+        if daily_pnl < 0 and day_start_equity > 0:
+            daily_loss_pct = abs(daily_pnl) / day_start_equity
+        else:
+            daily_loss_pct = 0.0
 
         if daily_loss_pct >= risk_params.max_daily_loss:
             logger.error(
@@ -893,6 +953,9 @@ class Baba:
         """
         verdict = RiskVerdict()
 
+        # ── Tek sefer snapshot okuma (Madde 1.1) ──
+        snap = self._db.get_latest_risk_snapshot()
+
         # 1. Kill-switch L3 → tam dur
         if self._kill_switch_level >= KILL_SWITCH_L3:
             verdict.can_trade = False
@@ -917,7 +980,7 @@ class Baba:
             return verdict
 
         # 4. Günlük kayıp (mevcut metod)
-        if not self.check_drawdown_limits(risk_params):
+        if not self.check_drawdown_limits(risk_params, snap=snap):
             self._activate_kill_switch(
                 KILL_SWITCH_L2, "daily_loss",
                 "Günlük kayıp limiti aşıldı",
@@ -928,7 +991,7 @@ class Baba:
             return verdict
 
         # 5. Hard drawdown (%15+) / Max drawdown (%10+)
-        dd_check = self._check_hard_drawdown(risk_params)
+        dd_check = self._check_hard_drawdown(risk_params, snap=snap)
         if dd_check == "hard":
             self._activate_kill_switch(
                 KILL_SWITCH_L3, "hard_drawdown",
@@ -949,7 +1012,7 @@ class Baba:
             return verdict
 
         # 6. Aylık kayıp (%7+)
-        if self._check_monthly_loss(risk_params):
+        if self._check_monthly_loss(risk_params, snap=snap):
             self._risk_state["monthly_paused"] = True
             self._activate_kill_switch(
                 KILL_SWITCH_L2, "monthly_loss",
@@ -960,13 +1023,13 @@ class Baba:
             return verdict
 
         # 7. Haftalık kayıp (%4+ → lot yarılama)
-        weekly_check = self._check_weekly_loss(risk_params)
+        weekly_check = self._check_weekly_loss(risk_params, snap=snap)
         if weekly_check == "halved":
             verdict.lot_multiplier = 0.5
             verdict.details["weekly_halved"] = True
 
         # 8. Floating loss (%1.5+)
-        if self._check_floating_loss(risk_params):
+        if self._check_floating_loss(risk_params, snap=snap):
             verdict.can_trade = False
             verdict.reason = f"Floating loss > %{risk_params.max_floating_loss*100:.1f} — yeni işlem engeli"
             return verdict
@@ -1000,13 +1063,18 @@ class Baba:
 
     # ── Alt kontroller ────────────────────────────────────────────────
 
-    def _check_weekly_loss(self, risk_params: RiskParams) -> str | None:
+    def _check_weekly_loss(self, risk_params: RiskParams, snap: dict | None = None) -> str | None:
         """Haftalık kayıp kontrolü.
+
+        Args:
+            risk_params: Risk parametreleri.
+            snap: Önceden alınmış risk snapshot'ı. None ise DB'den çekilir.
 
         Returns:
             ``"halved"`` → lot %50 azalt, ``None`` → normal.
         """
-        snap = self._db.get_latest_risk_snapshot()
+        if snap is None:
+            snap = self._db.get_latest_risk_snapshot()
         if not snap:
             return None
 
@@ -1048,13 +1116,18 @@ class Baba:
             return "halved"
         return None
 
-    def _check_monthly_loss(self, risk_params: RiskParams) -> bool:
+    def _check_monthly_loss(self, risk_params: RiskParams, snap: dict | None = None) -> bool:
         """Aylık kayıp kontrolü.
+
+        Args:
+            risk_params: Risk parametreleri.
+            snap: Önceden alınmış risk snapshot'ı. None ise DB'den çekilir.
 
         Returns:
             True → aylık limit aşıldı → sistem durdurulmalı.
         """
-        snap = self._db.get_latest_risk_snapshot()
+        if snap is None:
+            snap = self._db.get_latest_risk_snapshot()
         if not snap:
             return False
 
@@ -1093,13 +1166,18 @@ class Baba:
             return True
         return False
 
-    def _check_hard_drawdown(self, risk_params: RiskParams) -> str | None:
+    def _check_hard_drawdown(self, risk_params: RiskParams, snap: dict | None = None) -> str | None:
         """Hard ve soft drawdown kontrolü.
+
+        Args:
+            risk_params: Risk parametreleri.
+            snap: Önceden alınmış risk snapshot'ı. None ise DB'den çekilir.
 
         Returns:
             ``"hard"`` → %15+, ``"soft"`` → %10+, ``None`` → normal.
         """
-        snap = self._db.get_latest_risk_snapshot()
+        if snap is None:
+            snap = self._db.get_latest_risk_snapshot()
         if not snap:
             return None
 
@@ -1117,13 +1195,18 @@ class Baba:
 
         return None
 
-    def _check_floating_loss(self, risk_params: RiskParams) -> bool:
+    def _check_floating_loss(self, risk_params: RiskParams, snap: dict | None = None) -> bool:
         """Floating (açık pozisyon) kayıp kontrolü.
+
+        Args:
+            risk_params: Risk parametreleri.
+            snap: Önceden alınmış risk snapshot'ı. None ise DB'den çekilir.
 
         Returns:
             True → floating loss > %1.5 → yeni işlem engeli.
         """
-        snap = self._db.get_latest_risk_snapshot()
+        if snap is None:
+            snap = self._db.get_latest_risk_snapshot()
         if not snap:
             return False
 
@@ -1134,7 +1217,12 @@ class Baba:
             return False
 
         if floating_pnl < 0:
-            floating_loss_pct = abs(floating_pnl) / equity
+            # Madde 1.3: Balance bazlı hesaplama (equity zaten floating'den etkilenmiş)
+            # MT5: equity = balance + floating_pnl → balance = equity - floating_pnl
+            balance = equity - floating_pnl
+            if balance <= 0:
+                return False
+            floating_loss_pct = abs(floating_pnl) / balance
             if floating_loss_pct >= risk_params.max_floating_loss:
                 logger.warning(
                     f"FLOATING LOSS ENGELİ: %{floating_loss_pct*100:.2f} "
@@ -1146,14 +1234,17 @@ class Baba:
     def _update_consecutive_losses(self) -> None:
         """Üst üste kayıp sayacını DB'den güncelle.
 
-        Sadece RISK_BASELINE_DATE sonrası kapanmış işlemleri sayar.
+        Madde 1.6: Sadece son cooldown bitişinden sonraki trade'leri sayar.
+        Bu, cooldown → tekrar aynı trade'leri sayma → tekrar cooldown
+        sonsuz döngüsünü önler.
         """
-        trades = self._db.get_trades(limit=10)
+        # Cooldown sonrası veya RISK_BASELINE_DATE sonrası (hangisi yeniyse)
+        since = self._risk_state.get("last_cooldown_end") or RISK_BASELINE_DATE
+        trades = self._db.get_trades(limit=10, since=since)
         closed = [
             t for t in trades
             if t.get("pnl") is not None
             and t.get("exit_time") is not None
-            and t.get("exit_time", "") >= RISK_BASELINE_DATE
         ]
 
         count = 0
@@ -1190,9 +1281,10 @@ class Baba:
             return False
         if datetime.now() < until:
             return True
-        # Cooldown bitti
+        # Cooldown bitti — Madde 1.6: timestamp kaydet (sonsuz döngü önlemi)
         self._risk_state["cooldown_until"] = None
         self._risk_state["consecutive_losses"] = 0
+        self._risk_state["last_cooldown_end"] = datetime.now().isoformat(timespec="seconds")
         logger.info("Cooldown sona erdi.")
         self._db.insert_event(
             event_type="COOLDOWN",
@@ -1480,18 +1572,45 @@ class Baba:
             logger.error("MT5 bağlantısı yok — pozisyonlar kapatılamadı")
             return failed_tickets
 
-        positions = self._mt5.get_positions()
+        try:
+            positions = self._mt5.get_positions()
+        except Exception as exc:
+            logger.error(f"get_positions hatası (close_all): {exc}")
+            return failed_tickets
+        CLOSE_MAX_RETRIES = 3
         closed_count = 0
         for pos in positions:
             ticket = pos.get("ticket")
             if ticket:
-                result = self._mt5.close_position(ticket)
-                if result:
-                    closed_count += 1
-                    logger.info(f"Pozisyon kapatıldı: {ticket} ({reason})")
-                else:
+                closed = False
+                for attempt in range(1, CLOSE_MAX_RETRIES + 1):
+                    try:
+                        result = self._mt5.close_position(ticket)
+                    except Exception as exc:
+                        logger.error(
+                            f"close_position hatası ticket={ticket} "
+                            f"(deneme {attempt}/{CLOSE_MAX_RETRIES}): {exc}"
+                        )
+                        result = None
+                    if result:
+                        closed_count += 1
+                        closed = True
+                        logger.info(
+                            f"Pozisyon kapatıldı: {ticket} ({reason}) "
+                            f"deneme {attempt}/{CLOSE_MAX_RETRIES}"
+                        )
+                        break
+                    else:
+                        logger.warning(
+                            f"Kapanış denemesi {attempt}/{CLOSE_MAX_RETRIES} "
+                            f"başarısız: ticket={ticket}"
+                        )
+                if not closed:
                     failed_tickets.append(ticket)
-                    logger.error(f"Pozisyon kapatılamadı: {ticket}")
+                    logger.error(
+                        f"Pozisyon {CLOSE_MAX_RETRIES} denemede kapatılamadı: "
+                        f"ticket={ticket}"
+                    )
 
         if closed_count > 0:
             self._db.insert_event(
@@ -1553,7 +1672,11 @@ class Baba:
         if self._mt5 is None:
             return []
 
-        positions = self._mt5.get_positions()
+        try:
+            positions = self._mt5.get_positions()
+        except Exception as exc:
+            logger.error(f"get_positions hatası (fake analiz): {exc}")
+            return []
         if not positions:
             return []
 
@@ -1578,7 +1701,11 @@ class Baba:
                 )
 
                 # Pozisyonu kapat
-                close_result = self._mt5.close_position(ticket)
+                try:
+                    close_result = self._mt5.close_position(ticket)
+                except Exception as exc:
+                    logger.error(f"close_position hatası (fake) ticket={ticket}: {exc}")
+                    close_result = None
                 if close_result:
                     logger.info(f"Fake sinyal kapatma başarılı: {ticket}")
                 else:
@@ -1780,7 +1907,7 @@ class Baba:
             close = df["close"].values.astype(np.float64)
             ema_arr = ema(close, FAKE_MTF_EMA_PERIOD)
             last_close = close[-1]
-            last_ema = _last_valid(ema_arr)
+            last_ema = last_valid(ema_arr)
 
             if last_ema is None:
                 continue
@@ -1839,7 +1966,7 @@ class Baba:
 
         # RSI kontrolü
         rsi_arr = calc_rsi(close, FAKE_RSI_PERIOD)
-        rsi_val = _last_valid(rsi_arr)
+        rsi_val = last_valid(rsi_arr)
         if rsi_val is None:
             return FakeLayerResult(
                 "momentum", False, FAKE_WEIGHT_MOMENTUM, 0,
@@ -1851,7 +1978,7 @@ class Baba:
 
         # MACD diverjans kontrolü
         _, _, histogram = calc_macd(close)
-        hist_val = _last_valid(histogram)
+        hist_val = last_valid(histogram)
         if hist_val is None:
             return FakeLayerResult(
                 "momentum", False, FAKE_WEIGHT_MOMENTUM, 0,
@@ -1953,18 +2080,22 @@ class Baba:
                 continue
             buf = self._spread_history[symbol]
             buf.append(tick.spread)
-            if len(buf) > self._SPREAD_HISTORY_LEN:
-                self._spread_history[symbol] = buf[-self._SPREAD_HISTORY_LEN:]
+            if len(buf) > SPREAD_HISTORY_LEN:
+                self._spread_history[symbol] = buf[-SPREAD_HISTORY_LEN:]
 
     def _update_usdtry_history(self) -> None:
         """USD/TRY fiyat geçmişini MT5'ten güncelle."""
         if self._mt5 is None:
             return
-        tick = self._mt5.get_tick("USDTRY")
+        try:
+            tick = self._mt5.get_tick("USDTRY")
+        except Exception as exc:
+            logger.error(f"get_tick hatası [USDTRY]: {exc}")
+            return
         if tick is not None:
             self._usdtry_history.append(tick.bid)
-            if len(self._usdtry_history) > self._SPREAD_HISTORY_LEN:
-                self._usdtry_history = self._usdtry_history[-self._SPREAD_HISTORY_LEN:]
+            if len(self._usdtry_history) > SPREAD_HISTORY_LEN:
+                self._usdtry_history = self._usdtry_history[-SPREAD_HISTORY_LEN:]
 
     def _usdtry_5m_move_pct(self) -> float:
         """USD/TRY son ~5dk hareket yüzdesi."""
@@ -1978,19 +2109,6 @@ class Baba:
 # ═════════════════════════════════════════════════════════════════════
 #  MODÜL-SEVİYE YARDIMCILAR
 # ═════════════════════════════════════════════════════════════════════
-
-def _last_valid(arr: np.ndarray) -> float | None:
-    """Dizinin son NaN-olmayan değeri."""
-    for i in range(len(arr) - 1, -1, -1):
-        if not np.isnan(arr[i]):
-            return float(arr[i])
-    return None
-
-
-def _nanmean(arr: np.ndarray) -> float:
-    """NaN dışı ortalama (tümü NaN ise 0.0)."""
-    valid = arr[~np.isnan(arr)]
-    return float(np.mean(valid)) if len(valid) > 0 else 0.0
 
 
 def _volatile_reason(atr_ratio: float, spread_mult: float, move_pct: float) -> str:

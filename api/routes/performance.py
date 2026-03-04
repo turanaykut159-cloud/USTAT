@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
-from datetime import datetime
 
 from fastapi import APIRouter, Query
 
@@ -71,31 +70,39 @@ async def get_performance(
     best_day = max(daily_pnls) if daily_pnls else 0.0
     worst_day = min(daily_pnls) if daily_pnls else 0.0
 
-    # ── Sharpe Ratio (basitleştirilmiş, günlük) ──────────────────
+    # ── Sharpe Ratio (yüzde getiri bazlı, Madde 2.2) ─────────────
     sharpe_ratio = 0.0
-    if len(daily_pnls) >= 5:
-        mean_daily = sum(daily_pnls) / len(daily_pnls)
-        variance = sum((d - mean_daily) ** 2 for d in daily_pnls) / len(daily_pnls)
-        std_daily = math.sqrt(variance) if variance > 0 else 0.0
-        if std_daily > 0:
-            sharpe_ratio = (mean_daily / std_daily) * math.sqrt(252)
+    daily_snapshots = db.get_daily_end_snapshots(
+        since=f"{RISK_BASELINE_DATE}T00:00:00", limit=365,
+    )
+    if daily_snapshots:
+        daily_returns: list[float] = []
+        for snap in daily_snapshots:
+            eq = snap.get("equity", 0.0)
+            dp = snap.get("daily_pnl", 0.0)
+            day_start_eq = eq - dp  # Madde 1.2 formülü ile tutarlı
+            if day_start_eq > 0:
+                daily_returns.append(dp / day_start_eq)
 
-    # ── Max Drawdown (equity eğrisinden) ─────────────────────────
+        if len(daily_returns) >= 5:
+            mean_return = sum(daily_returns) / len(daily_returns)
+            variance = sum((r - mean_return) ** 2 for r in daily_returns) / len(daily_returns)
+            std_return = math.sqrt(variance) if variance > 0 else 0.0
+            if std_return > 0:
+                sharpe_ratio = (mean_return / std_return) * math.sqrt(252)
+
+    # ── Max Drawdown + Equity Eğrisi (günlük snapshot, Madde 2.3) ──
     max_drawdown_pct = 0.0
     equity_curve: list[EquityPoint] = []
 
-    snapshots = db.get_risk_snapshots(
-        since=f"{RISK_BASELINE_DATE}T00:00:00", limit=500,
-    )
-    if snapshots:
-        # Kronolojik sırada
-        snapshots.sort(key=lambda s: s.get("timestamp", ""))
-
+    # daily_snapshots zaten Sharpe için çekildi (ASC sıralı, gün başına 1)
+    if daily_snapshots:
         peak_equity = 0.0
-        for s in snapshots:
+        for s in daily_snapshots:
             eq = s.get("equity", 0.0)
             dp = s.get("daily_pnl", 0.0)
             ts = s.get("timestamp", "")
+            bal = s.get("balance", 0.0)
 
             if eq > peak_equity:
                 peak_equity = eq
@@ -108,6 +115,7 @@ async def get_performance(
                 timestamp=ts,
                 equity=eq,
                 daily_pnl=dp,
+                balance=bal,
             ))
 
     max_drawdown_pct *= 100  # yüzde olarak

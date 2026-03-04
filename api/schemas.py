@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 class StatusResponse(BaseModel):
     """GET /api/status — Sistem durumu."""
+    version: str = "5.1.0"
     engine_running: bool = False
     mt5_connected: bool = False
     regime: str = "TREND"          # TREND / RANGE / VOLATILE / OLAY
@@ -180,12 +181,13 @@ class RiskResponse(BaseModel):
     total_drawdown_pct: float = 0.0
     floating_pnl: float = 0.0
     equity: float = 0.0  # Snapshot equity (floating kayıp oranı hesabı için)
+    balance: float = 0.0  # Hesap bakiyesi (floating hariç)
 
     # Limitler
-    max_daily_loss: float = 0.02
+    max_daily_loss: float = 0.018
     max_weekly_loss: float = 0.04
     max_monthly_loss: float = 0.07
-    hard_drawdown: float = 0.15
+    hard_drawdown: float = 0.12
     max_floating_loss: float = 0.015
 
     # Durum
@@ -209,6 +211,9 @@ class RiskResponse(BaseModel):
     # Pozisyon limitleri
     open_positions: int = 0
     max_open_positions: int = 5
+
+    # Graduated lot (v5.1)
+    graduated_lot_mult: float = 1.0
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -241,6 +246,7 @@ class EquityPoint(BaseModel):
     timestamp: str
     equity: float
     daily_pnl: float = 0.0
+    balance: float = 0.0
 
 
 # Forward-ref güncelle
@@ -382,6 +388,9 @@ class ManualTradeCheckResponse(BaseModel):
     suggested_lot: float = 0.0
     current_price: float = 0.0
     atr_value: float = 0.0
+    suggested_sl: float = 0.0
+    suggested_tp: float = 0.0
+    max_lot: float = 0.0
     risk_summary: dict = {}
 
 class ManualTradeExecuteRequest(BaseModel):
@@ -389,6 +398,8 @@ class ManualTradeExecuteRequest(BaseModel):
     symbol: str
     direction: str
     lot: float
+    sl: float | None = None
+    tp: float | None = None
 
 class ManualTradeExecuteResponse(BaseModel):
     """Manuel işlem emir gönder — yanıt."""

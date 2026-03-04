@@ -31,6 +31,7 @@ from engine.models.risk import RiskParams
 from engine.models.signal import Signal, SignalType, StrategyType
 from engine.models.trade import Trade, TradeState
 from engine.mt5_bridge import MT5Bridge
+from engine.utils.helpers import last_valid, last_n_valid
 from engine.utils.indicators import (
     adx as calc_adx,
     atr as calc_atr,
@@ -38,6 +39,8 @@ from engine.utils.indicators import (
     bollinger_bands,
     rsi as calc_rsi,
     macd as calc_macd,
+    bb_kc_squeeze,
+    williams_r as calc_williams_r,
 )
 
 logger = get_logger(__name__)
@@ -58,8 +61,8 @@ TF_TRAILING_ATR_MULT: float = 1.5   # trailing stop 1.5×ATR
 
 # ── Mean Reversion ────────────────────────────────────────────────
 MR_RSI_PERIOD:    int   = 14
-MR_RSI_OVERSOLD:  float = 30.0
-MR_RSI_OVERBOUGHT: float = 70.0
+MR_RSI_OVERSOLD:  float = 20.0
+MR_RSI_OVERBOUGHT: float = 80.0
 MR_ADX_THRESHOLD: float = 20.0      # ADX < 20 gerekli
 MR_BB_PERIOD:     int   = 20
 MR_BB_STD:        float = 2.0
@@ -137,25 +140,6 @@ TRAILING_ATR_BY_CLASS: dict[str, float] = {
 #  YARDIMCI FONKSİYONLAR
 # ═════════════════════════════════════════════════════════════════════
 
-def _last_valid(arr: np.ndarray) -> float | None:
-    """Dizinin son NaN-olmayan değeri."""
-    for i in range(len(arr) - 1, -1, -1):
-        if not np.isnan(arr[i]):
-            return float(arr[i])
-    return None
-
-
-def _last_n_valid(arr: np.ndarray, n: int) -> list[float]:
-    """Son *n* adet NaN-olmayan değer (eskiden yeniye)."""
-    result: list[float] = []
-    for i in range(len(arr) - 1, -1, -1):
-        if not np.isnan(arr[i]):
-            result.append(float(arr[i]))
-            if len(result) >= n:
-                break
-    result.reverse()
-    return result
-
 
 def _find_swing_low(low: np.ndarray, lookback: int) -> float | None:
     """Son *lookback* bar içindeki en düşük fiyat."""
@@ -196,11 +180,13 @@ class Ogul:
         mt5: MT5Bridge,
         db: Database,
         baba: Any | None = None,
+        risk_params: RiskParams | None = None,
     ) -> None:
         self.config = config
         self.mt5 = mt5
         self.db = db
         self.baba = baba
+        self.risk_params = risk_params or RiskParams()
         self.active_trades: dict[str, Trade] = {}
         self.last_signals: dict[str, str] = {}  # symbol → "BUY"|"SELL"|"BEKLE"
 
@@ -297,7 +283,7 @@ class Ogul:
 
         # 1. RSI — 50 üstü bullish, 50 altı bearish
         rsi_arr = calc_rsi(close, period=MR_RSI_PERIOD)
-        rsi_val = _last_valid(rsi_arr)
+        rsi_val = last_valid(rsi_arr)
         if rsi_val is not None:
             if rsi_val > 50:
                 votes += 1
@@ -307,8 +293,8 @@ class Ogul:
         # 2. EMA crossover — fast > slow bullish
         ema_f = ema(close, period=TF_EMA_FAST)
         ema_s = ema(close, period=TF_EMA_SLOW)
-        ef = _last_valid(ema_f)
-        es = _last_valid(ema_s)
+        ef = last_valid(ema_f)
+        es = last_valid(ema_s)
         if ef is not None and es is not None:
             if ef > es:
                 votes += 1
@@ -317,7 +303,7 @@ class Ogul:
 
         # 3. MACD histogram — pozitif bullish
         _, _, hist = calc_macd(close)
-        h = _last_valid(hist)
+        h = last_valid(hist)
         if h is not None:
             if h > 0:
                 votes += 1
@@ -387,6 +373,19 @@ class Ogul:
         # En güçlü sinyali seç
         best = max(candidates, key=lambda s: s.strength)
 
+        # C1: Seans zamanlama filtresi — açılış/kapanış volatilitesinde
+        # strength düşürme (09:45-10:15 ve 17:15-17:45)
+        now_time = datetime.now().time()
+        SESSION_OPEN_END = time(10, 15)
+        SESSION_CLOSE_START = time(17, 15)
+        if now_time < SESSION_OPEN_END or now_time >= SESSION_CLOSE_START:
+            original_str = best.strength
+            best.strength = best.strength * 0.5
+            logger.debug(
+                f"Seans filtresi [{symbol}]: strength {original_str:.2f} "
+                f"→ {best.strength:.2f} (saat={now_time})"
+            )
+
         # Trend follow ise H1 onayı gerekli
         if best.strategy == StrategyType.TREND_FOLLOW:
             if not self._confirm_h1(symbol, best):
@@ -425,10 +424,10 @@ class Ogul:
         _, _, histogram = calc_macd(close)
 
         # Son geçerli değerler
-        ema_f = _last_valid(ema_fast)
-        ema_s = _last_valid(ema_slow)
-        adx_val = _last_valid(adx_arr)
-        atr_val = _last_valid(atr_arr)
+        ema_f = last_valid(ema_fast)
+        ema_s = last_valid(ema_slow)
+        adx_val = last_valid(adx_arr)
+        atr_val = last_valid(atr_arr)
 
         if any(v is None for v in (ema_f, ema_s, adx_val, atr_val)):
             return None
@@ -436,7 +435,7 @@ class Ogul:
             return None
 
         # MACD histogram son 2 bar
-        hist_vals = _last_n_valid(histogram, TF_MACD_CONFIRM_BARS)
+        hist_vals = last_n_valid(histogram, TF_MACD_CONFIRM_BARS)
         if len(hist_vals) < TF_MACD_CONFIRM_BARS:
             return None
 
@@ -511,8 +510,9 @@ class Ogul:
     ) -> Signal | None:
         """Mean reversion sinyali kontrolü.
 
-        Long: RSI(14) < 30 + BB alt bant teması + ADX < 20
-        Short: RSI(14) > 70 + BB üst bant teması + ADX < 20
+        Long: RSI(14) < 20 + BB alt bant teması + ADX < 20 + W%R < -80
+        Short: RSI(14) > 80 + BB üst bant teması + ADX < 20 + W%R > -20
+        C3: Williams %R çift onay eklendi.
         """
         # İndikatörler
         rsi_arr = calc_rsi(close, MR_RSI_PERIOD)
@@ -521,14 +521,16 @@ class Ogul:
         )
         adx_arr = calc_adx(high, low, close, ATR_PERIOD)
         atr_arr = calc_atr(high, low, close, ATR_PERIOD)
+        wr_arr = calc_williams_r(high, low, close, MR_RSI_PERIOD)
 
         # Son geçerli değerler
-        rsi_val = _last_valid(rsi_arr)
-        bb_up = _last_valid(bb_upper)
-        bb_mid = _last_valid(bb_middle)
-        bb_low = _last_valid(bb_lower)
-        adx_val = _last_valid(adx_arr)
-        atr_val = _last_valid(atr_arr)
+        rsi_val = last_valid(rsi_arr)
+        bb_up = last_valid(bb_upper)
+        bb_mid = last_valid(bb_middle)
+        bb_low = last_valid(bb_lower)
+        adx_val = last_valid(adx_arr)
+        atr_val = last_valid(atr_arr)
+        wr_val = last_valid(wr_arr)
 
         if any(v is None for v in (rsi_val, bb_up, bb_mid, bb_low, adx_val, atr_val)):
             return None
@@ -542,12 +544,14 @@ class Ogul:
         last_close = float(close[-1])
         direction: SignalType | None = None
 
-        # Long: RSI < 30 + BB alt bant teması
+        # Long: RSI < 20 + BB alt bant teması + W%R < -80 (C3)
         if rsi_val < MR_RSI_OVERSOLD and last_close <= bb_low:
-            direction = SignalType.BUY
-        # Short: RSI > 70 + BB üst bant teması
+            if wr_val is not None and wr_val < -80.0:
+                direction = SignalType.BUY
+        # Short: RSI > 80 + BB üst bant teması + W%R > -20 (C3)
         elif rsi_val > MR_RSI_OVERBOUGHT and last_close >= bb_up:
-            direction = SignalType.SELL
+            if wr_val is not None and wr_val > -20.0:
+                direction = SignalType.SELL
 
         if direction is None:
             return None
@@ -611,7 +615,7 @@ class Ogul:
             return None
 
         atr_arr = calc_atr(high, low, close, ATR_PERIOD)
-        atr_val = _last_valid(atr_arr)
+        atr_val = last_valid(atr_arr)
         if atr_val is None or atr_val <= 0:
             return None
 
@@ -677,8 +681,9 @@ class Ogul:
             tp = price - range_width
 
         # Sinyal gücü: hacim patlaması (0-0.5) + ATR genişleme (0-0.3) + kırılım büyüklüğü (0-0.2)
-        vol_str = min((current_vol / vol_avg - BO_VOLUME_MULT) / 2.0, 0.5)
-        atr_str = min((atr_val / atr_mean - BO_ATR_EXPANSION) / 1.0, 0.3)
+        # A2 fix: likidite sınıfı bazlı eşikler kullanılıyor (global sabit yerine)
+        vol_str = min((current_vol / vol_avg - vol_mult) / 2.0, 0.5)
+        atr_str = min((atr_val / atr_mean - atr_exp) / 1.0, 0.3)
         if direction == SignalType.BUY:
             break_size = (last_close - high_20) / atr_val if atr_val > 0 else 0.0
         else:
@@ -686,6 +691,17 @@ class Ogul:
         break_str = min(break_size * 0.2, 0.2)
 
         strength = max(vol_str, 0.0) + max(atr_str, 0.0) + max(break_str, 0.0)
+
+        # C2: Squeeze çıkışında bonus — sıkışma sonrası kırılım daha güvenilir
+        squeeze_arr = bb_kc_squeeze(high, low, close)
+        squeeze_bonus = 0.0
+        if len(squeeze_arr) >= 3:
+            # Son 3 bar'dan en az 1'i squeeze ise → yakın zamanda sıkışma vardı
+            recent_squeeze = squeeze_arr[-3:]
+            valid_sq = recent_squeeze[~np.isnan(recent_squeeze)]
+            if len(valid_sq) > 0 and np.any(valid_sq == 1.0):
+                squeeze_bonus = 0.15
+                strength += squeeze_bonus
 
         return Signal(
             symbol=symbol,
@@ -725,8 +741,8 @@ class Ogul:
         ema_fast_h1 = ema(close_h1, TF_EMA_FAST)
         ema_slow_h1 = ema(close_h1, TF_EMA_SLOW)
 
-        ef = _last_valid(ema_fast_h1)
-        es = _last_valid(ema_slow_h1)
+        ef = last_valid(ema_fast_h1)
+        es = last_valid(ema_slow_h1)
 
         if ef is None or es is None:
             return False
@@ -770,11 +786,10 @@ class Ogul:
             regime_at_entry=regime.regime_type.value,
         )
 
-        # BABA onay — korelasyon kontrolü
-        risk_params = RiskParams()
+        # BABA onay — korelasyon kontrolü (Madde 2.1: merkezi risk_params)
         if self.baba:
             corr_verdict = self.baba.check_correlation_limits(
-                symbol, direction, risk_params,
+                symbol, direction, self.risk_params,
             )
             if not corr_verdict.can_trade:
                 trade.state = TradeState.CANCELLED
@@ -829,7 +844,7 @@ class Ogul:
             return
 
         # Lot hesaplama
-        lot = self._calculate_lot(signal, regime, equity, risk_params)
+        lot = self._calculate_lot(signal, regime, equity, self.risk_params)
         if lot <= 0:
             trade.state = TradeState.CANCELLED
             trade.cancel_reason = "lot_zero"
@@ -949,13 +964,12 @@ class Ogul:
             )
             return result
 
-        # 3. BABA risk kontrolü
-        risk_params = RiskParams()
+        # 3. BABA risk kontrolü (Madde 2.1: merkezi risk_params)
         if not self.baba:
             result["reason"] = "BABA başlatılmamış"
             return result
 
-        verdict = self.baba.check_risk_limits(risk_params)
+        verdict = self.baba.check_risk_limits(self.risk_params)
         result["risk_summary"] = {
             "regime": (
                 self.baba.current_regime.regime_type.value
@@ -969,7 +983,7 @@ class Ogul:
             "daily_trade_count": self.baba._risk_state.get(
                 "daily_trade_count", 0,
             ),
-            "max_daily_trades": risk_params.max_daily_trades,
+            "max_daily_trades": self.risk_params.max_daily_trades,
             "consecutive_losses": self.baba._risk_state.get(
                 "consecutive_losses", 0,
             ),
@@ -982,7 +996,7 @@ class Ogul:
 
         # 4. Korelasyon kontrolü
         corr = self.baba.check_correlation_limits(
-            symbol, direction, risk_params,
+            symbol, direction, self.risk_params,
         )
         if not corr.can_trade:
             result["reason"] = corr.reason
@@ -1022,7 +1036,7 @@ class Ogul:
             return result
 
         lot = self.baba.calculate_position_size(
-            symbol, risk_params, atr_val, account.equity,
+            symbol, self.risk_params, atr_val, account.equity,
         )
         lot = min(lot, MAX_LOT_PER_CONTRACT)
 
@@ -1032,10 +1046,29 @@ class Ogul:
         if tick:
             current_price = tick.ask if direction == "BUY" else tick.bid
 
+        # 9. Suggested SL/TP (Madde 1.5)
+        if current_price > 0 and atr_val > 0:
+            if direction == "BUY":
+                suggested_sl = current_price - (atr_val * 1.5)
+                suggested_tp = current_price + (atr_val * 2.0)
+            else:
+                suggested_sl = current_price + (atr_val * 1.5)
+                suggested_tp = current_price - (atr_val * 2.0)
+        else:
+            suggested_sl = 0.0
+            suggested_tp = 0.0
+
+        # 10. Sembol bazlı max lot (Madde 2.5)
+        sym_info = self.mt5.get_symbol_info(symbol)
+        max_lot = sym_info.volume_max if sym_info else 10.0
+
         result["can_trade"] = True
         result["suggested_lot"] = lot
         result["current_price"] = current_price
         result["atr_value"] = atr_val
+        result["suggested_sl"] = round(suggested_sl, 2)
+        result["suggested_tp"] = round(suggested_tp, 2)
+        result["max_lot"] = max_lot
         result["risk_summary"]["floating_pnl"] = (
             account.profit if hasattr(account, "profit") else 0.0
         )
@@ -1048,11 +1081,15 @@ class Ogul:
         symbol: str,
         direction: str,
         lot: float,
+        sl: float | None = None,
+        tp: float | None = None,
     ) -> dict:
         """Manuel market emri gönder ve active_trades'e kaydet.
 
         ``_execute_signal()`` akışının basitleştirilmiş versiyonu.
-        MARKET emir gönderir, LIMIT değil.  SL = 2xATR, TP = 3xATR.
+        MARKET emir gönderir, LIMIT değil.
+        SL verilmezse ATR×1.5 otomatik hesaplanır (Madde 1.5).
+        TP verilmezse ATR×2.0 otomatik hesaplanır.
 
         Args:
             symbol: Base sembol (``"F_THYAO"``).
@@ -1092,16 +1129,46 @@ class Ogul:
 
         price = tick_data.ask if direction == "BUY" else tick_data.bid
 
-        # SL = 2xATR, TP = 3xATR
-        if direction == "BUY":
-            sl = price - (atr_val * 2.0)
-            tp = price + (atr_val * 3.0)
-        else:
-            sl = price + (atr_val * 2.0)
-            tp = price - (atr_val * 3.0)
+        # Madde 1.5: Kullanıcı SL/TP verdiyse kullan, vermediyse ATR bazlı otomatik
+        if sl is None or sl <= 0:
+            if direction == "BUY":
+                sl = price - (atr_val * 1.5)
+            else:
+                sl = price + (atr_val * 1.5)
+            logger.info(f"Manuel SL otomatik: {sl:.2f} (ATR×1.5={atr_val*1.5:.2f})")
 
-        # 3. Lot sınırlama
-        lot = min(lot, MAX_LOT_PER_CONTRACT)
+        if tp is None or tp <= 0:
+            if direction == "BUY":
+                tp = price + (atr_val * 2.0)
+            else:
+                tp = price - (atr_val * 2.0)
+            logger.info(f"Manuel TP otomatik: {tp:.2f} (ATR×2.0={atr_val*2.0:.2f})")
+
+        # 3. Lot sınırlama — sembol bazlı (Madde 2.5)
+        sym_info = self.mt5.get_symbol_info(symbol)
+        if sym_info:
+            vol_min = sym_info.volume_min
+            vol_max = sym_info.volume_max
+            vol_step = sym_info.volume_step if sym_info.volume_step > 0 else vol_min
+
+            if lot < vol_min:
+                result["message"] = (
+                    f"Lot çok düşük: {lot} (min={vol_min})"
+                )
+                return result
+            if lot > vol_max:
+                result["message"] = (
+                    f"Lot çok yüksek: {lot} (max={vol_max})"
+                )
+                return result
+
+            # volume_step'e yuvarlama
+            if vol_step > 0:
+                lot = round(lot / vol_step) * vol_step
+                lot = round(lot, 8)  # float hassasiyet düzeltme
+        else:
+            lot = min(lot, MAX_LOT_PER_CONTRACT)
+
         if lot <= 0:
             result["message"] = "Geçersiz lot miktarı"
             return result
@@ -1226,6 +1293,9 @@ class Ogul:
         yoksa basit fallback (1 lot). Her durumda
         ``MAX_LOT_PER_CONTRACT`` ile sınırlar.
 
+        A4: Bias-lot entegrasyonu — bias ters yöndeyse lot=0,
+        bias nötr ise lot*0.7 (güven düşürme).
+
         Returns:
             Hesaplanan lot miktarı.
         """
@@ -1238,6 +1308,23 @@ class Ogul:
             )
         else:
             lot = 1.0
+
+        # A4: Bias-lot entegrasyonu
+        bias = self._calculate_bias(signal.symbol)
+        direction = "BUY" if signal.signal_type == SignalType.BUY else "SELL"
+        if bias != "NOTR" and bias != direction:
+            # Bias ters yönde → işlem yapma
+            logger.info(
+                f"Bias-lot engeli [{signal.symbol}]: "
+                f"sinyal={direction}, bias={bias} → lot=0"
+            )
+            return 0.0
+        elif bias == "NOTR":
+            # Bias nötr → güven düşürme
+            lot = lot * 0.7
+            logger.debug(
+                f"Bias-lot nötr [{signal.symbol}]: lot*0.7={lot:.2f}"
+            )
 
         return min(lot, MAX_LOT_PER_CONTRACT)
 
@@ -1255,7 +1342,7 @@ class Ogul:
         high_arr = df["high"].values.astype(np.float64)
         low_arr = df["low"].values.astype(np.float64)
         atr_arr = calc_atr(high_arr, low_arr, close, ATR_PERIOD)
-        return _last_valid(atr_arr)
+        return last_valid(atr_arr)
 
     def _log_cancelled_trade(self, trade: Trade) -> None:
         """İptal edilen trade'i logla ve event yaz.
@@ -1441,7 +1528,10 @@ class Ogul:
             regime: Mevcut rejim.
         """
         # Kalan bekleyen emri iptal et
-        self.mt5.cancel_order(trade.order_ticket)
+        try:
+            self.mt5.cancel_order(trade.order_ticket)
+        except Exception as exc:
+            logger.error(f"cancel_order hatası [{symbol}] ticket={trade.order_ticket}: {exc}")
 
         threshold = trade.requested_volume * 0.5
 
@@ -1469,7 +1559,10 @@ class Ogul:
         else:
             # Yetersiz — kısmi pozisyonu kapat
             if trade.ticket:
-                self.mt5.close_position(trade.ticket)
+                try:
+                    self.mt5.close_position(trade.ticket)
+                except Exception as exc:
+                    logger.error(f"close_position hatası [{symbol}] ticket={trade.ticket}: {exc}")
             self._remove_trade(
                 symbol, trade,
                 f"partial_insufficient "
@@ -1493,7 +1586,10 @@ class Ogul:
             regime: Mevcut rejim.
         """
         # Bekleyen emri iptal et
-        self.mt5.cancel_order(trade.order_ticket)
+        try:
+            self.mt5.cancel_order(trade.order_ticket)
+        except Exception as exc:
+            logger.error(f"cancel_order hatası [{symbol}] ticket={trade.order_ticket}: {exc}")
 
         # VOLATILE/OLAY rejimde market emir yasak
         if trade.regime_at_entry in ("VOLATILE", "OLAY"):
@@ -1563,7 +1659,11 @@ class Ogul:
             regime: Mevcut rejim.
         """
         # MT5'te pozisyon var mı? (Netting: sembol bazlı eşleştir)
-        positions = self.mt5.get_positions()
+        try:
+            positions = self.mt5.get_positions()
+        except Exception as exc:
+            logger.error(f"get_positions hatası [{symbol}]: {exc}")
+            positions = []
         pos = next(
             (p for p in positions if p.get("symbol") == symbol),
             None,
@@ -1590,7 +1690,10 @@ class Ogul:
                 f"fill={fill_price:.4f} limit={trade.limit_price:.4f} "
                 f"slippage={slippage:.4f} max={trade.max_slippage:.4f}"
             )
-            self.mt5.close_position(trade.ticket)
+            try:
+                self.mt5.close_position(trade.ticket)
+            except Exception as exc:
+                logger.error(f"close_position hatası [{symbol}] ticket={trade.ticket}: {exc}")
             self._remove_trade(
                 symbol, trade,
                 f"slippage_exceeded "
@@ -1634,7 +1737,11 @@ class Ogul:
             symbol: Kontrat sembolü.
             trade: Güncellenecek Trade.
         """
-        positions = self.mt5.get_positions()
+        try:
+            positions = self.mt5.get_positions()
+        except Exception as exc:
+            logger.error(f"get_positions hatası [{symbol}] (fill_price): {exc}")
+            return
         # Netting mode: sembol bazlı eşleştir
         pos = next(
             (p for p in positions if p.get("symbol") == symbol),
@@ -1717,7 +1824,10 @@ class Ogul:
 
             if trade.state == TradeState.FILLED:
                 # Pozisyonu kapat
-                self.mt5.close_position(trade.ticket)
+                try:
+                    self.mt5.close_position(trade.ticket)
+                except Exception as exc:
+                    logger.error(f"EOD close_position hatası [{symbol}] ticket={trade.ticket}: {exc}")
                 self._handle_closed_trade(symbol, trade, "end_of_day")
 
             elif trade.state in (
@@ -1726,10 +1836,16 @@ class Ogul:
             ):
                 # Bekleyen emri iptal et
                 if trade.order_ticket:
-                    self.mt5.cancel_order(trade.order_ticket)
+                    try:
+                        self.mt5.cancel_order(trade.order_ticket)
+                    except Exception as exc:
+                        logger.error(f"EOD cancel_order hatası [{symbol}] ticket={trade.order_ticket}: {exc}")
                 # Kısmi dolum varsa pozisyonu da kapat
                 if trade.ticket and trade.filled_volume > 0:
-                    self.mt5.close_position(trade.ticket)
+                    try:
+                        self.mt5.close_position(trade.ticket)
+                    except Exception as exc:
+                        logger.error(f"EOD close_position hatası [{symbol}] ticket={trade.ticket}: {exc}")
                 self._remove_trade(symbol, trade, "end_of_day")
 
         self.db.insert_event(
@@ -1756,7 +1872,11 @@ class Ogul:
             return
 
         # MT5 pozisyonlarını BİR KERE al, sembol bazlı indexle
-        positions = self.mt5.get_positions()
+        try:
+            positions = self.mt5.get_positions()
+        except Exception as exc:
+            logger.error(f"get_positions hatası (manage_filled): {exc}")
+            return
         pos_by_symbol: dict[str, dict] = {
             p.get("symbol"): p for p in positions
         }
@@ -1767,7 +1887,11 @@ class Ogul:
                 trade = self.active_trades[symbol]
                 if trade.state != TradeState.FILLED:
                     continue
-                close_result = self.mt5.close_position(trade.ticket)
+                try:
+                    close_result = self.mt5.close_position(trade.ticket)
+                except Exception as exc:
+                    logger.error(f"close_position hatası [{symbol}] ticket={trade.ticket}: {exc}")
+                    close_result = None
                 reason = f"regime_{regime.regime_type.value.lower()}"
                 if close_result:
                     logger.warning(
@@ -1826,8 +1950,8 @@ class Ogul:
         ema_20 = ema(close, TF_EMA_FAST)
         atr_arr = calc_atr(high_arr, low_arr, close, ATR_PERIOD)
 
-        ema_val = _last_valid(ema_20)
-        atr_val = _last_valid(atr_arr)
+        ema_val = last_valid(ema_20)
+        atr_val = last_valid(atr_arr)
         current_price = float(pos.get("price_current", close[-1]))
 
         if ema_val is None or atr_val is None or atr_val <= 0:
@@ -1845,7 +1969,10 @@ class Ogul:
                 f"EMA ihlali kapatma [{symbol}]: "
                 f"fiyat={current_price:.4f} EMA(20)={ema_val:.4f}"
             )
-            self.mt5.close_position(trade.ticket)
+            try:
+                self.mt5.close_position(trade.ticket)
+            except Exception as exc:
+                logger.error(f"close_position hatası [{symbol}] ticket={trade.ticket}: {exc}")
             self._handle_closed_trade(symbol, trade, "ema_violation")
             return
 
@@ -1855,9 +1982,13 @@ class Ogul:
         if trade.direction == "BUY":
             new_sl = current_price - trail_mult * atr_val
             if new_sl > trade.trailing_sl:
-                mod_result = self.mt5.modify_position(
-                    trade.ticket, sl=new_sl,
-                )
+                try:
+                    mod_result = self.mt5.modify_position(
+                        trade.ticket, sl=new_sl,
+                    )
+                except Exception as exc:
+                    logger.error(f"modify_position hatası [{symbol}] ticket={trade.ticket}: {exc}")
+                    mod_result = None
                 if mod_result:
                     trade.trailing_sl = new_sl
                     trade.sl = new_sl
@@ -1867,9 +1998,13 @@ class Ogul:
         else:  # SELL
             new_sl = current_price + trail_mult * atr_val
             if new_sl < trade.trailing_sl:
-                mod_result = self.mt5.modify_position(
-                    trade.ticket, sl=new_sl,
-                )
+                try:
+                    mod_result = self.mt5.modify_position(
+                        trade.ticket, sl=new_sl,
+                    )
+                except Exception as exc:
+                    logger.error(f"modify_position hatası [{symbol}] ticket={trade.ticket}: {exc}")
+                    mod_result = None
                 if mod_result:
                     trade.trailing_sl = new_sl
                     trade.sl = new_sl
@@ -1883,8 +2018,9 @@ class Ogul:
         trade: Trade,
         pos: dict[str, Any],
     ) -> None:
-        """Mean reversion işlem yönetimi — BB orta bant kontrolü.
+        """Mean reversion işlem yönetimi — breakeven + BB orta bant kontrolü.
 
+        A5: Kâr %50+ olduğunda SL'yi entry fiyatına çek (breakeven).
         Normalde TP MT5 tarafından yönetilir, ama programatik kontrol de
         ekleyelim — fiyat BB orta bandına ulaştıysa kapat.
 
@@ -1899,12 +2035,43 @@ class Ogul:
 
         close = df["close"].values.astype(np.float64)
         _, bb_middle, _ = bollinger_bands(close, MR_BB_PERIOD, MR_BB_STD)
-        bb_mid = _last_valid(bb_middle)
+        bb_mid = last_valid(bb_middle)
 
         if bb_mid is None:
             return
 
         current_price = float(pos.get("price_current", close[-1]))
+
+        # A5: Breakeven trailing — kâr %50+ ise SL'yi entry'e çek
+        entry = trade.entry_price
+        if entry > 0 and trade.sl != entry:
+            if trade.direction == "BUY":
+                tp_distance = trade.tp - entry if trade.tp > 0 else 0
+                current_profit = current_price - entry
+            else:
+                tp_distance = entry - trade.tp if trade.tp > 0 else 0
+                current_profit = entry - current_price
+
+            # TP mesafesinin %50'sine ulaştıysa breakeven
+            if tp_distance > 0 and current_profit >= tp_distance * 0.5:
+                try:
+                    mod_result = self.mt5.modify_position(
+                        trade.ticket, sl=entry,
+                    )
+                except Exception as exc:
+                    logger.error(
+                        f"MR breakeven hatası [{symbol}] "
+                        f"ticket={trade.ticket}: {exc}"
+                    )
+                    mod_result = None
+                if mod_result:
+                    trade.sl = entry
+                    trade.trailing_sl = entry
+                    logger.info(
+                        f"MR breakeven [{symbol}]: SL→entry={entry:.4f} "
+                        f"(kâr={current_profit:.4f}, "
+                        f"TP mesafe={tp_distance:.4f})"
+                    )
 
         # BB orta banda ulaşım kontrolü
         reached_target = False
@@ -1918,7 +2085,10 @@ class Ogul:
                 f"BB orta bant ulaşımı [{symbol}]: "
                 f"fiyat={current_price:.4f} BB_mid={bb_mid:.4f}"
             )
-            self.mt5.close_position(trade.ticket)
+            try:
+                self.mt5.close_position(trade.ticket)
+            except Exception as exc:
+                logger.error(f"close_position hatası [{symbol}] ticket={trade.ticket}: {exc}")
             self._handle_closed_trade(symbol, trade, "bb_middle_reached")
 
     def _manage_breakout(
@@ -1947,7 +2117,7 @@ class Ogul:
         low_arr = df["low"].values.astype(np.float64)
 
         atr_arr = calc_atr(high_arr, low_arr, close, ATR_PERIOD)
-        atr_val = _last_valid(atr_arr)
+        atr_val = last_valid(atr_arr)
         if atr_val is None or atr_val <= 0:
             return
 
@@ -1974,34 +2144,50 @@ class Ogul:
                 f"False breakout tespit [{symbol}]: fiyat={current_price:.4f} "
                 f"entry={trade.entry_price:.4f} — pozisyon kapatılıyor"
             )
-            self.mt5.close_position(trade.ticket)
+            try:
+                self.mt5.close_position(trade.ticket)
+            except Exception as exc:
+                logger.error(f"close_position hatası [{symbol}] ticket={trade.ticket}: {exc}")
             self._handle_closed_trade(symbol, trade, "false_breakout")
             return
 
-        # ── Trailing stop ─────────────────────────────────────────
+        # ── Trailing stop (A3: likidite sınıfı bazlı) ─────────────
+        liq_class = self._get_liq_class(symbol)
+        trail_mult = TRAILING_ATR_BY_CLASS.get(liq_class, BO_TRAILING_ATR_MULT)
+
         if trade.direction == "BUY":
-            new_sl = current_price - BO_TRAILING_ATR_MULT * atr_val
+            new_sl = current_price - trail_mult * atr_val
             if new_sl > trade.trailing_sl:
-                mod_result = self.mt5.modify_position(
-                    trade.ticket, sl=new_sl,
-                )
+                try:
+                    mod_result = self.mt5.modify_position(
+                        trade.ticket, sl=new_sl,
+                    )
+                except Exception as exc:
+                    logger.error(f"modify_position hatası [{symbol}] ticket={trade.ticket}: {exc}")
+                    mod_result = None
                 if mod_result:
                     trade.trailing_sl = new_sl
                     trade.sl = new_sl
                     logger.debug(
-                        f"Breakout trailing SL [{symbol}]: {new_sl:.4f}"
+                        f"Breakout trailing SL [{symbol}] "
+                        f"(liq={liq_class}, mult={trail_mult}): {new_sl:.4f}"
                     )
         else:
-            new_sl = current_price + BO_TRAILING_ATR_MULT * atr_val
+            new_sl = current_price + trail_mult * atr_val
             if new_sl < trade.trailing_sl:
-                mod_result = self.mt5.modify_position(
-                    trade.ticket, sl=new_sl,
-                )
+                try:
+                    mod_result = self.mt5.modify_position(
+                        trade.ticket, sl=new_sl,
+                    )
+                except Exception as exc:
+                    logger.error(f"modify_position hatası [{symbol}] ticket={trade.ticket}: {exc}")
+                    mod_result = None
                 if mod_result:
                     trade.trailing_sl = new_sl
                     trade.sl = new_sl
                     logger.debug(
-                        f"Breakout trailing SL [{symbol}]: {new_sl:.4f}"
+                        f"Breakout trailing SL [{symbol}] "
+                        f"(liq={liq_class}, mult={trail_mult}): {new_sl:.4f}"
                     )
 
     # ═════════════════════════════════════════════════════════════════
@@ -2017,7 +2203,11 @@ class Ogul:
         if not self.active_trades:
             return
 
-        positions = self.mt5.get_positions()
+        try:
+            positions = self.mt5.get_positions()
+        except Exception as exc:
+            logger.error(f"get_positions hatası (sync): {exc}")
+            return
         open_symbols = {p.get("symbol") for p in positions}
 
         for symbol in list(self.active_trades):
@@ -2049,7 +2239,11 @@ class Ogul:
         trade.closed_at = now
 
         # Son fiyatı al
-        tick = self.mt5.get_tick(symbol)
+        try:
+            tick = self.mt5.get_tick(symbol)
+        except Exception as exc:
+            logger.error(f"get_tick hatası [{symbol}]: {exc}")
+            tick = None
         if tick:
             if trade.direction == "BUY":
                 trade.exit_price = tick.bid
@@ -2107,15 +2301,26 @@ class Ogul:
     # ═════════════════════════════════════════════════════════════════
 
     def restore_active_trades(self) -> None:
-        """Engine restart'ta açık işlemleri geri yükle.
+        """Engine restart'ta açık işlemleri geri yükle (P0-3 iyileştirme).
 
         MT5 pozisyonları ile DB trade kayıtlarını eşleyerek
         ``active_trades`` dict'ini yeniden oluşturur.
+
+        P0-3: Strateji bilgisi, rejim bilgisi ve entry zamanı da
+        DB'den kurtarılır. trailing_sl için mevcut SL kullanılır.
         """
-        positions = self.mt5.get_positions()
+        try:
+            positions = self.mt5.get_positions()
+        except Exception as exc:
+            logger.error(f"get_positions hatası (restore): {exc}")
+            return
+
         if not positions:
             logger.info("Geri yükleme: açık pozisyon yok")
             return
+
+        restored_count = 0
+        orphan_count = 0
 
         for pos in positions:
             symbol = pos.get("symbol", "")
@@ -2136,6 +2341,18 @@ class Ogul:
                 None,
             )
 
+            # P0-3: Strateji ve rejim bilgisini DB'den al
+            strategy = db_trade.get("strategy", "") if db_trade else ""
+            regime_at_entry = db_trade.get("regime", "") if db_trade else ""
+            entry_time_str = db_trade.get("entry_time", "") if db_trade else ""
+
+            opened_at = None
+            if entry_time_str:
+                try:
+                    opened_at = datetime.fromisoformat(entry_time_str)
+                except (ValueError, TypeError):
+                    pass
+
             trade = Trade(
                 symbol=symbol,
                 direction=direction,
@@ -2145,17 +2362,31 @@ class Ogul:
                 tp=pos.get("tp", 0.0),
                 state=TradeState.FILLED,
                 ticket=ticket,
-                strategy=db_trade.get("strategy", "") if db_trade else "",
+                strategy=strategy,
                 trailing_sl=pos.get("sl", 0.0),
                 db_id=db_trade.get("id", 0) if db_trade else 0,
+                regime_at_entry=regime_at_entry,
             )
+            if opened_at:
+                trade.opened_at = opened_at
 
             self.active_trades[symbol] = trade
-            logger.info(
-                f"Geri yüklendi [{symbol}]: ticket={ticket} "
-                f"{direction} {trade.volume} lot"
-            )
+            restored_count += 1
+
+            if db_trade:
+                logger.info(
+                    f"Geri yüklendi [{symbol}]: ticket={ticket} "
+                    f"{direction} {trade.volume} lot "
+                    f"strateji={strategy} rejim={regime_at_entry}"
+                )
+            else:
+                orphan_count += 1
+                logger.warning(
+                    f"Yetim pozisyon geri yüklendi [{symbol}]: ticket={ticket} "
+                    f"{direction} {trade.volume} lot (DB eşleşmesi yok)"
+                )
 
         logger.info(
-            f"Geri yükleme tamamlandı: {len(self.active_trades)} aktif işlem"
+            f"Geri yükleme tamamlandı: {restored_count} aktif işlem "
+            f"({orphan_count} yetim)"
         )

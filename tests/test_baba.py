@@ -47,10 +47,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from engine.utils.helpers import last_valid as _last_valid, nanmean as _nanmean
 from engine.baba import (
     Baba,
-    _last_valid,
-    _nanmean,
     _volatile_reason,
     ADX_TREND_THRESHOLD,
     ADX_RANGE_THRESHOLD,
@@ -1080,8 +1079,8 @@ class TestDrawdownLimits:
         result = baba.check_drawdown_limits(risk_params)
         assert result is False
 
-    def test_zero_equity_returns_true(self, baba, tmp_db):
-        """Equity=0 → True (guvenli taraf)."""
+    def test_zero_equity_returns_false(self, baba, tmp_db):
+        """Equity=0 → False (islem durdur, sermaye yok)."""
         tmp_db.insert_risk_snapshot({
             "equity": 0.0,
             "floating_pnl": 0.0,
@@ -1090,7 +1089,7 @@ class TestDrawdownLimits:
         })
         risk_params = RiskParams(max_daily_loss=0.02, max_total_drawdown=0.10)
         result = baba.check_drawdown_limits(risk_params)
-        assert result is True
+        assert result is False
 
     def test_positive_daily_pnl(self, baba, tmp_db):
         """Gunluk PnL pozitif → True."""
@@ -1105,11 +1104,15 @@ class TestDrawdownLimits:
         assert result is True
 
     def test_exact_daily_limit(self, baba, tmp_db):
-        """Gunluk kayip tam limite esit → False (>= kontrolu)."""
+        """Gunluk kayip tam limite esit → False (>= kontrolu).
+
+        Gün başı equity bazlı: day_start = 98_000 - (-2000) = 100_000
+        daily_loss_pct = 2000 / 100_000 = 0.02 = %2 tam limit
+        """
         tmp_db.insert_risk_snapshot({
-            "equity": 100_000.0,
+            "equity": 98_000.0,
             "floating_pnl": -1000.0,
-            "daily_pnl": -2000.0,  # %2 tam limit
+            "daily_pnl": -2000.0,  # day_start=100K → %2 tam limit
             "drawdown": 0.05,
         })
         risk_params = RiskParams(max_daily_loss=0.02, max_total_drawdown=0.10)
@@ -1585,8 +1588,8 @@ class TestConsecutiveLoss:
                 "direction": "BUY",
                 "lot": 1.0,
                 "pnl": -100.0 * (i + 1),
-                "entry_time": f"2025-01-01T10:0{i}:00",
-                "exit_time": f"2025-01-01T10:0{i + 3}:00",
+                "entry_time": f"2026-03-01T10:0{i}:00",
+                "exit_time": f"2026-03-01T10:0{i + 3}:00",
             })
         baba._update_consecutive_losses()
         assert baba._risk_state["consecutive_losses"] == 3
@@ -1597,26 +1600,26 @@ class TestConsecutiveLoss:
         tmp_db.insert_trade({
             "strategy": "test", "symbol": "F_THYAO", "direction": "BUY",
             "lot": 1.0, "pnl": -100.0,
-            "entry_time": "2025-01-01T10:00:00",
-            "exit_time": "2025-01-01T10:05:00",
+            "entry_time": "2026-03-01T10:00:00",
+            "exit_time": "2026-03-01T10:05:00",
         })
         tmp_db.insert_trade({
             "strategy": "test", "symbol": "F_THYAO", "direction": "BUY",
             "lot": 1.0, "pnl": 200.0,  # KAZANC
-            "entry_time": "2025-01-01T10:10:00",
-            "exit_time": "2025-01-01T10:15:00",
+            "entry_time": "2026-03-01T10:10:00",
+            "exit_time": "2026-03-01T10:15:00",
         })
         tmp_db.insert_trade({
             "strategy": "test", "symbol": "F_THYAO", "direction": "BUY",
             "lot": 1.0, "pnl": -50.0,
-            "entry_time": "2025-01-01T10:20:00",
-            "exit_time": "2025-01-01T10:25:00",
+            "entry_time": "2026-03-01T10:20:00",
+            "exit_time": "2026-03-01T10:25:00",
         })
         tmp_db.insert_trade({
             "strategy": "test", "symbol": "F_THYAO", "direction": "BUY",
             "lot": 1.0, "pnl": -75.0,
-            "entry_time": "2025-01-01T10:30:00",
-            "exit_time": "2025-01-01T10:35:00",
+            "entry_time": "2026-03-01T10:30:00",
+            "exit_time": "2026-03-01T10:35:00",
         })
         baba._update_consecutive_losses()
         # Son 2 kayip, oncesi kazanc → 2

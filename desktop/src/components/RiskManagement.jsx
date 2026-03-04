@@ -232,6 +232,12 @@ export default function RiskManagement() {
             </span>
           </div>
           <div className="risk-counter-card">
+            <span className="risk-counter-label">Bakiye</span>
+            <span className="risk-counter-value">
+              {formatMoney(risk.balance)} TRY
+            </span>
+          </div>
+          <div className="risk-counter-card">
             <span className="risk-counter-label">Toplam Drawdown</span>
             <span className="risk-counter-value">
               {pct(risk.total_drawdown_pct)}

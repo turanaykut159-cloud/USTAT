@@ -1,4 +1,5 @@
 {
+  "version": "5.1.0",
   "engine": {
     "cycle_interval": 10,
     "data_lookback_bars": 500,
@@ -9,11 +10,14 @@
     "margin_reserve_pct": 0.20
   },
   "risk": {
-    "max_daily_loss_pct": 0.02,
+    "max_daily_loss_pct": 0.018,
     "max_total_drawdown_pct": 0.10,
+    "hard_drawdown_pct": 0.12,
     "risk_per_trade_pct": 0.01,
     "max_open_positions": 5,
-    "max_correlated_positions": 3
+    "max_correlated_positions": 3,
+    "sltp_max_retries": 3,
+    "close_max_retries": 3
   },
   "mt5": {
     "path": "C:\\Program Files\\GCM MT5 Terminal\\terminal64.exe",
@@ -34,7 +38,12 @@
     "adx_period": 14,
     "bb_period": 20,
     "bb_std": 2.0,
-    "atr_period": 14
+    "atr_period": 14,
+    "kc_ema_period": 20,
+    "kc_atr_period": 14,
+    "kc_atr_mult": 1.5,
+    "williams_r_period": 14,
+    "adx_slope_bars": 3
   },
   "strategies": {
     "trend_follow": {
@@ -48,20 +57,34 @@
     },
     "mean_reversion": {
       "rsi_period": 14,
-      "rsi_oversold": 30.0,
-      "rsi_overbought": 70.0,
+      "rsi_oversold": 20.0,
+      "rsi_overbought": 80.0,
       "adx_threshold": 20.0,
       "bb_period": 20,
       "bb_std": 2.0,
-      "sl_atr_mult": 1.0
+      "sl_atr_mult": 1.0,
+      "williams_r_oversold": -80.0,
+      "williams_r_overbought": -20.0,
+      "breakeven_profit_pct": 0.5
     },
     "breakout": {
       "lookback": 20,
       "volume_mult": 1.5,
       "atr_expansion": 1.2,
       "trailing_atr_mult": 2.0,
-      "reentry_bars": 3
+      "reentry_bars": 3,
+      "squeeze_bonus": 0.15
     }
+  },
+  "session_filter": {
+    "open_buffer_minutes": 30,
+    "close_buffer_minutes": 30,
+    "strength_reduction": 0.5
+  },
+  "graduated_lot": {
+    "loss_1_mult": 0.75,
+    "loss_2_mult": 0.50,
+    "loss_3_action": "cooldown"
   },
   "liquidity_overrides": {
     "volume_mult": {"A": 1.5, "B": 2.0, "C": 3.0},

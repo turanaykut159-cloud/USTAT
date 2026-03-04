@@ -27,10 +27,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from engine.utils.helpers import last_valid as _last_valid, last_n_valid as _last_n_valid
 from engine.ogul import (
     Ogul,
-    _last_valid,
-    _last_n_valid,
     _find_swing_low,
     _find_swing_high,
     REGIME_STRATEGIES,
@@ -105,6 +104,12 @@ def mock_mt5():
     )
     mt5.cancel_order.return_value = True
     mt5.check_order_status.return_value = None
+    mt5.get_symbol_info.return_value = SimpleNamespace(
+        trade_contract_size=100.0,
+        volume_min=1.0,
+        volume_max=10.0,
+        volume_step=1.0,
+    )
     return mt5
 
 
@@ -817,7 +822,7 @@ class TestBreakout:
         assert signal is None
 
     def test_sl_at_range_midpoint(self, ogul, mock_mt5):
-        """SL: range orta noktası."""
+        """SL: last_close - ATR_mult → fiyatın altında."""
         n = MIN_BARS_M15 + 10
         mid = 100.0
 
@@ -835,9 +840,14 @@ class TestBreakout:
         high[-3:-1] = close[-3:-1] + 2.0
         low[-3:-1] = close[-3:-1] - 2.0
 
+        # Tick fiyatını breakout close'a yakın ayarla (tutarlı test verisi)
+        mock_mt5.get_tick.return_value = SimpleNamespace(
+            ask=close[-1], bid=close[-1] - 0.1,
+        )
+
         signal = ogul._check_breakout("F_THYAO", close, high, low, volume)
         if signal is not None:
-            # SL = (20-bar high + 20-bar low) / 2 → range orta noktası
+            # SL = last_close - BO_SL_ATR_MULT * ATR → fiyatın altında
             assert signal.sl < signal.price  # BUY ise SL fiyatın altında
 
     def test_tp_range_width(self, ogul, mock_mt5):
@@ -1022,7 +1032,8 @@ class TestExecuteSignal:
         assert trade.order_ticket == 12345
         assert trade.direction == "BUY"
         assert trade.strategy == "trend_follow"
-        mock_baba.increment_daily_trade_count.assert_called_once()
+        # Sayaç FILLED'da artıyor, SENT'te değil
+        mock_baba.increment_daily_trade_count.assert_not_called()
 
     def test_failed_order(self, ogul, mock_mt5, tmp_db, mock_baba):
         """Başarısız emir → Trade oluşmaz."""
@@ -2143,7 +2154,7 @@ class TestAdvanceTimeout:
         ogul._advance_timeout("F_THYAO", trade, regime)
 
         assert trade.state == TradeState.MARKET_RETRY
-        assert trade.ticket == 999
+        assert trade.order_ticket == 999
         assert trade.retry_count == 1
         call_kwargs = mock_mt5.send_order.call_args
         assert call_kwargs[1].get("order_type") == "market"
@@ -2239,7 +2250,7 @@ class TestAdvanceMarketRetry:
         )
         ogul.active_trades["F_THYAO"] = trade
         mock_mt5.get_positions.return_value = [
-            {"ticket": 999, "price_open": 100.2},
+            {"ticket": 999, "symbol": "F_THYAO", "price_open": 100.2},
         ]
 
         regime = Regime(regime_type=RegimeType.TREND)
@@ -2272,7 +2283,7 @@ class TestAdvanceMarketRetry:
         )
         ogul.active_trades["F_THYAO"] = trade
         mock_mt5.get_positions.return_value = [
-            {"ticket": 999, "price_open": 100.5},  # slippage=0.5 > 0.3
+            {"ticket": 999, "symbol": "F_THYAO", "price_open": 100.5},  # slippage=0.5 > 0.3
         ]
 
         regime = Regime(regime_type=RegimeType.TREND)
@@ -2296,7 +2307,7 @@ class TestAdvanceMarketRetry:
         )
         ogul.active_trades["F_THYAO"] = trade
         mock_mt5.get_positions.return_value = [
-            {"ticket": 999, "price_open": 100.3},
+            {"ticket": 999, "symbol": "F_THYAO", "price_open": 100.3},
         ]
 
         regime = Regime(regime_type=RegimeType.TREND)

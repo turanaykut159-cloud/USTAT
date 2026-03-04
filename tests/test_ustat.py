@@ -50,8 +50,8 @@ from engine.ustat import (
     Ustat,
     _business_days_since,
     _business_days_until,
-    _last_valid,
 )
+from engine.utils.helpers import last_valid as _last_valid
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -729,15 +729,15 @@ class TestBusinessDays:
         assert _business_days_until(d, d) == 0
 
     def test_weekdays_count(self):
-        """Pazartesi → Cuma = 4 iş günü."""
-        monday = date(2025, 6, 2)    # Pazartesi
-        friday = date(2025, 6, 6)    # Cuma
+        """Pazartesi → Cuma = 4 iş günü (tatil olmayan hafta)."""
+        monday = date(2025, 5, 5)    # Pazartesi (tatil değil)
+        friday = date(2025, 5, 9)    # Cuma (tatil değil)
         assert _business_days_until(friday, monday) == 4
 
     def test_weekend_skipped(self):
         """Cuma → Pazartesi = 1 iş günü (haftasonu atlanır)."""
-        friday = date(2025, 6, 6)    # Cuma
-        monday = date(2025, 6, 9)    # Pazartesi
+        friday = date(2025, 5, 9)    # Cuma
+        monday = date(2025, 5, 12)   # Pazartesi
         assert _business_days_until(monday, friday) == 1
 
     def test_business_days_since(self):

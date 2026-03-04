@@ -35,9 +35,11 @@ async def get_risk():
             resp.total_drawdown_pct = snap.get("drawdown", 0.0)
             equity = snap.get("equity", 0.0) or 0.0
 
-            # daily_drawdown_pct: anlık hesapla (kesir, örn. 0.02 = %2)
-            if equity > 0 and snap.get("daily_pnl", 0) < 0:
-                resp.daily_drawdown_pct = abs(snap["daily_pnl"]) / equity
+            # daily_drawdown_pct: gün başı equity bazlı (Madde 1.2)
+            daily_pnl = snap.get("daily_pnl", 0.0)
+            day_start_equity = equity - daily_pnl
+            if daily_pnl < 0 and day_start_equity > 0:
+                resp.daily_drawdown_pct = abs(daily_pnl) / day_start_equity
             else:
                 resp.daily_drawdown_pct = 0.0
 
@@ -56,6 +58,7 @@ async def get_risk():
                 resp.weekly_drawdown_pct = 0.0
 
             resp.equity = equity
+            resp.balance = snap.get("balance", 0.0) or 0.0
 
     # ── Baba'dan canlı risk bilgisi ──────────────────────────────
     if baba:

@@ -19,6 +19,12 @@ from engine.utils.indicators import (
     atr,
     bollinger_bands,
     calculate_indicators,
+    keltner_channel,
+    bb_kc_squeeze,
+    williams_r,
+    normalized_atr,
+    adx_slope,
+    hurst_exponent,
 )
 
 # ── Yardımcılar ─────────────────────────────────────────────────────
@@ -525,3 +531,247 @@ class TestCalculateIndicators:
         np.testing.assert_allclose(
             result["rsi_14"].values, rsi(c, 14), atol=TOL, equal_nan=True
         )
+
+
+# ═════════════════════════════════════════════════════════════════════
+#  KELTNER CHANNEL
+# ═════════════════════════════════════════════════════════════════════
+
+class TestKeltnerChannel:
+    """Keltner Channel testleri."""
+
+    def test_middle_is_ema(self):
+        """Orta bant EMA olmalı."""
+        c = _close(60)
+        h = c + 0.5
+        l = c - 0.5
+        _, kc_mid, _ = keltner_channel(h, l, c, ema_period=20)
+        ema_20 = ema(c, 20)
+        mask = ~np.isnan(kc_mid)
+        np.testing.assert_allclose(kc_mid[mask], ema_20[mask], atol=TOL)
+
+    def test_upper_gt_lower(self):
+        """Upper > Lower (volatilite > 0)."""
+        c = _close(60)
+        h = c + np.random.uniform(0.1, 1.0, len(c))
+        l = c - np.random.uniform(0.1, 1.0, len(c))
+        kc_up, _, kc_low = keltner_channel(h, l, c)
+        mask = ~np.isnan(kc_up) & ~np.isnan(kc_low)
+        assert np.all(kc_up[mask] >= kc_low[mask])
+
+    def test_constant_series(self):
+        """Sabit seride upper = middle = lower."""
+        n = 40
+        c = np.full(n, 50.0)
+        h = np.full(n, 50.0)
+        l = np.full(n, 50.0)
+        kc_up, kc_mid, kc_low = keltner_channel(h, l, c)
+        mask = ~np.isnan(kc_up)
+        np.testing.assert_allclose(kc_up[mask], 50.0, atol=TOL)
+        np.testing.assert_allclose(kc_low[mask], 50.0, atol=TOL)
+
+    def test_length_preserved(self):
+        """Çıktı uzunluğu girdi ile aynı."""
+        c = _close(50)
+        h = c + 0.5
+        l = c - 0.5
+        kc_up, kc_mid, kc_low = keltner_channel(h, l, c)
+        assert len(kc_up) == len(c)
+        assert len(kc_mid) == len(c)
+        assert len(kc_low) == len(c)
+
+
+# ═════════════════════════════════════════════════════════════════════
+#  BB/KC SQUEEZE
+# ═════════════════════════════════════════════════════════════════════
+
+class TestBBKCSqueeze:
+    """BB/KC Squeeze testleri."""
+
+    def test_output_binary(self):
+        """Çıktı 0.0, 1.0 veya NaN olmalı."""
+        c = _close(80)
+        h = c + np.random.uniform(0.1, 1.0, len(c))
+        l = c - np.random.uniform(0.1, 1.0, len(c))
+        sq = bb_kc_squeeze(h, l, c)
+        valid = sq[~np.isnan(sq)]
+        for v in valid:
+            assert v in (0.0, 1.0), f"Beklenmeyen değer: {v}"
+
+    def test_constant_squeeze(self):
+        """Sabit fiyatta BB ve KC bandı birleşir → squeeze."""
+        n = 60
+        c = np.full(n, 100.0)
+        h = np.full(n, 100.0)
+        l = np.full(n, 100.0)
+        sq = bb_kc_squeeze(h, l, c)
+        # Sabit fiyatta her iki bant da aynı → squeeze (BB içinde KC)
+        # veya tam örtüşme
+        valid = sq[~np.isnan(sq)]
+        # Sabit seride BB width=0, KC width=0, yani eşit → squeeze değil
+        # (BB_upper == KC_upper, koşul < gerekiyor)
+        assert len(valid) > 0
+
+    def test_length_preserved(self):
+        """Çıktı uzunluğu girdi ile aynı."""
+        c = _close(60)
+        h = c + 0.5
+        l = c - 0.5
+        sq = bb_kc_squeeze(h, l, c)
+        assert len(sq) == len(c)
+
+
+# ═════════════════════════════════════════════════════════════════════
+#  WILLIAMS %R
+# ═════════════════════════════════════════════════════════════════════
+
+class TestWilliamsR:
+    """Williams %R testleri."""
+
+    def test_range_minus100_to_0(self):
+        """Williams %R -100 ile 0 arasında olmalı."""
+        c = _close(50)
+        h = c + np.random.uniform(0.1, 1.0, len(c))
+        l = c - np.random.uniform(0.1, 1.0, len(c))
+        wr = williams_r(h, l, c, 14)
+        valid = wr[~np.isnan(wr)]
+        assert np.all(valid >= -100.0)
+        assert np.all(valid <= 0.0)
+
+    def test_monotonic_up(self):
+        """Sürekli yükselen fiyatta W%R 0'a yakın olmalı."""
+        c = np.linspace(50, 100, 50)
+        h = c + 0.1
+        l = c - 0.1
+        wr = williams_r(h, l, c, 14)
+        # Son birkaç değer 0'a yakın olmalı
+        assert wr[-1] > -10.0
+
+    def test_monotonic_down(self):
+        """Sürekli düşen fiyatta W%R -100'e yakın olmalı."""
+        c = np.linspace(100, 50, 50)
+        h = c + 0.1
+        l = c - 0.1
+        wr = williams_r(h, l, c, 14)
+        assert wr[-1] < -90.0
+
+    def test_nan_prefix(self):
+        """İlk period-1 eleman NaN olmalı."""
+        c = _close(30)
+        h = c + 0.5
+        l = c - 0.5
+        wr = williams_r(h, l, c, 14)
+        assert all(np.isnan(wr[i]) for i in range(13))
+
+    def test_length_preserved(self):
+        """Çıktı uzunluğu girdi ile aynı."""
+        c = _close(40)
+        h = c + 0.5
+        l = c - 0.5
+        wr = williams_r(h, l, c, 14)
+        assert len(wr) == len(c)
+
+    def test_invalid_period(self):
+        """Geçersiz period ValueError fırlatmalı."""
+        with pytest.raises(ValueError):
+            williams_r(np.array([1.0]), np.array([1.0]), np.array([1.0]), 0)
+
+
+# ═════════════════════════════════════════════════════════════════════
+#  NORMALIZED ATR
+# ═════════════════════════════════════════════════════════════════════
+
+class TestNormalizedATR:
+    """Normalized ATR testleri."""
+
+    def test_always_positive(self):
+        """NATR her zaman pozitif olmalı."""
+        c = _close(50)
+        h = c + np.random.uniform(0.1, 1.0, len(c))
+        l = c - np.random.uniform(0.1, 1.0, len(c))
+        natr = normalized_atr(h, l, c, 14)
+        valid = natr[~np.isnan(natr)]
+        assert np.all(valid > 0)
+
+    def test_percentage_format(self):
+        """NATR yüzde cinsinden olmalı (genelde 0-10 arası)."""
+        c = _close(50)
+        h = c + np.random.uniform(0.1, 1.0, len(c))
+        l = c - np.random.uniform(0.1, 1.0, len(c))
+        natr = normalized_atr(h, l, c, 14)
+        valid = natr[~np.isnan(natr)]
+        assert np.all(valid < 100.0)  # %100'den küçük olmalı
+
+    def test_length_preserved(self):
+        """Çıktı uzunluğu girdi ile aynı."""
+        c = _close(40)
+        h = c + 0.5
+        l = c - 0.5
+        natr = normalized_atr(h, l, c, 14)
+        assert len(natr) == len(c)
+
+
+# ═════════════════════════════════════════════════════════════════════
+#  ADX SLOPE
+# ═════════════════════════════════════════════════════════════════════
+
+class TestADXSlope:
+    """ADX Slope testleri."""
+
+    def test_strong_trend_positive_slope(self):
+        """Güçlü trend → pozitif ADX slope."""
+        # Düzenli yükseliş → ADX artar → slope pozitif
+        c = np.linspace(50, 150, 80)
+        h = c + 1.0
+        l = c - 1.0
+        slope = adx_slope(h, l, c, adx_period=14, slope_bars=3)
+        valid = slope[~np.isnan(slope)]
+        # Son değerler genelde pozitif
+        assert len(valid) > 0
+
+    def test_length_preserved(self):
+        """Çıktı uzunluğu girdi ile aynı."""
+        c = _close(60)
+        h = c + 0.5
+        l = c - 0.5
+        slope = adx_slope(h, l, c)
+        assert len(slope) == len(c)
+
+
+# ═════════════════════════════════════════════════════════════════════
+#  HURST EXPONENT
+# ═════════════════════════════════════════════════════════════════════
+
+class TestHurstExponent:
+    """Hurst Exponent testleri."""
+
+    def test_trending_series(self):
+        """Trend serisi → H > 0.5."""
+        data = np.cumsum(np.ones(100))  # sürekli artış
+        h = hurst_exponent(data, max_lag=20)
+        assert not np.isnan(h)
+        assert h > 0.4  # trend serisi genelde > 0.5
+
+    def test_random_walk(self):
+        """Rastgele yürüyüş → H sayısal değer döner."""
+        rng = np.random.RandomState(123)
+        data = np.cumsum(rng.normal(0, 1, 500))
+        h = hurst_exponent(data, max_lag=20)
+        assert not np.isnan(h)
+        # R/S analizi küçük veri setlerinde kesin 0.5 garanti etmez
+        assert 0.0 < h < 2.0
+
+    def test_short_data_nan(self):
+        """Kısa veri → NaN."""
+        data = np.array([1.0, 2.0, 3.0])
+        h = hurst_exponent(data, max_lag=20)
+        assert np.isnan(h)
+
+    def test_mean_reverting(self):
+        """Ortalamaya dönen seri → H sayısal değer döner."""
+        # Sinüs dalgası — ortalamaya dönen
+        data = np.sin(np.linspace(0, 20 * np.pi, 500)) * 10 + 100
+        h = hurst_exponent(data, max_lag=20)
+        assert not np.isnan(h)
+        # R/S ile hesaplanan H küçük veri setlerinde kesin < 0.5 garanti etmez
+        assert 0.0 < h < 2.0

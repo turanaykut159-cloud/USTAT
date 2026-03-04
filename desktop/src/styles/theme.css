@@ -1200,6 +1200,44 @@ h2 {
   letter-spacing: 0.2px;
 }
 
+/* ── Dashboard Hesap Durumu Şeridi ─────────────────────────── */
+.dash-account-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 16px;
+}
+
+.dash-account-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dash-account-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.dash-account-value {
+  font-size: 15px;
+  font-weight: 600;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+}
+
+.dash-account-suffix {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-dim);
+  margin-left: 2px;
+}
+
 /* ── Charts Row (2 adet, yan yana) ───────────────────────────── */
 /* ── Dashboard Açık Pozisyonlar ──────────────────────────── */
 .dash-positions-row {
@@ -2360,6 +2398,36 @@ h2 {
   font-size: 10px;
   color: var(--text-secondary);
   font-weight: 500;
+}
+
+/* ── Performance Chart Legend ──────────────────────────────── */
+.pf-chart-legend {
+  display: flex;
+  gap: 14px;
+  margin-left: auto;
+}
+
+.pf-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.pf-legend-line {
+  display: inline-block;
+  width: 16px;
+  height: 2px;
+  border-radius: 1px;
+}
+
+.pf-legend-dashed {
+  background: repeating-linear-gradient(
+    90deg,
+    #3fb950 0px, #3fb950 4px,
+    transparent 4px, transparent 8px
+  ) !important;
 }
 
 /* ══════════════════════════════════════════════════════════════

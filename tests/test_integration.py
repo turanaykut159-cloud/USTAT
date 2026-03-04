@@ -166,6 +166,8 @@ def mock_db():
     db = MagicMock()
     db.insert_event.return_value = None
     db.close.return_value = None
+    db.get_latest_risk_snapshot.return_value = None
+    db.get_risk_snapshots.return_value = []
     return db
 
 
@@ -223,7 +225,7 @@ class TestStartupFlow:
         """Başlatma sırası: connect → restore baba → restore ogul → cycle."""
         execution_log = []
 
-        mock_mt5.connect.side_effect = lambda: (
+        mock_mt5.connect.side_effect = lambda **kwargs: (
             execution_log.append("mt5_connect") or True
         )
         mock_baba.restore_risk_state.side_effect = lambda: (
@@ -472,8 +474,8 @@ class TestTradeFlow:
         assert len(events) >= 1
         assert "F_THYAO" in events[0]["message"]
 
-        # BABA sayacı güncellendi
-        mock_baba.increment_daily_trade_count.assert_called_once()
+        # Sayaç FILLED'da artıyor, SENT'te değil
+        mock_baba.increment_daily_trade_count.assert_not_called()
 
     def test_sent_to_filled_flow(self, real_ogul, mock_mt5, tmp_db, mock_baba):
         """SENT → check_order_status → FILLED."""
@@ -627,7 +629,8 @@ class TestTradeFlow:
         )
         regime = Regime(regime_type=RegimeType.RANGE)
 
-        with patch.object(real_ogul, '_is_trading_allowed', return_value=True):
+        with patch.object(real_ogul, '_is_trading_allowed', return_value=True), \
+             patch.object(real_ogul, '_calculate_bias', return_value="SELL"):
             real_ogul._execute_signal(signal, regime)
 
         # DB'den trade oku

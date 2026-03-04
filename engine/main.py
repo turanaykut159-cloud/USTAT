@@ -26,7 +26,7 @@ import time as _time
 import traceback
 from datetime import datetime
 
-from engine.baba import Baba
+from engine.baba import Baba, validate_expiry_dates
 from engine.config import Config
 from engine.data_pipeline import DataPipeline
 from engine.database import Database
@@ -83,8 +83,11 @@ class Engine:
         self.pipeline = pipeline or DataPipeline(self.mt5, self.db, self.config)
         self.ustat = ustat or Ustat(self.config, self.db)
         self.baba = baba or Baba(self.config, self.db, mt5=self.mt5)
-        self.ogul = ogul or Ogul(self.config, self.mt5, self.db, baba=self.baba)
         self.risk_params = RiskParams()
+        self.ogul = ogul or Ogul(
+            self.config, self.mt5, self.db,
+            baba=self.baba, risk_params=self.risk_params,
+        )
 
         # ── Durum ───────────────────────────────────────────────────
         self._running: bool = False
@@ -101,6 +104,28 @@ class Engine:
         logger.info("=" * 60)
         logger.info("ÜSTAT Trading Engine başlatılıyor...")
         logger.info("=" * 60)
+
+        # 0. Config durumu kontrolü (Madde 2.6)
+        if not self.config.is_loaded:
+            logger.critical("Config dosyası yüklenemedi — varsayılan değerlerle devam ediliyor!")
+            self._log_event(
+                "CONFIG_MISSING",
+                f"Config dosyası bulunamadı veya parse edilemedi: {self.config._path}",
+                "CRITICAL",
+            )
+
+        # 0.5. VİOP vade tarihleri doğrulama (Madde 2.7)
+        expiry_issues = validate_expiry_dates()
+        if expiry_issues:
+            for issue in expiry_issues:
+                logger.warning(f"VİOP vade tarihi sorunu: {issue}")
+            self._log_event(
+                "EXPIRY_DATE_WARNING",
+                f"{len(expiry_issues)} vade tarihi sorunu: {'; '.join(expiry_issues)}",
+                "WARNING",
+            )
+        else:
+            logger.info("VİOP vade tarihleri doğrulandı — tümü iş günü.")
 
         # 1. MT5 bağlantısı
         if not self._connect_mt5():

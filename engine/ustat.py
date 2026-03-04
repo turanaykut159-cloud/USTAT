@@ -34,6 +34,7 @@ from engine.database import Database
 from engine.logger import get_logger
 from engine.models.regime import Regime, RegimeType
 from engine.mt5_bridge import WATCHED_SYMBOLS
+from engine.utils.helpers import last_valid
 from engine.utils.indicators import (
     adx as calc_adx,
     atr as calc_atr,
@@ -102,13 +103,6 @@ from engine.utils.time_utils import ALL_HOLIDAYS  # noqa: E402
 # ═════════════════════════════════════════════════════════════════════
 #  YARDIMCI FONKSİYONLAR
 # ═════════════════════════════════════════════════════════════════════
-
-def _last_valid(arr: np.ndarray) -> float | None:
-    """Dizinin son NaN-olmayan değeri."""
-    for i in range(len(arr) - 1, -1, -1):
-        if not np.isnan(arr[i]):
-            return float(arr[i])
-    return None
 
 
 def _business_days_until(target: date, from_date: date) -> int:
@@ -442,13 +436,13 @@ class Ustat:
             close, TECH_BB_PERIOD, TECH_BB_STD,
         )
 
-        adx_val = _last_valid(adx_arr)
-        rsi_val = _last_valid(rsi_arr)
-        hist_val = _last_valid(histogram)
-        ema_fast_val = _last_valid(ema_f)
-        ema_slow_val = _last_valid(ema_s)
-        bb_upper = _last_valid(bb_u)
-        bb_lower = _last_valid(bb_l)
+        adx_val = last_valid(adx_arr)
+        rsi_val = last_valid(rsi_arr)
+        hist_val = last_valid(histogram)
+        ema_fast_val = last_valid(ema_f)
+        ema_slow_val = last_valid(ema_s)
+        bb_upper = last_valid(bb_u)
+        bb_lower = last_valid(bb_l)
 
         if any(
             v is None
@@ -688,7 +682,7 @@ class Ustat:
         low = df["low"].values.astype(np.float64)
 
         atr_arr = calc_atr(high, low, close, TECH_ATR_PERIOD)
-        atr_val = _last_valid(atr_arr)
+        atr_val = last_valid(atr_arr)
         price = close[-1]
 
         if atr_val is None or price <= 0:

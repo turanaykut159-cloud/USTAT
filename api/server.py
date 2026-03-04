@@ -1,4 +1,4 @@
-"""ÜSTAT v5.0 API — FastAPI Sunucu.
+"""ÜSTAT v5.1 API — FastAPI Sunucu.
 
 Desktop uygulamasına REST API + WebSocket köprüsü sağlar.
 
@@ -109,7 +109,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="ÜSTAT API",
-    version="5.0.0",
+    version="5.1.0",
     description="VİOP Algorithmic Trading — REST & WebSocket API",
     lifespan=lifespan,
 )

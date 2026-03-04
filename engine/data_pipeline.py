@@ -101,6 +101,28 @@ class DataPipeline:
         # Son tick verileri (pipeline dışından okunabilir)
         self.latest_ticks: dict[str, TickSnapshot] = {}
 
+        # MT5 cache — WebSocket buradan okur, MT5'e doğrudan gitmez (Madde 2.4)
+        self.latest_account: Any | None = None   # AccountInfo nesnesi
+        self.latest_positions: list[dict] = []   # Pozisyon dict listesi
+        self._cache_time: datetime | None = None  # Son cache güncelleme zamanı
+
+        # Peak equity baseline doğrulaması
+        self._validate_peak_equity()
+
+    def is_cache_stale(self, max_age_seconds: float = 15.0) -> bool:
+        """Cache'in yaşını kontrol et.
+
+        Args:
+            max_age_seconds: Kabul edilebilir maksimum yaş (saniye).
+
+        Returns:
+            True → cache eski veya yok, False → taze.
+        """
+        if self._cache_time is None:
+            return True
+        age = (datetime.now() - self._cache_time).total_seconds()
+        return age > max_age_seconds
+
     # ── public: ana cycle ────────────────────────────────────────────
     def run_cycle(self) -> None:
         """10 saniyelik ana döngüden çağrılır.
@@ -507,6 +529,11 @@ class DataPipeline:
             # Açık pozisyonlar
             positions = self._mt5.get_positions()
 
+            # Cache güncelle — WebSocket buradan okur (Madde 2.4)
+            self.latest_account = account
+            self.latest_positions = positions
+            self._cache_time = datetime.now()
+
             # Floating PnL = pozisyonların toplam profit'i
             floating_pnl = sum(p.get("profit", 0.0) for p in positions)
 
@@ -527,6 +554,7 @@ class DataPipeline:
 
             snapshot: dict[str, Any] = {
                 "equity": account.equity,
+                "balance": account.balance,
                 "floating_pnl": floating_pnl,
                 "daily_pnl": daily_pnl,
                 "positions_json": positions,
@@ -570,10 +598,46 @@ class DataPipeline:
         start_equity = first.get("equity", current_equity)
         return round(current_equity - start_equity, 2)
 
-    def _calculate_drawdown(self, current_equity: float) -> float:
-        """Drawdown hesapla (peak equity'ye göre).
+    def _validate_peak_equity(self) -> None:
+        """Peak equity'yi RISK_BASELINE_DATE'e göre doğrula.
 
-        Son 500 risk snapshot'tan peak equity bulunur.
+        Eski test/geliştirme verilerinden kalan şişirilmiş peak_equity
+        değerini tespit eder ve baseline sonrası gerçek max equity ile
+        değiştirir. Engine başlangıcında bir kez çalışır.
+        """
+        from engine.baba import RISK_BASELINE_DATE
+
+        stored = self._db.get_state("peak_equity")
+        if not stored:
+            return
+
+        stored_peak = float(stored)
+
+        # Baseline sonrası gerçek max equity'yi bul
+        snapshots = self._db.get_risk_snapshots(
+            since=f"{RISK_BASELINE_DATE}T00:00:00", limit=50000,
+        )
+        if not snapshots:
+            return
+
+        max_eq = max(
+            (s.get("equity", 0.0) for s in snapshots),
+            default=0.0,
+        )
+
+        # Stored peak, gerçek max'ın 1.5 katından büyükse → stale
+        if max_eq > 0 and stored_peak > max_eq * 1.5:
+            self._db.set_state("peak_equity", str(max_eq))
+            logger.warning(
+                f"Peak equity sıfırlandı: {stored_peak:.2f} → {max_eq:.2f} "
+                f"(RISK_BASELINE_DATE={RISK_BASELINE_DATE} ile uyumsuz)"
+            )
+
+    def _calculate_drawdown(self, current_equity: float) -> float:
+        """Drawdown hesapla (kalıcı peak equity'ye göre).
+
+        Peak equity DB'de kalıcı saklanır (Madde 1.4).
+        İlk çalıştırmada DB'de peak yoksa mevcut equity kullanılır.
 
         Args:
             current_equity: Mevcut equity.
@@ -581,13 +645,17 @@ class DataPipeline:
         Returns:
             Drawdown oranı (0.0–1.0 arası). 0.05 = %5 drawdown.
         """
-        snapshots = self._db.get_risk_snapshots(limit=500)
+        # DB'den kalıcı peak oku
+        stored = self._db.get_state("peak_equity")
+        stored_peak = float(stored) if stored else 0.0
 
-        if not snapshots:
-            return 0.0
+        # Mevcut equity ile karşılaştır
+        peak = max(stored_peak, current_equity)
 
-        peak = max(s.get("equity", 0.0) for s in snapshots)
-        peak = max(peak, current_equity)
+        # Yeni peak ise DB'ye kaydet
+        if peak > stored_peak:
+            self._db.set_state("peak_equity", str(peak))
+            logger.debug(f"Peak equity güncellendi: {stored_peak:.2f} → {peak:.2f}")
 
         if peak <= 0:
             return 0.0

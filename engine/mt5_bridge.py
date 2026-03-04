@@ -683,22 +683,39 @@ class MT5Bridge:
                         f"request={sltp_request}"
                     )
 
-                    sltp_result = mt5.order_send(sltp_request)
-                    if sltp_result is not None and sltp_result.retcode == mt5.TRADE_RETCODE_DONE:
-                        order_result["sl_tp_applied"] = True
-                        logger.info(
-                            f"SL/TP başarılı [{symbol}]: "
-                            f"SL={sl_rounded:.4f} TP={tp_rounded:.4f}"
+                    # 3 deneme ile SL/TP ekleme (P0-1 fix)
+                    sltp_applied = False
+                    SLTP_MAX_RETRIES = 3
+                    for sltp_attempt in range(1, SLTP_MAX_RETRIES + 1):
+                        sltp_result = mt5.order_send(sltp_request)
+                        if sltp_result is not None and sltp_result.retcode == mt5.TRADE_RETCODE_DONE:
+                            order_result["sl_tp_applied"] = True
+                            sltp_applied = True
+                            logger.info(
+                                f"SL/TP başarılı [{symbol}] "
+                                f"(deneme {sltp_attempt}/{SLTP_MAX_RETRIES}): "
+                                f"SL={sl_rounded:.4f} TP={tp_rounded:.4f}"
+                            )
+                            break
+                        else:
+                            sltp_err = (
+                                sltp_result.comment
+                                if sltp_result else str(mt5.last_error())
+                            )
+                            logger.warning(
+                                f"SL/TP denemesi {sltp_attempt}/{SLTP_MAX_RETRIES} "
+                                f"başarısız [{symbol}]: {sltp_err}"
+                            )
+
+                    if not sltp_applied:
+                        # 3 deneme de başarısız — pozisyonu kapat (korumasız bırakma)
+                        logger.error(
+                            f"SL/TP {SLTP_MAX_RETRIES} denemede eklenemedi [{symbol}] "
+                            f"— pozisyon korumasız, kapatılıyor"
                         )
-                    else:
-                        sltp_err = (
-                            sltp_result.comment
-                            if sltp_result else str(mt5.last_error())
-                        )
-                        logger.warning(
-                            f"SL/TP eklenemedi [{symbol}]: {sltp_err} "
-                            f"— pozisyon SL/TP'siz açık kalacak"
-                        )
+                        self.close_position(position_ticket)
+                        order_result["sl_tp_applied"] = False
+                        order_result["force_closed"] = True
 
                 return order_result
 
