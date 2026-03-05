@@ -1,4 +1,4 @@
-"""BABA — Risk yönetimi ve piyasa rejim algılama (v12.0).
+"""BABA — Risk yönetimi ve piyasa rejim algılama (v13.0).
 
 4 rejim:
     TREND    — ADX>25 + EMA mesafesi artıyor + son 5 barın 4'ü aynı yön
@@ -292,6 +292,9 @@ class Baba:
         self._killed_symbols: set[str] = set()
         # L3 kapanışta kapatılamayan pozisyon ticket'ları (API'ye iletilir)
         self._last_l3_failed_tickets: list[int] = []
+
+        # v13.0: "izin verdi" olay kaydı dedup (5 dk'da 1 kez)
+        self._last_risk_allowed_log: datetime | None = None
 
     # ── public: ana cycle ────────────────────────────────────────────
     def run_cycle(self, pipeline=None) -> Regime:
@@ -1058,6 +1061,31 @@ class Baba:
             verdict.reason = f"{risk_params.consecutive_loss_limit} üst üste kayıp — cooldown başladı"
             verdict.kill_switch_level = KILL_SWITCH_L2
             return verdict
+
+        # v13.0: Risk göstergesi varken izin verildi → olay kaydı (ÜSTAT beslemesi)
+        # 5 dk'da en fazla 1 kez logla (her cycle'da loglama çok fazla kayıt oluşturur)
+        if self.active_warnings and verdict.can_trade:
+            now = datetime.now()
+            should_log = (
+                self._last_risk_allowed_log is None
+                or (now - self._last_risk_allowed_log).total_seconds() >= 300
+            )
+            if should_log:
+                self._last_risk_allowed_log = now
+                warning_symbols = {
+                    w.symbol for w in self.active_warnings
+                    if hasattr(w, "symbol")
+                }
+                self._db.insert_event(
+                    event_type="RISK_ALLOWED",
+                    message=(
+                        f"Risk göstergesi aktif ({len(self.active_warnings)} uyarı, "
+                        f"semboller: {', '.join(sorted(warning_symbols))}) "
+                        f"ancak ticarete izin verildi"
+                    ),
+                    severity="INFO",
+                    action="baba_risk_check",
+                )
 
         return verdict
 

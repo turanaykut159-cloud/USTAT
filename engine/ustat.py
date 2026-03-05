@@ -335,7 +335,7 @@ class Ustat:
 
         risk_event_types = (
             "KILL_SWITCH", "COOLDOWN", "RISK_LIMIT",
-            "DRAWDOWN_WARNING", "SPREAD_SPIKE",
+            "DRAWDOWN_WARNING", "SPREAD_SPIKE", "RISK_ALLOWED",
         )
         risk_events = [
             e for e in events
