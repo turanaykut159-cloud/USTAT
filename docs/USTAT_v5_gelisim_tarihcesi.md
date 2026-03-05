@@ -225,3 +225,120 @@ Bu düzeltmeler native SLTP çalışmadığı için sorunu çözmedi ama kod kal
 - Onceki (#7): Kapanma tespit edilip sync yapildiginda OUT deal yoksa islem kaybi
 - Yeni (#8): OUT deal yoksa ticket pending'de kalir, 60sn aralikli retry ile 21:35 sonrasi otomatik cozulur
 - Trade gorulme suresi: Kapanma ani → max 10sn tespit + OUT deal bekleme (21:35'e kadar) + max 60sn retry = uzlasma sonrasi ~70sn
+
+---
+
+## #9 — v13.0: Top 5 Kontrat Seçimi ÜSTAT → OĞUL Taşınması (2026-03-05)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-05 |
+| **Commit** | `39b53d8` |
+| **Neden** | v13.0 spesifikasyonunda ÜSTAT read-only brain olarak tanımlandı. Top 5 seçimi işlem kararı gerektirdiğinden OĞUL sorumluluğuna alındı |
+| **Kök Neden** | Katman sorumluluğu düzeltmesi — ÜSTAT işlem kararı vermemeli, yalnızca gözlem ve raporlama yapmalı |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `engine/ogul.py` | Top 5 seçim mantığı ÜSTAT'tan taşındı: `select_top5()`, `_refresh_scores()`, 5 boyutlu puanlama (teknik/hacim/spread/tarihsel/volatilite) |
+| `engine/ogul.py` | Vade geçişi yönetimi: `_get_expiry_status()`, `get_expiry_close_needed()` |
+| `engine/ogul.py` | Haber/bilanço filtresi: `set_earnings_dates()`, `set_kap_event()`, `clear_kap_event()`, `set_manual_news_flag()` |
+| `engine/ustat.py` | Top 5 kodu kaldırıldı (99 satıra düştü) |
+| `engine/main.py` | Cycle adım 5: `self.ogul.select_top5(regime)` çağrısı |
+
+### Taşınan
+- 5 boyutlu kontrat puanlama sistemi (teknik, hacim, spread, tarihsel, volatilite)
+- Vade geçişi yönetimi (3 gün öncesi yeni işlem yasak, 1 gün öncesi pozisyon kapat)
+- Haber/bilanço filtresi (KAP özel durum, bilanço tarihleri)
+
+---
+
+## #10 — v13.0: ÜSTAT Brain Tam İmplementasyon (2026-03-05)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-05 |
+| **Commit** | `faf5182` |
+| **Neden** | v13.0 spesifikasyonunda ÜSTAT'a 8 brain görevi verildi ama implementasyon yoktu (sadece 99 satır boş sınıf) |
+| **Kök Neden** | v13.0 spec yazıldı ama engine kodu güncellenmemişti |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `engine/ustat.py` | 99 → 1213 satır: 8 brain görevi tam implementasyon |
+| `api/schemas.py` | `NextDayAnalysis`: `profit_score`, `risk_score`, `total_score` eklendi |
+| `api/schemas.py` | `StrategyPool`: `active_profile` eklendi |
+| `api/routes/ustat_brain.py` | Placeholder yerine gerçek engine verisi: `get_error_attributions()`, `get_next_day_analyses()`, `get_strategy_pool()`, `get_regulation_suggestions()` |
+
+### Eklenen (ÜSTAT Brain 8 Görev)
+1. **Olay takibi** — rejim değişikliği, kill-switch, işlem açma/kapama, uyarı değişimleri
+2. **Hata ataması** — BABA hatası (RISK_MISS) vs OĞUL hatası (PROFIT_MISS) ayrımı
+3. **Açılmayan işlem analizi** — bloke edilen sinyallerin neden analizi
+4. **Ertesi gün analizi** — 4 boyutlu puanlama (sinyal arama, işlem yönetimi, kâr yakalama, risk uyumu)
+5. **Strateji havuzu** — rejim bazlı profil eşleme (TREND→trend, RANGE→durağan, VOLATILE→volatil, OLAY→patlama)
+6. **Kontrat profilleri** — 90 günlük sembol bazlı performans
+7. **Günlük rapor** — otomatik iş günü sonu raporlama
+8. **Regülasyon önerileri** — hata/skor bazlı parametre değişiklik önerileri
+
+---
+
+## #11 — v13.0: BABA Risk Aksiyonu Olay Kaydı (2026-03-05)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-05 |
+| **Commit** | `6f61f98` |
+| **Neden** | v13.0 spesifikasyonunda BABA'nın "izin verdi" aksiyonunu da loglaması istendi. Sadece "kapattı" ve "kapatamadı" loglanıyordu |
+| **Kök Neden** | Risk kontrolü sonucu pozitif olduğunda (ticarete izin verildiğinde) olay kaydı düşmüyordu |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `engine/baba.py` | `check_risk_limits()` sonunda `RISK_ALLOWED` event kaydı eklendi (5 dakika dedup ile) |
+| `engine/baba.py` | `_last_risk_allowed_log` timestamp eklendi (`__init__`) |
+| `engine/baba.py` | Docstring v12.0 → v13.0 güncellendi |
+| `engine/ustat.py` | `_check_error_attribution()` içinde `risk_event_types` tuple'ına `"RISK_ALLOWED"` eklendi |
+
+### Eklenen
+- `RISK_ALLOWED` event tipi — uyarı aktifken ticarete izin verildiğinde loglanır
+- 5 dakika dedup — her 10 sn'de değil, 5 dk'da bir log düşer
+
+---
+
+## #12 — Sistem Sağlık İyileştirmeleri (2026-03-05)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-05 |
+| **Commit** | `4bf6cbb` |
+| **Neden** | Sistem sağlık analizi sonucu tespit edilen 2 mimari sorun düzeltildi |
+
+### Sorun 1: OĞUL Exception → H-Engine ve ÜSTAT Atlanması
+
+| Alan | Detay |
+|------|-------|
+| **Kök Neden** | `main.py` process_signals() çağrısı try/except içinde değildi. OĞUL exception atarsa H-Engine (hibrit pozisyon yönetimi) ve ÜSTAT (raporlama) adımları çalışmıyordu |
+| **Çözüm** | process_signals() çağrısı try/except ile sarıldı, `OGUL_ERROR` event kaydı eklendi |
+
+### Sorun 2: OĞUL/H-Engine BABA Private Alan Erişimi
+
+| Alan | Detay |
+|------|-------|
+| **Kök Neden** | OĞUL ve H-Engine, BABA'nın `_kill_switch_level` ve `_risk_state` private alanlarına doğrudan erişiyordu. BABA iç yapısı değiştiğinde sessiz kırılma riski |
+| **Çözüm** | BABA'ya 3 public property eklendi: `kill_switch_level`, `daily_trade_count`, `consecutive_losses`. OĞUL ve H-Engine bu property'leri kullanacak şekilde güncellendi |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `engine/main.py` | `process_signals()` çağrısı try/except ile sarıldı |
+| `engine/baba.py` | `kill_switch_level`, `daily_trade_count`, `consecutive_losses` public property'leri eklendi |
+| `engine/ogul.py` | `baba._kill_switch_level` → `baba.kill_switch_level`, `baba._risk_state` erişimleri property'lere dönüştürüldü |
+| `engine/h_engine.py` | `baba._kill_switch_level` → `baba.kill_switch_level` |
+
+### Analiz Sonucu İptal Edilen Öneriler
+- `_volatile_reason()` dead code DEĞİL — `baba.py:469`'da kullanılıyor
+- RiskVerdict çift çağrı sorun DEĞİL — API ve cycle farklı bağlam, her biri güncel veri almak zorunda
