@@ -564,7 +564,7 @@ class ContractProfile(BaseModel):
 
 
 class ErrorAttribution(BaseModel):
-    """Hata atama kaydı (placeholder — engine implemente edince dolacak)."""
+    """Hata atama kaydı — BABA veya OĞUL sorumluluğu."""
     trade_id: int
     error_type: str
     responsible: str  # "BABA" | "OGUL"
@@ -572,20 +572,22 @@ class ErrorAttribution(BaseModel):
 
 
 class NextDayAnalysis(BaseModel):
-    """Ertesi gün analizi (placeholder — engine implemente edince dolacak)."""
+    """Ertesi gün analizi — kapanan işlemlerin detaylı puanlaması."""
     trade_id: int
     symbol: str
     actual_pnl: float
     potential_pnl: float
     missed_profit: float
     signal_score: float
-    risk_score: float
     management_score: float
+    profit_score: float = 0.0
+    risk_score: float = 0.0
+    total_score: float = 0.0
     summary: str
 
 
 class RegulationSuggestion(BaseModel):
-    """Parametre regülasyon önerisi (placeholder)."""
+    """Parametre regülasyon önerisi — BABA/OĞUL parametreleri."""
     parameter: str
     current_value: str
     suggested_value: str
@@ -594,7 +596,7 @@ class RegulationSuggestion(BaseModel):
 
 
 class StrategyProfile(BaseModel):
-    """Strateji havuzu profili (placeholder)."""
+    """Strateji havuzu profili — dönem parametreleri."""
     name: str
     market_type: str = ""  # volatil / duragan / patlama
     parameters: dict = {}
@@ -602,8 +604,9 @@ class StrategyProfile(BaseModel):
 
 
 class StrategyPool(BaseModel):
-    """Strateji havuzu durumu (placeholder)."""
+    """Strateji havuzu durumu — rejime göre aktif parametre seti."""
     current_regime: str = ""
+    active_profile: str = ""
     profiles: list[StrategyProfile] = []
 
 

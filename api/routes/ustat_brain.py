@@ -1,11 +1,18 @@
 """GET /api/ustat/brain — ÜSTAT beyin analiz verileri.
 
-v13.0 spesifikasyonu kapsamında ÜSTAT'ın beyin görevleri için
-işlem kategorizasyonu, kontrat profilleri, karar akışı ve
-rejim bazlı performans verileri sağlar.
+v13.0 spesifikasyonu kapsamında ÜSTAT'ın beyin görevleri:
+  - İşlem kategorizasyonu (çok boyutlu)
+  - Kontrat profilleri
+  - Karar/olay akışı
+  - Rejim bazlı performans
+  - Hata ataması ("Kim hata yaptı?" — BABA/OĞUL)
+  - Ertesi gün analizi (puanlama)
+  - Strateji havuzu (dönem parametreleri)
+  - Regülasyon önerileri
 
-Mevcut trades/events tablolarından hesaplanan veriler + henüz
-engine'de implemente edilmemiş görevler için placeholder'lar döner.
+Veriler iki kaynaktan gelir:
+  1. DB'den hesaplanan: trades/events tablolarından kategorizasyon ve profiller
+  2. Engine'den okunan: ÜSTAT brain cycle çıktıları (hata ataması, analiz, strateji)
 """
 
 from __future__ import annotations
@@ -14,12 +21,16 @@ from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Query
 
-from api.deps import get_baba, get_db, get_engine
+from api.deps import get_baba, get_db, get_engine, get_ustat
 from api.schemas import (
     CategoryGroup,
     ContractProfile,
+    ErrorAttribution,
     EventItem,
+    NextDayAnalysis,
+    RegulationSuggestion,
     StrategyPool,
+    StrategyProfile,
     TradeCategories,
     UstatBrainResponse,
 )
@@ -167,8 +178,10 @@ async def get_ustat_brain(
 ):
     """ÜSTAT beyin analiz verilerini döndür.
 
-    Mevcut trades/events tablolarından hesaplanan veriler ve
-    henüz engine'de implemente edilmemiş görevler için boş placeholder'lar.
+    İki veri kaynağı:
+      1. DB'den: trades/events tabloları → kategorizasyon, profiller
+      2. Engine ÜSTAT'tan: hata ataması, ertesi gün analizi, strateji havuzu,
+         regülasyon önerileri (run_cycle çıktıları)
     """
     engine = get_engine()
     if engine and getattr(engine.mt5, "_connected", False):
@@ -206,25 +219,83 @@ async def get_ustat_brain(
         for e in events_raw
     ]
 
-    # Rejim bazlı performans (trade_categories.by_regime ile aynı veri)
+    # Rejim bazlı performans
     regime_performance = trade_categories.by_regime
 
-    # Strateji havuzu (mevcut rejim)
-    current_regime = ""
-    baba = get_baba()
-    if baba and baba.current_regime:
-        current_regime = baba.current_regime.regime_type.value
+    # ── ÜSTAT engine verileri ────────────────────────────────────
+    ustat = get_ustat()
 
-    strategy_pool = StrategyPool(current_regime=current_regime)
+    # Hata atamaları (ÜSTAT brain cycle'dan)
+    error_attributions: list[ErrorAttribution] = []
+    if ustat:
+        for ea in ustat.get_error_attributions():
+            error_attributions.append(ErrorAttribution(
+                trade_id=ea.get("trade_id", 0),
+                error_type=ea.get("error_type", ""),
+                responsible=ea.get("responsible", ""),
+                description=ea.get("description", ""),
+            ))
+
+    # Ertesi gün analizleri (ÜSTAT brain cycle'dan)
+    next_day_analyses: list[NextDayAnalysis] = []
+    if ustat:
+        for nda in ustat.get_next_day_analyses():
+            next_day_analyses.append(NextDayAnalysis(
+                trade_id=nda.get("trade_id", 0),
+                symbol=nda.get("symbol", ""),
+                actual_pnl=nda.get("actual_pnl", 0.0),
+                potential_pnl=nda.get("potential_pnl", 0.0),
+                missed_profit=nda.get("missed_profit", 0.0),
+                signal_score=nda.get("signal_score", 0.0),
+                management_score=nda.get("management_score", 0.0),
+                profit_score=nda.get("profit_score", 0.0),
+                risk_score=nda.get("risk_score", 0.0),
+                total_score=nda.get("total_score", 0.0),
+                summary=nda.get("summary", ""),
+            ))
+
+    # Strateji havuzu (ÜSTAT brain cycle'dan)
+    strategy_pool = StrategyPool()
+    if ustat:
+        sp = ustat.get_strategy_pool()
+        strategy_pool = StrategyPool(
+            current_regime=sp.get("current_regime", ""),
+            active_profile=sp.get("active_profile", ""),
+            profiles=[
+                StrategyProfile(
+                    name=p.get("name", ""),
+                    market_type=p.get("market_type", ""),
+                    parameters=p.get("parameters", {}),
+                    active=p.get("active", False),
+                )
+                for p in sp.get("profiles", [])
+            ],
+        )
+    else:
+        # Engine yoksa sadece rejim bilgisini al
+        baba = get_baba()
+        if baba and baba.current_regime:
+            strategy_pool.current_regime = baba.current_regime.regime_type.value
+
+    # Regülasyon önerileri (ÜSTAT brain cycle'dan)
+    regulation_suggestions: list[RegulationSuggestion] = []
+    if ustat:
+        for rs in ustat.get_regulation_suggestions():
+            regulation_suggestions.append(RegulationSuggestion(
+                parameter=rs.get("parameter", ""),
+                current_value=rs.get("current_value", ""),
+                suggested_value=rs.get("suggested_value", ""),
+                reason=rs.get("reason", ""),
+                priority=rs.get("priority", "MEDIUM"),
+            ))
 
     return UstatBrainResponse(
         trade_categories=trade_categories,
         contract_profiles=contract_profiles,
         recent_decisions=recent_decisions,
         regime_performance=regime_performance,
+        error_attributions=error_attributions,
+        next_day_analyses=next_day_analyses,
         strategy_pool=strategy_pool,
-        # Placeholder'lar — engine implemente edince dolacak
-        error_attributions=[],
-        next_day_analyses=[],
-        regulation_suggestions=[],
+        regulation_suggestions=regulation_suggestions,
     )
