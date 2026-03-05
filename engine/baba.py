@@ -1332,6 +1332,23 @@ class Baba:
             f"Günlük işlem sayısı: {self._risk_state['daily_trade_count']}"
         )
 
+    # ── Public risk durumu erişimleri (OĞUL/API kullanımı için) ────
+
+    @property
+    def kill_switch_level(self) -> int:
+        """Mevcut kill-switch seviyesi (0=yok, 1=L1, 2=L2, 3=L3)."""
+        return self._kill_switch_level
+
+    @property
+    def daily_trade_count(self) -> int:
+        """Bugünkü işlem sayısı."""
+        return self._risk_state.get("daily_trade_count", 0)
+
+    @property
+    def consecutive_losses(self) -> int:
+        """Art arda zarar sayısı."""
+        return self._risk_state.get("consecutive_losses", 0)
+
     # ═════════════════════════════════════════════════════════════════
     #  KORELASYON YÖNETİMİ
     # ═════════════════════════════════════════════════════════════════

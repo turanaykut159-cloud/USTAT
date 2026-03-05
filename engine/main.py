@@ -346,13 +346,19 @@ class Engine:
         # process_signals her zaman çağrılır (emir yönetimi + trailing stop).
         # risk kapalıyken top5 yerine boş liste → sinyal üretilmez.
         # Ama bias her zaman güncellenmeli (Dashboard doğru göstersin).
-        if risk_verdict.can_trade:
-            self.ogul.process_signals(top5, regime)
-        else:
-            self.ogul.process_signals([], regime)
-            # Risk kapalıyken de bias güncelle (Dashboard için)
-            for sym in top5:
-                self.ogul.last_signals[sym] = self.ogul._calculate_bias(sym)
+        try:
+            if risk_verdict.can_trade:
+                self.ogul.process_signals(top5, regime)
+            else:
+                self.ogul.process_signals([], regime)
+                # Risk kapalıyken de bias güncelle (Dashboard için)
+                for sym in top5:
+                    self.ogul.last_signals[sym] = self.ogul._calculate_bias(sym)
+        except Exception as exc:
+            logger.error(f"OĞUL process_signals hatası: {exc}")
+            self._log_event_safe(
+                "OGUL_ERROR", f"OĞUL sinyal/emir hatası: {exc}", "ERROR",
+            )
 
         # ── 6.5. H-Engine — Hibrit Pozisyon Yönetimi ─────────────
         try:

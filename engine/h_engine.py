@@ -203,7 +203,7 @@ class HEngine:
             return result
 
         # 2. Kill-switch seviyesi
-        if self.baba and self.baba._kill_switch_level >= 3:
+        if self.baba and self.baba.kill_switch_level >= 3:
             result["reason"] = "Kill-switch L3 aktif — tüm işlemler durduruldu"
             return result
 

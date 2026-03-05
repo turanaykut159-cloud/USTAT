@@ -1083,14 +1083,10 @@ class Ogul:
                 self.baba.current_regime.risk_multiplier
                 if self.baba.current_regime else 0
             ),
-            "kill_switch_level": self.baba._kill_switch_level,
-            "daily_trade_count": self.baba._risk_state.get(
-                "daily_trade_count", 0,
-            ),
+            "kill_switch_level": self.baba.kill_switch_level,
+            "daily_trade_count": self.baba.daily_trade_count,
             "max_daily_trades": self.risk_params.max_daily_trades,
-            "consecutive_losses": self.baba._risk_state.get(
-                "consecutive_losses", 0,
-            ),
+            "consecutive_losses": self.baba.consecutive_losses,
             "lot_multiplier": verdict.lot_multiplier,
             "can_trade": verdict.can_trade,
         }
