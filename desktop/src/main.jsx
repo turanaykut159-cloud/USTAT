@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.0 Desktop — React entry point (Vite).
+ * ÜSTAT v5.1 Desktop — React entry point (Vite).
  */
 
 import React from 'react';

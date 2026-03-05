@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.0 Desktop — Electron preload script.
+ * ÜSTAT v5.1 Desktop — Electron preload script.
  * Güvenli IPC köprüsü sağlar (contextIsolation + sandbox).
  *
  * Renderer tarafında window.electronAPI üzerinden erişilir.
@@ -63,6 +63,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getEngineStatus: () => ipcRenderer.invoke('engine:status'),
   startEngine: () => ipcRenderer.invoke('engine:start'),
   stopEngine: () => ipcRenderer.invoke('engine:stop'),
+
+  // ── Güvenli kapat (doğrulama sonrası renderer'dan çağrılır) ───────
+  /**
+   * Uygulamayı tamamen kapatır (pencere + tray + API process).
+   * Önce UI'da 2 adım doğrulama yapılmalı.
+   */
+  safeQuit: () => ipcRenderer.invoke('app:safeQuit'),
 
   // ── Event dinleyicileri ────────────────────────────────────────
   onTradeUpdate: (callback) => {

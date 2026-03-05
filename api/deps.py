@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from engine.baba import Baba
     from engine.data_pipeline import DataPipeline
     from engine.database import Database
+    from engine.h_engine import HEngine
     from engine.main import Engine
     from engine.mt5_bridge import MT5Bridge
     from engine.ogul import Ogul
@@ -70,6 +71,11 @@ def get_ogul() -> Ogul | None:
 def get_pipeline() -> DataPipeline | None:
     """DataPipeline instance'ına eriş."""
     return _engine.pipeline if _engine else None
+
+
+def get_h_engine() -> HEngine | None:
+    """HEngine (hibrit motor) instance'ına eriş."""
+    return _engine.h_engine if _engine else None
 
 
 def get_uptime() -> int:

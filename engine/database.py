@@ -146,6 +146,41 @@ CREATE INDEX IF NOT EXISTS idx_events_type         ON events (type);
 CREATE INDEX IF NOT EXISTS idx_events_severity     ON events (severity);
 CREATE INDEX IF NOT EXISTS idx_top5_date           ON top5_history (date);
 CREATE INDEX IF NOT EXISTS idx_risk_timestamp      ON risk_snapshots (timestamp);
+
+CREATE TABLE IF NOT EXISTS hybrid_positions (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket          INTEGER NOT NULL UNIQUE,
+    symbol          TEXT    NOT NULL,
+    direction       TEXT    NOT NULL,
+    volume          REAL    NOT NULL,
+    entry_price     REAL    NOT NULL,
+    entry_atr       REAL    NOT NULL,
+    initial_sl      REAL    NOT NULL,
+    initial_tp      REAL    NOT NULL,
+    current_sl      REAL,
+    current_tp      REAL,
+    state           TEXT    NOT NULL DEFAULT 'ACTIVE',
+    breakeven_hit   INTEGER NOT NULL DEFAULT 0,
+    trailing_active INTEGER NOT NULL DEFAULT 0,
+    transferred_at  TEXT    NOT NULL,
+    closed_at       TEXT,
+    close_reason    TEXT,
+    pnl             REAL,
+    swap            REAL    DEFAULT 0.0
+);
+
+CREATE TABLE IF NOT EXISTS hybrid_events (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT    NOT NULL,
+    ticket    INTEGER NOT NULL,
+    symbol    TEXT    NOT NULL,
+    event     TEXT    NOT NULL,
+    details   TEXT    DEFAULT '{}'
+);
+
+CREATE INDEX IF NOT EXISTS idx_hybrid_pos_state   ON hybrid_positions (state);
+CREATE INDEX IF NOT EXISTS idx_hybrid_pos_ticket  ON hybrid_positions (ticket);
+CREATE INDEX IF NOT EXISTS idx_hybrid_evt_ticket  ON hybrid_events (ticket);
 """
 
 
@@ -452,48 +487,129 @@ class Database:
     def sync_mt5_trades(self, trades: list[dict[str, Any]]) -> int:
         """MT5 işlem geçmişini trades tablosuna senkronize et.
 
-        Zaten mevcut olan pozisyonları atlar (mt5_position_id ile dedup).
+        Dedup mantığı (sırayla):
+        1. mt5_position_id ile birebir eşleşme → atla.
+        2. OĞUL kaydı eşleştirme: mt5_position_id NULL + aynı symbol + direction
+           + entry_time ±5 dk tolerans → mevcut kaydı güncelle (INSERT yerine UPDATE).
+        3. Eşleşme yoksa → yeni satır ekle.
 
         Args:
             trades: get_history_for_sync() çıktısı — her biri bir trade dict.
 
         Returns:
-            Eklenen trade sayısı.
+            Eklenen + güncellenen trade sayısı.
         """
         added = 0
+        updated = 0
         for t in trades:
             pos_id = t.get("mt5_position_id")
+
+            # 1) mt5_position_id ile birebir eşleşme → komisyon/swap/pnl MT5'ten güncelle
+            #    (OĞUL kapanışta get_deal_summary bazen None döner, sync ile doldurulur)
             if pos_id:
                 existing = self._fetch_one(
-                    "SELECT id FROM trades WHERE mt5_position_id=?",
+                    "SELECT id, commission, swap, pnl FROM trades WHERE mt5_position_id=?",
                     (pos_id,),
                 )
                 if existing:
-                    continue  # zaten var, atla
+                    # MT5 verisiyle commission/swap/pnl güncelle (eksikse veya her zaman)
+                    self._execute(
+                        """UPDATE trades SET pnl=?, commission=?, swap=?,
+                           exit_time=COALESCE(exit_time, ?), exit_price=COALESCE(exit_price, ?)
+                           WHERE id=?""",
+                        (
+                            t.get("pnl"), t.get("commission"), t.get("swap"),
+                            t.get("exit_time"), t.get("exit_price"),
+                            existing["id"],
+                        ),
+                    )
+                    updated += 1
+                    continue
 
-            self._execute(
-                """INSERT INTO trades
-                   (strategy, symbol, direction, entry_time, exit_time,
-                    entry_price, exit_price, lot, pnl, slippage,
-                    commission, swap, regime, fake_score, exit_reason,
-                    mt5_position_id)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (
-                    t.get("strategy", "manual"),
-                    t["symbol"], t["direction"],
-                    t.get("entry_time"), t.get("exit_time"),
-                    t.get("entry_price"), t.get("exit_price"),
-                    t["lot"], t.get("pnl"), t.get("slippage"),
-                    t.get("commission"), t.get("swap"),
-                    t.get("regime"), t.get("fake_score"),
-                    t.get("exit_reason"), pos_id,
-                ),
+            # 2) OĞUL kaydı eşleştirme: mt5_position_id NULL + symbol + direction
+            #    Strateji A: entry_time ±5 dk tolerans
+            #    Strateji B: exit_price + PnL eşleşmesi (timezone farkı durumu)
+            entry_time = t.get("entry_time")
+            ogul_match = None
+            if pos_id and entry_time:
+                ogul_match = self._fetch_one(
+                    """SELECT id FROM trades
+                       WHERE mt5_position_id IS NULL
+                         AND symbol=? AND direction=?
+                         AND entry_time IS NOT NULL
+                         AND ABS(
+                             CAST(strftime('%%s', entry_time) AS INTEGER)
+                           - CAST(strftime('%%s', ?) AS INTEGER)
+                         ) <= 300
+                       ORDER BY id LIMIT 1""",
+                    (t["symbol"], t["direction"], entry_time),
+                )
+
+            # Strateji B: exit_price + PnL (timezone farkı yakalamak için)
+            if not ogul_match and pos_id and t.get("exit_price") is not None:
+                sync_pnl = t.get("pnl") or 0.0
+                ogul_match = self._fetch_one(
+                    """SELECT id FROM trades
+                       WHERE mt5_position_id IS NULL
+                         AND symbol=? AND direction=?
+                         AND exit_price=?
+                         AND pnl IS NOT NULL
+                         AND ABS(pnl - ?) <= 5.0
+                       ORDER BY id LIMIT 1""",
+                    (t["symbol"], t["direction"],
+                     t["exit_price"], sync_pnl),
+                )
+
+            if ogul_match:
+                # Mevcut OĞUL kaydını MT5 verileriyle güncelle
+                self._execute(
+                    """UPDATE trades SET
+                         pnl=?, commission=?, swap=?,
+                         mt5_position_id=?,
+                         exit_time=?, exit_price=?,
+                         entry_price=?, lot=?
+                       WHERE id=?""",
+                    (
+                        t.get("pnl"), t.get("commission"), t.get("swap"),
+                        pos_id,
+                        t.get("exit_time"), t.get("exit_price"),
+                        t.get("entry_price"), t["lot"],
+                        ogul_match["id"],
+                    ),
+                )
+                updated += 1
+                logger.debug(
+                    f"Sync: OĞUL kaydı güncellendi id={ogul_match['id']} "
+                    f"→ mt5_position_id={pos_id}"
+                )
+            else:
+                # 3) Yeni kayıt ekle
+                self._execute(
+                    """INSERT INTO trades
+                       (strategy, symbol, direction, entry_time, exit_time,
+                        entry_price, exit_price, lot, pnl, slippage,
+                        commission, swap, regime, fake_score, exit_reason,
+                        mt5_position_id)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        t.get("strategy", "manual"),
+                        t["symbol"], t["direction"],
+                        t.get("entry_time"), t.get("exit_time"),
+                        t.get("entry_price"), t.get("exit_price"),
+                        t["lot"], t.get("pnl"), t.get("slippage"),
+                        t.get("commission"), t.get("swap"),
+                        t.get("regime"), t.get("fake_score"),
+                        t.get("exit_reason"), pos_id,
+                    ),
+                )
+                added += 1
+
+        if added or updated:
+            logger.info(
+                f"MT5 sync: {added} yeni eklendi, "
+                f"{updated} mevcut kayıt güncellendi"
             )
-            added += 1
-
-        if added:
-            logger.info(f"MT5 sync: {added} yeni trade eklendi")
-        return added
+        return added + updated
 
     def update_trade(self, trade_id: int, fields: dict[str, Any]) -> bool:
         """İşlem kaydını güncelle.
@@ -526,12 +642,114 @@ class Database:
         """
         return self._fetch_one("SELECT * FROM trades WHERE id=?", (trade_id,))
 
+    def deduplicate_trades(self) -> int:
+        """Mevcut çift kayıtları temizle.
+
+        Aynı pozisyon için hem OĞUL kaydı (mt5_position_id NULL) hem Sync
+        kaydı (mt5_position_id NOT NULL) varsa, OĞUL kaydını siler.
+
+        Eşleşme stratejisi (sırayla):
+        1. symbol + direction + entry_time ±5 dk tolerans
+        2. symbol + direction + aynı exit_price + yakın PnL (±5 TL)
+           (timezone farkı nedeniyle entry_time uyuşmadığında)
+
+        Returns:
+            Silinen çift kayıt sayısı.
+        """
+        sync_rows = self._fetch_all(
+            """SELECT id, symbol, direction, entry_time, exit_price,
+                      pnl, mt5_position_id
+               FROM trades WHERE mt5_position_id IS NOT NULL""",
+            (),
+        )
+        if not sync_rows:
+            return 0
+
+        deleted_ids: set[int] = set()
+        for sr in sync_rows:
+            # Strateji 1: entry_time ±5 dk
+            ogul_dup = None
+            if sr.get("entry_time"):
+                ogul_dup = self._fetch_one(
+                    """SELECT id FROM trades
+                       WHERE mt5_position_id IS NULL
+                         AND symbol=? AND direction=?
+                         AND entry_time IS NOT NULL
+                         AND id NOT IN ({excluded})
+                         AND ABS(
+                             CAST(strftime('%%s', entry_time) AS INTEGER)
+                           - CAST(strftime('%%s', ?) AS INTEGER)
+                         ) <= 300
+                       ORDER BY id LIMIT 1""".format(
+                        excluded=",".join(str(d) for d in deleted_ids)
+                        if deleted_ids else "0"
+                    ),
+                    (sr["symbol"], sr["direction"], sr["entry_time"]),
+                )
+
+            # Strateji 2: exit_price + PnL eşleşmesi (timezone farkı durumu)
+            if not ogul_dup and sr.get("exit_price") is not None:
+                sync_pnl = sr.get("pnl") or 0.0
+                ogul_dup = self._fetch_one(
+                    """SELECT id FROM trades
+                       WHERE mt5_position_id IS NULL
+                         AND symbol=? AND direction=?
+                         AND exit_price=?
+                         AND pnl IS NOT NULL
+                         AND id NOT IN ({excluded})
+                         AND ABS(pnl - ?) <= 5.0
+                       ORDER BY id LIMIT 1""".format(
+                        excluded=",".join(str(d) for d in deleted_ids)
+                        if deleted_ids else "0"
+                    ),
+                    (sr["symbol"], sr["direction"],
+                     sr["exit_price"], sync_pnl),
+                )
+
+            if ogul_dup:
+                self._execute(
+                    "DELETE FROM trades WHERE id=?", (ogul_dup["id"],)
+                )
+                deleted_ids.add(ogul_dup["id"])
+                logger.debug(
+                    f"Çift kayıt silindi: id={ogul_dup['id']} "
+                    f"(mt5_position_id={sr['mt5_position_id']} "
+                    f"ile eşleşti)"
+                )
+
+        # Strateji 3: Aynı mt5_position_id ile birden fazla kayıt varsa
+        # en düşük id'li olanı (OĞUL kaydı) sil, en yüksek id'li (Sync) kalsın
+        dup_pos_rows = self._fetch_all(
+            """SELECT mt5_position_id, MIN(id) AS min_id, COUNT(*) AS cnt
+               FROM trades
+               WHERE mt5_position_id IS NOT NULL
+               GROUP BY mt5_position_id
+               HAVING cnt > 1""",
+            (),
+        )
+        for dp in dup_pos_rows:
+            if dp["min_id"] not in deleted_ids:
+                self._execute(
+                    "DELETE FROM trades WHERE id=?", (dp["min_id"],)
+                )
+                deleted_ids.add(dp["min_id"])
+                logger.debug(
+                    f"Aynı position çift kaydı silindi: id={dp['min_id']} "
+                    f"(mt5_position_id={dp['mt5_position_id']})"
+                )
+
+        deleted = len(deleted_ids)
+        if deleted:
+            logger.info(f"Dedup: {deleted} çift kayıt temizlendi")
+        return deleted
+
     def get_trades(
         self,
         symbol: str | None = None,
         strategy: str | None = None,
         since: str | None = None,
         limit: int = 100,
+        closed_only: bool = True,
     ) -> list[dict[str, Any]]:
         """İşlem listesi getir (filtreli).
 
@@ -540,12 +758,16 @@ class Database:
             strategy: Filtre: strateji adı.
             since: Filtre: bu tarihten sonra (YYYY-MM-DD). entry_time bazlı.
             limit: Maksimum satır.
+            closed_only: True ise yalnızca kapanmış işlemler (exit_time dolu).
+                         False ise açık/kapanmamış kayıtlar da dahil.
 
         Returns:
             İşlem sözlüklerinin listesi.
         """
         clauses: list[str] = []
         params: list[Any] = []
+        if closed_only:
+            clauses.append("exit_time IS NOT NULL")
         if symbol:
             clauses.append("symbol=?")
             params.append(symbol)
@@ -558,8 +780,9 @@ class Database:
 
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         params.append(limit)
+        order = "exit_time DESC, id DESC" if closed_only else "exit_time IS NULL DESC, exit_time DESC, id DESC"
         return self._fetch_all(
-            f"SELECT * FROM trades {where} ORDER BY id DESC LIMIT ?",
+            f"SELECT * FROM trades {where} ORDER BY {order} LIMIT ?",
             tuple(params),
         )
 
@@ -1149,6 +1372,154 @@ class Database:
         )
         logger.debug(f"Liquidity delete <{before_date}: {cur.rowcount}")
         return cur.rowcount
+
+    # ═════════════════════════════════════════════════════════════════
+    #  HİBRİT POZİSYONLAR
+    # ═════════════════════════════════════════════════════════════════
+
+    def insert_hybrid_position(self, data: dict[str, Any]) -> int:
+        """Yeni hibrit pozisyon kaydı ekle.
+
+        Args:
+            data: ticket, symbol, direction, volume, entry_price, entry_atr,
+                  initial_sl, initial_tp, current_sl, current_tp alanları.
+
+        Returns:
+            Oluşturulan satırın id'si.
+        """
+        cur = self._execute(
+            """INSERT INTO hybrid_positions
+               (ticket, symbol, direction, volume, entry_price, entry_atr,
+                initial_sl, initial_tp, current_sl, current_tp,
+                state, breakeven_hit, trailing_active, transferred_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                data["ticket"], data["symbol"], data["direction"],
+                data["volume"], data["entry_price"], data["entry_atr"],
+                data["initial_sl"], data["initial_tp"],
+                data.get("current_sl", data["initial_sl"]),
+                data.get("current_tp", data["initial_tp"]),
+                "ACTIVE", 0, 0, self._now(),
+            ),
+        )
+        logger.info(
+            f"Hibrit pozisyon eklendi: ticket={data['ticket']} "
+            f"{data['symbol']} {data['direction']}"
+        )
+        return cur.lastrowid
+
+    def update_hybrid_position(self, ticket: int, updates: dict[str, Any]) -> None:
+        """Hibrit pozisyon alanlarını güncelle.
+
+        Args:
+            ticket: MT5 pozisyon ticket'ı.
+            updates: Güncellenecek alan-değer çiftleri
+                     (current_sl, current_tp, breakeven_hit, trailing_active, state vb.).
+        """
+        if not updates:
+            return
+        set_parts = [f"{k}=?" for k in updates]
+        values = list(updates.values()) + [ticket]
+        self._execute(
+            f"UPDATE hybrid_positions SET {', '.join(set_parts)} WHERE ticket=?",
+            tuple(values),
+        )
+
+    def get_active_hybrid_positions(self) -> list[dict[str, Any]]:
+        """Aktif (state='ACTIVE') hibrit pozisyonları getir.
+
+        Returns:
+            Hibrit pozisyon sözlüklerinin listesi.
+        """
+        return self._fetch_all(
+            "SELECT * FROM hybrid_positions WHERE state='ACTIVE' ORDER BY id",
+        )
+
+    def close_hybrid_position(
+        self, ticket: int, reason: str, pnl: float, swap: float = 0.0,
+    ) -> None:
+        """Hibrit pozisyonu kapat (state=CLOSED, kapanış bilgileri yaz).
+
+        Args:
+            ticket: MT5 pozisyon ticket'ı.
+            reason: Kapanış nedeni (BREAKEVEN, TRAILING_SL, TP_HIT, SL_HIT, EOD, KILL_SWITCH_L3, MANUAL_REMOVE, EXTERNAL).
+            pnl: Kapanış K/Z (TRY).
+            swap: Birikmiş swap maliyeti (TRY).
+        """
+        self._execute(
+            """UPDATE hybrid_positions
+               SET state='CLOSED', closed_at=?, close_reason=?, pnl=?, swap=?
+               WHERE ticket=?""",
+            (self._now(), reason, pnl, swap, ticket),
+        )
+        logger.info(
+            f"Hibrit pozisyon kapatıldı: ticket={ticket} "
+            f"neden={reason} pnl={pnl:.2f}"
+        )
+
+    def insert_hybrid_event(
+        self, ticket: int, symbol: str, event: str, details: dict[str, Any] | None = None,
+    ) -> int:
+        """Hibrit olay kaydı ekle.
+
+        Args:
+            ticket: İlgili pozisyon ticket'ı.
+            symbol: Kontrat sembolü.
+            event: Olay tipi (TRANSFER, BREAKEVEN, TRAILING_UPDATE, SL_MODIFY, TP_HIT, CLOSE, REMOVE, EOD_CLOSE, L3_CLOSE).
+            details: Ek bilgi sözlüğü (JSON olarak saklanır).
+
+        Returns:
+            Oluşturulan satırın id'si.
+        """
+        import json as _json
+        details_str = _json.dumps(details or {}, default=str)
+        cur = self._execute(
+            """INSERT INTO hybrid_events (timestamp, ticket, symbol, event, details)
+               VALUES (?,?,?,?,?)""",
+            (self._now(), ticket, symbol, event, details_str),
+        )
+        return cur.lastrowid
+
+    def get_hybrid_daily_pnl(self, target_date: str | None = None) -> float:
+        """Belirtilen güne ait kapatılan hibrit pozisyonların toplam PnL'ini getir.
+
+        Args:
+            target_date: Tarih (YYYY-MM-DD). None ise bugün.
+
+        Returns:
+            Toplam PnL (TRY). Kayıt yoksa 0.0.
+        """
+        if target_date is None:
+            target_date = date.today().isoformat()
+        rows = self._fetch_all(
+            """SELECT COALESCE(SUM(pnl), 0) as total
+               FROM hybrid_positions
+               WHERE state='CLOSED' AND closed_at LIKE ?""",
+            (f"{target_date}%",),
+        )
+        return rows[0]["total"] if rows else 0.0
+
+    def get_hybrid_events(
+        self, limit: int = 50, ticket: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Hibrit olay geçmişini getir.
+
+        Args:
+            limit: Maksimum satır sayısı.
+            ticket: Opsiyonel filtre: sadece bu ticket'ın olayları.
+
+        Returns:
+            Olay sözlüklerinin listesi.
+        """
+        if ticket is not None:
+            return self._fetch_all(
+                "SELECT * FROM hybrid_events WHERE ticket=? ORDER BY id DESC LIMIT ?",
+                (ticket, limit),
+            )
+        return self._fetch_all(
+            "SELECT * FROM hybrid_events ORDER BY id DESC LIMIT ?",
+            (limit,),
+        )
 
     # ═════════════════════════════════════════════════════════════════
     #  YARDIMCI

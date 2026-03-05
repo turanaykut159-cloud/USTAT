@@ -1,8 +1,9 @@
-"""ÜSTAT Trading Engine — Ana döngü (v12.0).
+"""ÜSTAT Trading Engine — Ana döngü (v12.2).
 
 Her 10 saniyede çalışan ana döngü:
     1. MT5 heartbeat / reconnect
     2. Veri güncelleme: 15 kontratın fiyat, hacim, spread
+    2.5. Pozisyon kapanma tespiti: ticket set diff → kapanma varsa history sync
     3. BABA açık pozisyon denetimi: fake analiz, risk limitleri, erken uyarı
     4. BABA risk kontrolü: günlük/haftalık/aylık zarar, floating, korelasyon
     5. OĞUL emir state-machine ilerletme (her zaman, risk verdiktinden bağımsız)
@@ -34,6 +35,7 @@ from engine.logger import get_logger
 from engine.models.regime import RegimeType
 from engine.models.risk import RiskParams
 from engine.mt5_bridge import MT5Bridge
+from engine.h_engine import HEngine
 from engine.ogul import Ogul
 from engine.ustat import Ustat
 
@@ -48,6 +50,8 @@ CYCLE_INTERVAL: int = 10          # ana döngü aralığı (saniye)
 MAX_MT5_RECONNECT: int = 5        # Dokümantasyon / ileride kullanım için (heartbeat'ta kullanılmıyor)
 DB_ERROR_THRESHOLD: int = 3       # art arda DB hatası → sistem durdur
 SHUTDOWN_TIMEOUT: int = 30        # graceful shutdown bekleme (saniye)
+CLOSURE_SYNC_LOOKBACK_DAYS: int = 3  # kapanma sync lookback (gün)
+CLOSURE_RETRY_INTERVAL: int = 6   # pending ticket retry aralığı (cycle = 60sn)
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -89,11 +93,24 @@ class Engine:
             baba=self.baba, risk_params=self.risk_params,
         )
 
+        # H-Engine (Hibrit İşlem Motoru)
+        self.h_engine = HEngine(
+            config=self.config,
+            mt5=self.mt5,
+            db=self.db,
+            baba=self.baba,
+            pipeline=self.pipeline,
+        )
+        # OĞUL'a h_engine referansı ver (netting koruması)
+        self.ogul.h_engine = self.h_engine
+
         # ── Durum ───────────────────────────────────────────────────
         self._running: bool = False
         self._cycle_count: int = 0
         self._consecutive_db_errors: int = 0
         self._shutdown_requested: bool = False
+        self._prev_mt5_tickets: set[int] = set()  # pozisyon kapanma tespiti için
+        self._pending_closure_tickets: set[int] = set()  # VİOP uzlaşma bekleyen kapanmalar
 
     # ═════════════════════════════════════════════════════════════════
     #  BAŞLATMA / DURDURMA
@@ -168,6 +185,13 @@ class Engine:
                 f"pozisyonlar MT5'te açık kalacak!"
             )
 
+        hybrid_count = len(self.h_engine.hybrid_positions)
+        if hybrid_count > 0:
+            logger.warning(
+                f"DİKKAT: {hybrid_count} hibrit pozisyon var — "
+                f"pozisyonlar MT5'te açık kalacak!"
+            )
+
         # MT5 bağlantısını kapat
         try:
             self.mt5.disconnect()
@@ -193,6 +217,7 @@ class Engine:
         Sıralama (DEĞİŞTİRİLEMEZ):
             1. MT5 heartbeat
             2. Veri güncelleme (DataPipeline)
+            2.5. Pozisyon kapanma tespiti (ticket set diff → history sync + pending retry)
             3. BABA cycle (rejim + erken uyarı + fake + period reset + kill-switch)
             4. BABA risk kontrolü
             5. Top 5 seçimi (ÜSTAT)
@@ -281,6 +306,9 @@ class Engine:
         # ── 2. Veri Güncelleme ────────────────────────────────────
         self._update_data()
 
+        # ── 2.5 Pozisyon Kapanma Tespiti ─────────────────────────
+        self._check_position_closures()
+
         # ── 3. BABA Cycle (HER ZAMAN ÖNCE!) ──────────────────────
         regime = self._run_baba_cycle()
 
@@ -322,6 +350,15 @@ class Engine:
             for sym in top5:
                 self.ogul.last_signals[sym] = self.ogul._calculate_bias(sym)
 
+        # ── 6.5. H-Engine — Hibrit Pozisyon Yönetimi ─────────────
+        try:
+            self.h_engine.run_cycle()
+        except Exception as exc:
+            logger.error(f"H-Engine cycle hatası: {exc}")
+            self._log_event_safe(
+                "H_ENGINE_ERROR", f"H-Engine cycle hatası: {exc}", "ERROR",
+            )
+
         # ── 7. Cycle Loglama ──────────────────────────────────────
         self._log_cycle_summary(regime, risk_verdict, top5)
 
@@ -344,6 +381,122 @@ class Engine:
                 logger.info("MT5 geçmiş sync: yeni trade yok")
         except Exception as exc:
             logger.warning(f"MT5 geçmiş sync hatası (kritik değil): {exc}")
+
+    def _check_position_closures(self) -> None:
+        """Pozisyon kapanma tespiti — ticket set diff ile.
+
+        Her cycle'da pipeline.latest_positions'dan güncel ticket set'ini alır.
+        Önceki set'te olup şimdiki set'te olmayan ticket'lar → kapanmış pozisyon.
+        Kapanma tespit edilirse MT5 işlem geçmişi DB'ye sync edilir.
+
+        VİOP günlük uzlaşma gecikmesi:
+            Pozisyon kapanır ama OUT deal'leri 21:35 uzlaşmasına kadar
+            yazılmayabilir. Bu durumda ticket _pending_closure_tickets'a
+            eklenir ve CLOSURE_RETRY_INTERVAL (60sn) aralıklarla tekrar
+            denenir. OUT deal'ler yazıldığında otomatik çözülür.
+
+        İlk cycle'da (prev boş) sadece set güncellenir, sync tetiklenmez.
+        Startup'ta zaten 90 günlük tam sync yapılır.
+        """
+        # Güncel ticket set'ini oluştur
+        current_tickets: set[int] = set()
+        for pos in self.pipeline.latest_positions:
+            ticket = pos.get("ticket")
+            if ticket is not None:
+                current_tickets.add(ticket)
+
+        # İlk cycle: sadece set'i başlat, sync yok
+        # (Startup'ta 90 günlük tam sync zaten yapıldı)
+        if not self._prev_mt5_tickets:
+            self._prev_mt5_tickets = current_tickets
+            return
+
+        # Kapanan ticket'ları bul: önceki - şimdiki = kapananlar
+        closed_tickets = self._prev_mt5_tickets - current_tickets
+
+        # Her durumda set'i güncelle (yeni pozisyonlar da yakalanır)
+        self._prev_mt5_tickets = current_tickets
+
+        # Yeni kapanma tespit edildiyse pending'e ekle ve hemen sync dene
+        if closed_tickets:
+            logger.info(
+                f"Pozisyon kapanması tespit edildi: {len(closed_tickets)} ticket "
+                f"({closed_tickets})"
+            )
+            self._pending_closure_tickets.update(closed_tickets)
+            self._sync_closed_positions()
+            return
+
+        # Yeni kapanma yok ama pending ticket varsa — aralıklı retry
+        if self._pending_closure_tickets and self._cycle_count % CLOSURE_RETRY_INTERVAL == 0:
+            logger.debug(
+                f"Pending kapanma retry: {len(self._pending_closure_tickets)} ticket "
+                f"({self._pending_closure_tickets})"
+            )
+            self._sync_closed_positions()
+
+    def _sync_closed_positions(self) -> None:
+        """Kapanan pozisyonların işlem geçmişini DB'ye sync et.
+
+        _pending_closure_tickets'taki ticket'lar için MT5 deal geçmişini
+        çeker ve DB'ye yazar. Tamamlanmış trade kaydı bulunan ticket'lar
+        (hem IN hem OUT deal'i olan) pending'den çıkar.
+
+        VİOP günlük uzlaşma gecikmesi:
+            OUT deal'leri 21:35 uzlaşmasına kadar yazılmayabilir.
+            Bu durumda ticket pending'de kalır ve sonraki retry'larda
+            tekrar denenir. OUT deal'ler yazıldığında mt5_position_id
+            eşleşmesi ile otomatik çözülür.
+        """
+        try:
+            trades = self.mt5.get_history_for_sync(days=CLOSURE_SYNC_LOOKBACK_DAYS)
+            added = self.db.sync_mt5_trades(trades)
+
+            # Sync edilen trade'lerin position_id'lerini topla
+            synced_position_ids: set[int] = {
+                t["mt5_position_id"] for t in trades if "mt5_position_id" in t
+            }
+
+            # Pending'den çözülen ticket'ları çıkar
+            resolved = self._pending_closure_tickets & synced_position_ids
+            if resolved:
+                self._pending_closure_tickets -= resolved
+                logger.info(
+                    f"Kapanma sync: {len(resolved)} ticket çözüldü ({resolved}), "
+                    f"DB'ye {added} yeni trade"
+                )
+
+            # Hâlâ çözülemeyenler: OUT deal bekleniyor (VİOP 21:35 uzlaşması)
+            if self._pending_closure_tickets:
+                logger.debug(
+                    f"Bekleyen kapanma ticket'ları (OUT deal bekleniyor): "
+                    f"{self._pending_closure_tickets}"
+                )
+        except Exception as exc:
+            logger.warning(f"Kapanma-tetiklemeli sync hatası: {exc}")
+
+    def sync_mt5_history_recent(self, days: int = 3) -> int:
+        """Son N günlük MT5 işlem geçmişini DB ile senkronize et.
+
+        API'den (get_trades, pozisyon kapatma vb.) veya ana döngüden
+        periyodik olarak çağrılır. Değişim olduğunda anlık güncel veri için kullanılır.
+
+        Args:
+            days: Kaç günlük geçmiş çekilecek (1–90).
+
+        Returns:
+            DB'ye eklenen/güncellenen trade sayısı. Hata durumunda 0.
+        """
+        if not getattr(self.mt5, "_connected", False):
+            return 0
+        days = max(1, min(90, days))
+        try:
+            trades = self.mt5.get_history_for_sync(days=days)
+            added = self.db.sync_mt5_trades(trades)
+            return added
+        except Exception as exc:
+            logger.warning(f"MT5 geçmiş sync (son {days} gün) hatası: {exc}")
+            return 0
 
     # ═════════════════════════════════════════════════════════════════
     #  ADIM 1: MT5 HEARTBEAT / RECONNECT
@@ -546,6 +699,13 @@ class Engine:
             logger.info(f"OĞUL aktif işlemler geri yüklendi: {active} adet")
         except Exception as exc:
             logger.error(f"OĞUL restore hatası: {exc}")
+
+        try:
+            self.h_engine.restore_positions()
+            hybrid_count = len(self.h_engine.hybrid_positions)
+            logger.info(f"H-Engine hibrit pozisyonlar geri yüklendi: {hybrid_count} adet")
+        except Exception as exc:
+            logger.error(f"H-Engine restore hatası: {exc}")
 
 
 # ═════════════════════════════════════════════════════════════════════

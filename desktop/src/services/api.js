@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.0 — Backend API çağrıları.
+ * ÜSTAT v5.1 — Backend API çağrıları.
  *
  * FastAPI sunucusuyla iletişim (REST + WebSocket).
  * Tüm endpoint'ler: /api/status, /api/account, /api/positions,
@@ -68,6 +68,17 @@ export async function getPositions() {
   }
 }
 
+/** Tek pozisyonu kapat (ticket ile). Sadece manuel pozisyonlar için UI'da buton gösterilir. */
+export async function closePosition(ticket) {
+  try {
+    const { data } = await client.post('/positions/close', { ticket });
+    return data;
+  } catch (err) {
+    const msg = err?.response?.data?.detail ?? err?.message ?? err;
+    throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+  }
+}
+
 // ── Trades ───────────────────────────────────────────────────────
 
 export async function getTrades(params = {}) {
@@ -76,7 +87,7 @@ export async function getTrades(params = {}) {
     return data;
   } catch (err) {
     console.error('[ÜSTAT API] getTrades:', err?.message ?? err);
-    return { count: 0, trades: [] };
+    return { count: 0, trades: [], error: true };
   }
 }
 
@@ -224,6 +235,79 @@ export async function executeManualTrade(symbol, direction, lot) {
   } catch (err) {
     console.error('[ÜSTAT API] executeManualTrade:', err?.message ?? err);
     return { success: false, message: 'Bağlantı hatası.' };
+  }
+}
+
+// ── ÜSTAT Beyin (v13.0) ──────────────────────────────────────
+
+export async function getUstatBrain(days = 90) {
+  try {
+    const { data } = await client.get('/ustat/brain', { params: { days } });
+    return data;
+  } catch (err) {
+    console.error('[ÜSTAT API] getUstatBrain:', err?.message ?? err);
+    return {
+      trade_categories: { by_result: [], by_direction: [], by_duration: [], by_regime: [], by_exit_reason: [] },
+      contract_profiles: [],
+      recent_decisions: [],
+      regime_performance: [],
+      error_attributions: [],
+      next_day_analyses: [],
+      strategy_pool: { current_regime: '', profiles: [] },
+      regulation_suggestions: [],
+    };
+  }
+}
+
+// ── Hibrit İşlem Paneli ──────────────────────────────────────────
+
+export async function checkHybridTransfer(ticket) {
+  try {
+    const { data } = await client.post('/hybrid/check', { ticket });
+    return data;
+  } catch (err) {
+    console.error('[ÜSTAT API] checkHybridTransfer:', err?.message ?? err);
+    return { can_transfer: false, reason: 'Bağlantı hatası.' };
+  }
+}
+
+export async function transferToHybrid(ticket) {
+  try {
+    const { data } = await client.post('/hybrid/transfer', { ticket });
+    return data;
+  } catch (err) {
+    console.error('[ÜSTAT API] transferToHybrid:', err?.message ?? err);
+    return { success: false, message: 'Bağlantı hatası.' };
+  }
+}
+
+export async function removeFromHybrid(ticket) {
+  try {
+    const { data } = await client.post('/hybrid/remove', { ticket });
+    return data;
+  } catch (err) {
+    console.error('[ÜSTAT API] removeFromHybrid:', err?.message ?? err);
+    return { success: false, message: 'Bağlantı hatası.' };
+  }
+}
+
+export async function getHybridStatus() {
+  try {
+    const { data } = await client.get('/hybrid/status');
+    return data;
+  } catch (err) {
+    console.error('[ÜSTAT API] getHybridStatus:', err?.message ?? err);
+    return { active_count: 0, max_count: 3, daily_pnl: 0, daily_limit: 500, positions: [] };
+  }
+}
+
+export async function getHybridEvents(params = {}) {
+  try {
+    const { data } = await client.get('/hybrid/events', { params });
+    return data;
+  } catch (err) {
+    console.error('[ÜSTAT API] getHybridEvents:', err?.message ?? err);
+    return { count: 0, events: [] };
   }
 }
 

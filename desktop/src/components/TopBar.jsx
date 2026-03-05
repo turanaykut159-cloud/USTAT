@@ -1,7 +1,7 @@
 /**
- * ÜSTAT v5.0 — Üst bilgi çubuğu.
+ * ÜSTAT v5.1 — Üst bilgi çubuğu.
  *
- * Sol:  ÜSTAT v5.0 logosu | Kill-switch (L1/L2/L3) | Bağlantı durumu (yeşil/kırmızı nokta)
+ * Sol:  ÜSTAT v5.1 logosu | Kill-switch (L1/L2/L3) | Bağlantı durumu (yeşil/kırmızı nokta)
  * Sağ:  Bakiye | Equity | Floating | Günlük K/Z (MT5, 2sn) | Pin | Saat
  */
 
@@ -105,7 +105,7 @@ export default function TopBar() {
 
       {/* ── SOL: Logo + Faz + Bağlantı ─────────────────────────── */}
       <div className="top-bar-left">
-        <h1>ÜSTAT <span className="version">v5.0</span></h1>
+        <h1>ÜSTAT <span className="version">v5.1</span></h1>
         {initialLoading && <span className="tb-loading">Yükleniyor...</span>}
 
         <span className={`tb-phase tb-phase--${phase}`}>
@@ -176,7 +176,16 @@ export default function TopBar() {
           {alwaysOnTop ? '📌' : '📍'}
         </button>
 
-        <span className="clock">{time.toLocaleTimeString('tr-TR')}</span>
+        <span className="clock">
+          {time.toLocaleString('tr-TR', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+          })}
+        </span>
       </div>
     </div>
   );

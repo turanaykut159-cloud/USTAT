@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from api.deps import get_baba, get_db
+from api.deps import get_baba, get_db, get_h_engine
 from api.schemas import KillSwitchRequest, KillSwitchResponse
 
 router = APIRouter()
@@ -33,6 +33,14 @@ async def trigger_killswitch(req: KillSwitchRequest):
         try:
             baba.activate_kill_switch_l3_manual(user=req.user)
             failed = getattr(baba, "_last_l3_failed_tickets", [])
+
+            # Hibrit pozisyonları da kapat (L3)
+            h_engine = get_h_engine()
+            if h_engine:
+                h_failed = h_engine.force_close_all(reason="KILL_SWITCH_L3")
+                if h_failed:
+                    failed = list(failed) + h_failed
+
             msg = f"L3 kill-switch aktif — {req.user}"
             if failed:
                 msg += f"; kapatılamayan pozisyonlar: {failed}"

@@ -101,6 +101,8 @@ class MT5Bridge:
         # Son emir hatasının detayı — send_order() None döndüğünde
         # çağıran kod buradan retcode/comment okuyabilir.
         self._last_order_error: dict[str, Any] = {}
+        # modify_position() başarısız olduğunda MT5 hata detayı (hibrit devir vb.)
+        self._last_modify_error: dict[str, Any] = {}
         # Emir gönderimi tek seferde bir çağrı (manuel + engine race önlemi)
         self._order_lock: threading.Lock = threading.Lock()
 
@@ -571,14 +573,10 @@ class MT5Bridge:
                 lot = round(lot / vol_step) * vol_step
                 lot = max(vol_min, min(vol_max, lot))
 
-                # Filling mode: sembolün desteklediğini kullan
-                # VİOP genelde RETURN destekler
-                if sym_info.filling_mode & mt5.SYMBOL_FILLING_FOK:
-                    filling = mt5.ORDER_FILLING_FOK
-                elif sym_info.filling_mode & mt5.SYMBOL_FILLING_IOC:
-                    filling = mt5.ORDER_FILLING_IOC
-                else:
-                    filling = mt5.ORDER_FILLING_RETURN
+                # Filling mode: VİOP netting → ORDER_FILLING_RETURN
+                # SYMBOL_FILLING_* sabitleri MT5 v5.0.5572'de kaldırılmış.
+                # GCM VİOP kontratları RETURN destekler (FOK desteklenmez).
+                filling = mt5.ORDER_FILLING_RETURN
 
                 # Market ise güncel fiyatı al
                 if order_type == "market":
@@ -666,8 +664,24 @@ class MT5Bridge:
                         round(tp / tick_size) * tick_size if tp > 0 else 0.0
                     )
 
-                    # Pozisyon ticket'ını bul
+                    # Pozisyon ticket: emir yanıtında 0 dönebilir (netting/gecikme) — sembole göre bul
                     position_ticket = order_result.get("order", 0)
+                    if position_ticket == 0:
+                        for _ in range(12):
+                            _time.sleep(0.2)
+                            by_symbol = mt5.positions_get(symbol=mt5_name)
+                            if by_symbol and len(by_symbol) > 0:
+                                position_ticket = getattr(by_symbol[0], "ticket", 0)
+                                if position_ticket:
+                                    logger.debug(
+                                        f"SL/TP için pozisyon ticket sembolden alındı: {position_ticket}"
+                                    )
+                                    break
+                        if position_ticket == 0:
+                            logger.warning(
+                                f"SL/TP atlanıyor [{symbol}]: pozisyon ticket alınamadı (order=0, sembol listesi boş)"
+                            )
+                            return order_result
 
                     sltp_request: dict[str, Any] = {
                         "action": mt5.TRADE_ACTION_SLTP,
@@ -675,6 +689,8 @@ class MT5Bridge:
                         "position": position_ticket,
                         "sl": sl_rounded,
                         "tp": tp_rounded,
+                        "type_filling": filling,      # GCM VİOP: RETURN
+                        "type_time": mt5.ORDER_TIME_GTC,
                     }
 
                     logger.info(
@@ -683,7 +699,8 @@ class MT5Bridge:
                         f"request={sltp_request}"
                     )
 
-                    # 3 deneme ile SL/TP ekleme (P0-1 fix)
+                    # 3 deneme ile SL/TP ekleme — denemeler arası 0.5s bekleme
+                    # (exchange modda deal tamamlanmadan modify başarısız olabiliyor)
                     sltp_applied = False
                     SLTP_MAX_RETRIES = 3
                     for sltp_attempt in range(1, SLTP_MAX_RETRIES + 1):
@@ -706,6 +723,8 @@ class MT5Bridge:
                                 f"SL/TP denemesi {sltp_attempt}/{SLTP_MAX_RETRIES} "
                                 f"başarısız [{symbol}]: {sltp_err}"
                             )
+                            if sltp_attempt < SLTP_MAX_RETRIES:
+                                _time.sleep(0.5)
 
                     if not sltp_applied:
                         # 3 deneme de başarısız — pozisyonu kapat (korumasız bırakma)
@@ -839,41 +858,96 @@ class MT5Bridge:
             new_sl = sl if sl is not None else pos.sl
             new_tp = tp if tp is not None else pos.tp
 
+            # tick_size'a yuvarla (send_order ile aynı mantık)
+            sym_info = mt5.symbol_info(pos.symbol)
+            if sym_info is not None:
+                tick_size = getattr(sym_info, "trade_tick_size", 0) or 0
+                if tick_size <= 0:
+                    tick_size = getattr(sym_info, "point", 0) or 0
+                if tick_size > 0:
+                    new_sl = (
+                        round(new_sl / tick_size) * tick_size
+                        if new_sl > 0 else 0.0
+                    )
+                    new_tp = (
+                        round(new_tp / tick_size) * tick_size
+                        if new_tp > 0 else 0.0
+                    )
+                else:
+                    # tick_size yoksa VİOP için 5 ondalık (broker reddini önlemek)
+                    new_sl = round(new_sl, 5) if new_sl > 0 else 0.0
+                    new_tp = round(new_tp, 5) if new_tp > 0 else 0.0
+            else:
+                # sembol bilgisi alınamadıysa yine de ondalık hassasiyeti düşür
+                new_sl = round(new_sl, 5) if new_sl > 0 else 0.0
+                new_tp = round(new_tp, 5) if new_tp > 0 else 0.0
+
+            self._last_modify_error = {}
+
+            # TRADE_ACTION_SLTP için position alanı zorunlu (MT5 API gereksinimi).
+            # GCM VİOP exchange modunda SLTP istekleri sunucu tarafında bağlı
+            # bekleyen emirlere dönüştürülüyor — type_filling ve type_time zorunlu,
+            # yoksa 10035 Invalid order dönüyor.
+            position_ticket = int(getattr(pos, "ticket", ticket))
             request: dict[str, Any] = {
                 "action": mt5.TRADE_ACTION_SLTP,
                 "symbol": pos.symbol,
-                "position": ticket,
+                "position": position_ticket,
                 "sl": new_sl,
                 "tp": new_tp,
+                "type_filling": mt5.ORDER_FILLING_RETURN,
+                "type_time": mt5.ORDER_TIME_GTC,
             }
 
-            logger.debug(
-                f"Pozisyon değiştiriliyor: ticket={ticket}, "
-                f"SL={new_sl:.4f}, TP={new_tp:.4f}"
+            logger.info(
+                f"Modify SL/TP: ticket={ticket} position={position_ticket} "
+                f"pos.symbol={pos.symbol} SL={new_sl:.4f} TP={new_tp:.4f}"
             )
 
-            result = mt5.order_send(request)
-            if result is None:
-                logger.error(
-                    f"Modify emri None [{ticket}]: {mt5.last_error()}"
-                )
-                return None
+            # order_check kullanmıyoruz — eski MT5 build'larda (4755<5200)
+            # SLTP için false-negative dönebiliyor. Doğrudan order_send + retry.
+            MODIFY_MAX_RETRIES = 3
+            for attempt in range(1, MODIFY_MAX_RETRIES + 1):
+                result = mt5.order_send(request)
 
-            if result.retcode != mt5.TRADE_RETCODE_DONE:
-                logger.error(
-                    f"Modify reddedildi [{ticket}]: retcode={result.retcode}, "
-                    f"comment={result.comment}"
-                )
-                return None
+                if result is not None and result.retcode == mt5.TRADE_RETCODE_DONE:
+                    self._last_modify_error = {}
+                    mod_result = result._asdict()
+                    logger.info(
+                        f"Pozisyon değiştirildi (deneme {attempt}): ticket={ticket}, "
+                        f"SL={new_sl:.4f}, TP={new_tp:.4f}"
+                    )
+                    return mod_result
 
-            mod_result = result._asdict()
-            logger.debug(
-                f"Pozisyon değiştirildi: ticket={ticket}, "
-                f"SL={new_sl:.4f}, TP={new_tp:.4f}"
+                # Hata detayını kaydet
+                if result is not None:
+                    ret = int(result.retcode)
+                    comment = str(result.comment) if result.comment else ""
+                    self._last_modify_error = {"retcode": ret, "comment": comment}
+                    logger.warning(
+                        f"Modify deneme {attempt}/{MODIFY_MAX_RETRIES} başarısız [{ticket}]: "
+                        f"retcode={ret}, comment={comment}"
+                    )
+                else:
+                    err = mt5.last_error()
+                    self._last_modify_error = {"last_error": str(err) if err else "Bilinmeyen hata"}
+                    logger.warning(
+                        f"Modify deneme {attempt}/{MODIFY_MAX_RETRIES} None [{ticket}]: {err}"
+                    )
+
+                # Son deneme değilse bekle ve tekrar dene
+                if attempt < MODIFY_MAX_RETRIES:
+                    _time.sleep(0.5)
+
+            # Tüm denemeler başarısız
+            logger.error(
+                f"Modify {MODIFY_MAX_RETRIES} denemede başarısız [{ticket}]: "
+                f"{self._last_modify_error}"
             )
-            return mod_result
+            return None
 
         except Exception as exc:
+            self._last_modify_error = {"exception": str(exc)}
             logger.error(f"modify_position istisnası [ticket={ticket}]: {exc}")
             return None
 
@@ -912,6 +986,7 @@ class MT5Bridge:
                     "tp": pos.tp,
                     "price_current": pos.price_current,
                     "profit": pos.profit,
+                    "swap": pos.swap,
                     "time": datetime.fromtimestamp(pos.time).isoformat(),
                 })
 
@@ -1087,6 +1162,57 @@ class MT5Bridge:
         except Exception as exc:
             logger.error(f"get_history_for_sync istisnası: {exc}")
             return []
+
+    # ── get_deal_summary ─────────────────────────────────────────
+    def get_deal_summary(self, position_id: int) -> dict[str, float] | None:
+        """Tek bir pozisyonun deal bazlı PnL/komisyon/swap özetini getir.
+
+        MT5 deal geçmişinden position_id'ye ait tüm deal'leri çeker,
+        profit/commission/swap toplamlarını hesaplar.
+
+        Args:
+            position_id: MT5 pozisyon ticket'ı.
+
+        Returns:
+            {"pnl": float, "commission": float, "swap": float} veya
+            veri bulunamazsa None.
+        """
+        if not position_id or position_id == 0:
+            return None
+
+        if not self._ensure_connection():
+            return None
+
+        try:
+            deals = mt5.history_deals_get(position=position_id)
+            if deals is None or len(deals) == 0:
+                logger.debug(
+                    f"Deal özeti bulunamadı: position_id={position_id}, "
+                    f"hata={mt5.last_error()}"
+                )
+                return None
+
+            total_pnl = sum(d.profit for d in deals)
+            total_commission = sum(d.commission for d in deals)
+            total_swap = sum(d.swap for d in deals)
+
+            logger.debug(
+                f"Deal özeti [pos={position_id}]: "
+                f"pnl={total_pnl:.2f} comm={total_commission:.2f} "
+                f"swap={total_swap:.2f} ({len(deals)} deal)"
+            )
+
+            return {
+                "pnl": round(total_pnl, 2),
+                "commission": round(total_commission, 2),
+                "swap": round(total_swap, 2),
+            }
+
+        except Exception as exc:
+            logger.error(
+                f"get_deal_summary istisnası [pos={position_id}]: {exc}"
+            )
+            return None
 
     # ── cancel_order ───────────────────────────────────────────────
     def cancel_order(self, order_ticket: int) -> dict[str, Any] | None:

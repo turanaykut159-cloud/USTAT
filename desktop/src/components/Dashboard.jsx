@@ -14,7 +14,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   getTradeStats, getPerformance, getTrades, getTop5, getStatus,
-  getAccount, getPositions, connectLiveWS, reactivateSymbols,
+  getAccount, getPositions, closePosition, connectLiveWS, reactivateSymbols,
 } from '../services/api';
 
 // ── Yardımcılar ──────────────────────────────────────────────────
@@ -45,12 +45,18 @@ function pnlClass(val) {
   return '';
 }
 
-/** Timestamp → saat:dakika */
+/** Timestamp → tarih + saat (gg.aa.yyyy HH:mm) */
 function shortTime(ts) {
   if (!ts) return '';
   try {
     const d = new Date(ts);
-    return d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+    return d.toLocaleString('tr-TR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
   } catch {
     return '';
   }
@@ -94,6 +100,7 @@ export default function Dashboard() {
   const [account, setAccount] = useState({ equity: 0 });
   const [livePositions, setLivePositions] = useState([]);
   const [initialLoading, setInitialLoading] = useState(true);
+  const [closingTicket, setClosingTicket] = useState(null);
 
   // WebSocket kaynak canlı veri
   const [liveEquity, setLiveEquity] = useState(null);
@@ -153,6 +160,20 @@ export default function Dashboard() {
       if (wsRef.current) wsRef.current();
     };
   }, []);
+
+  // ── İşlemi Kapat (sadece manuel, Dashboard tablosu) ─────────────────
+  const handleClosePosition = useCallback(async (ticket) => {
+    if (closingTicket != null) return;
+    setClosingTicket(ticket);
+    try {
+      await closePosition(ticket);
+      await fetchAll();
+    } catch (err) {
+      window.alert('Kapatma hatası: ' + (err?.message ?? String(err)));
+    } finally {
+      setClosingTicket(null);
+    }
+  }, [closingTicket, fetchAll]);
 
   // ── Hesaplamalar ─────────────────────────────────────────────────
 
@@ -251,11 +272,15 @@ export default function Dashboard() {
                   <th>SL</th>
                   <th>TP</th>
                   <th>K/Z</th>
+                  <th>Tür</th>
+                  <th>İşlem</th>
                 </tr>
               </thead>
               <tbody>
                 {(livePositions || []).map((pos) => {
                   const pnl = pos.pnl || 0;
+                  const isManual = (pos.strategy || '').toLowerCase() === 'manual';
+                  const turLabel = isManual ? 'Manuel' : (pos.strategy ? 'Otomatik' : '—');
                   return (
                     <tr key={pos.ticket || pos.symbol}>
                       <td className="mono">{pos.symbol}</td>
@@ -272,6 +297,24 @@ export default function Dashboard() {
                       <td className={`mono ${pnl > 0 ? 'profit' : pnl < 0 ? 'loss' : ''}`}>
                         <b>{formatMoney(pnl)}</b>
                       </td>
+                      <td>
+                        <span className={`op-tur-badge op-tur--${isManual ? 'manual' : 'auto'}`}>
+                          {turLabel}
+                        </span>
+                      </td>
+                      <td>
+                        {isManual && (
+                          <button
+                            type="button"
+                            className="op-close-btn"
+                            onClick={() => handleClosePosition(pos.ticket)}
+                            disabled={closingTicket === pos.ticket}
+                            title="Bu pozisyonu kapat"
+                          >
+                            {closingTicket === pos.ticket ? 'Kapatılıyor...' : 'İşlemi Kapat'}
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}
@@ -286,6 +329,7 @@ export default function Dashboard() {
                   <td className={`mono ${(livePositions || []).reduce((s, p) => s + (p.pnl || 0), 0) >= 0 ? 'profit' : 'loss'}`}>
                     <b>{formatMoney((livePositions || []).reduce((s, p) => s + (p.pnl || 0), 0))}</b>
                   </td>
+                  <td colSpan={2}></td>
                 </tr>
               </tfoot>
             </table>

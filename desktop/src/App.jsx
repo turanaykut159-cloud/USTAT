@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.0 Desktop — Ana uygulama bileşeni.
+ * ÜSTAT v5.1 Desktop — Ana uygulama bileşeni.
  *
  * HashRouter kullanılır (Electron file:// protokolü uyumu).
  * React Router v6 ile 5 sayfa yönlendirme.
@@ -16,6 +16,7 @@ import OpenPositions from './components/OpenPositions';
 import Performance from './components/Performance';
 import RiskManagement from './components/RiskManagement';
 import ManualTrade from './components/ManualTrade';
+import HybridTrade from './components/HybridTrade';
 import Settings from './components/Settings';
 
 export default function App() {
@@ -43,6 +44,7 @@ export default function App() {
             <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/manual" element={<ManualTrade />} />
+              <Route path="/hybrid" element={<HybridTrade />} />
               <Route path="/trades" element={<TradeHistory />} />
               <Route path="/positions" element={<OpenPositions />} />
               <Route path="/performance" element={<Performance />} />

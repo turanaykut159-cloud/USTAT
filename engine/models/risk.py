@@ -27,7 +27,7 @@ class RiskParams:
     # ── Çok katmanlı kayıp limitleri ────────────────────────────────
     max_weekly_loss: float = 0.04       # %4 haftalık → lot %50 azalt
     max_monthly_loss: float = 0.07      # %7 aylık → sistem dur
-    hard_drawdown: float = 0.12         # %12 hard drawdown → tam kapanış
+    hard_drawdown: float = 0.15         # %15 hard drawdown → tam kapanış
     max_floating_loss: float = 0.015    # %1.5 floating loss → yeni işlem engeli
     max_daily_trades: int = 5           # günlük max işlem sayısı
     max_risk_per_trade_hard: float = 0.02  # tek işlem max %2 (hard cap)

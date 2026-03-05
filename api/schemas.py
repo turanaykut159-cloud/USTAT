@@ -79,14 +79,28 @@ class PositionItem(BaseModel):
     current_price: float
     sl: float = 0.0
     tp: float = 0.0
-    pnl: float = 0.0
+    pnl: float = 0.0     # profit + swap (toplam floating K/Z)
+    swap: float = 0.0    # birikmiş swap maliyeti
     open_time: str = ""
+    strategy: str = ""   # "manual" | "trend_follow" | "mean_reversion" | "breakout" | "bilinmiyor"
+    tur: str = ""        # "Otomatik" | "Manuel" | "Hibrit" — backend tek kaynak
 
 
 class PositionsResponse(BaseModel):
     """GET /api/positions — Açık pozisyonlar."""
     count: int = 0
     positions: list[PositionItem] = []
+
+
+class ClosePositionRequest(BaseModel):
+    """POST /api/positions/close isteği."""
+    ticket: int
+
+
+class ClosePositionResponse(BaseModel):
+    """Pozisyon kapatma yanıtı."""
+    success: bool
+    message: str
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -187,7 +201,7 @@ class RiskResponse(BaseModel):
     max_daily_loss: float = 0.018
     max_weekly_loss: float = 0.04
     max_monthly_loss: float = 0.07
-    hard_drawdown: float = 0.12
+    hard_drawdown: float = 0.15
     max_floating_loss: float = 0.015
 
     # Durum
@@ -410,3 +424,200 @@ class ManualTradeExecuteResponse(BaseModel):
     sl: float = 0.0
     tp: float = 0.0
     lot: float = 0.0
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  HİBRİT İŞLEM
+# ═══════════════════════════════════════════════════════════════════
+
+class HybridCheckRequest(BaseModel):
+    """Hibrite devir ön kontrolü — istek."""
+    ticket: int
+
+
+class HybridCheckResponse(BaseModel):
+    """Hibrite devir ön kontrolü — yanıt."""
+    can_transfer: bool = False
+    reason: str = ""
+    symbol: str = ""
+    direction: str = ""
+    volume: float = 0.0
+    entry_price: float = 0.0
+    current_price: float = 0.0
+    atr_value: float = 0.0
+    suggested_sl: float = 0.0
+    suggested_tp: float = 0.0
+    hybrid_daily_pnl: float = 0.0
+    hybrid_daily_limit: float = 500.0
+    active_hybrid_count: int = 0
+    max_hybrid_count: int = 3
+
+
+class HybridTransferRequest(BaseModel):
+    """Hibrite devret — istek."""
+    ticket: int
+
+
+class HybridTransferResponse(BaseModel):
+    """Hibrite devret — yanıt."""
+    success: bool = False
+    message: str = ""
+    ticket: int = 0
+    symbol: str = ""
+    sl: float = 0.0
+    tp: float = 0.0
+    entry_atr: float = 0.0
+
+
+class HybridRemoveRequest(BaseModel):
+    """Hibritten çıkar — istek."""
+    ticket: int
+
+
+class HybridRemoveResponse(BaseModel):
+    """Hibritten çıkar — yanıt."""
+    success: bool = False
+    message: str = ""
+
+
+class HybridPositionItem(BaseModel):
+    """Hibrit pozisyon detayı."""
+    ticket: int
+    symbol: str
+    direction: str
+    volume: float
+    entry_price: float
+    current_price: float = 0.0
+    entry_atr: float
+    initial_sl: float
+    initial_tp: float
+    current_sl: float
+    current_tp: float
+    pnl: float = 0.0
+    swap: float = 0.0
+    breakeven_hit: bool = False
+    trailing_active: bool = False
+    transferred_at: str = ""
+    state: str = "ACTIVE"
+
+
+class HybridStatusResponse(BaseModel):
+    """Hibrit panel durum bilgisi."""
+    active_count: int = 0
+    max_count: int = 3
+    daily_pnl: float = 0.0
+    daily_limit: float = 500.0
+    native_sltp: bool = False
+    positions: list[HybridPositionItem] = []
+
+
+class HybridEventItem(BaseModel):
+    """Hibrit olay kaydı."""
+    id: int = 0
+    timestamp: str = ""
+    ticket: int = 0
+    symbol: str = ""
+    event: str = ""
+    details: str = ""
+
+
+class HybridEventsResponse(BaseModel):
+    """Hibrit olaylar listesi."""
+    count: int = 0
+    events: list[HybridEventItem] = []
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  ÜSTAT BEYİN (v13.0)
+# ═══════════════════════════════════════════════════════════════════
+
+class CategoryGroup(BaseModel):
+    """İşlem kategori grubu (sonuç/yön/süre/rejim bazlı)."""
+    label: str
+    count: int = 0
+    total_pnl: float = 0.0
+    win_rate: float = 0.0
+    avg_pnl: float = 0.0
+
+
+class TradeCategories(BaseModel):
+    """Çok boyutlu işlem kategorizasyonu."""
+    by_result: list[CategoryGroup] = []
+    by_direction: list[CategoryGroup] = []
+    by_duration: list[CategoryGroup] = []
+    by_regime: list[CategoryGroup] = []
+    by_exit_reason: list[CategoryGroup] = []
+
+
+class ContractProfile(BaseModel):
+    """Kontrat bazlı detaylı profil."""
+    symbol: str
+    trade_count: int = 0
+    win_rate: float = 0.0
+    total_pnl: float = 0.0
+    avg_pnl: float = 0.0
+    avg_duration_min: float = 0.0
+    best_pnl: float = 0.0
+    worst_pnl: float = 0.0
+    last_trade: str = ""
+    preferred_direction: str = ""  # BUY veya SELL
+
+
+class ErrorAttribution(BaseModel):
+    """Hata atama kaydı (placeholder — engine implemente edince dolacak)."""
+    trade_id: int
+    error_type: str
+    responsible: str  # "BABA" | "OGUL"
+    description: str
+
+
+class NextDayAnalysis(BaseModel):
+    """Ertesi gün analizi (placeholder — engine implemente edince dolacak)."""
+    trade_id: int
+    symbol: str
+    actual_pnl: float
+    potential_pnl: float
+    missed_profit: float
+    signal_score: float
+    risk_score: float
+    management_score: float
+    summary: str
+
+
+class RegulationSuggestion(BaseModel):
+    """Parametre regülasyon önerisi (placeholder)."""
+    parameter: str
+    current_value: str
+    suggested_value: str
+    reason: str
+    priority: str = "MEDIUM"  # HIGH / MEDIUM / LOW
+
+
+class StrategyProfile(BaseModel):
+    """Strateji havuzu profili (placeholder)."""
+    name: str
+    market_type: str = ""  # volatil / duragan / patlama
+    parameters: dict = {}
+    active: bool = False
+
+
+class StrategyPool(BaseModel):
+    """Strateji havuzu durumu (placeholder)."""
+    current_regime: str = ""
+    profiles: list[StrategyProfile] = []
+
+
+class UstatBrainResponse(BaseModel):
+    """GET /api/ustat/brain — ÜSTAT beyin analiz verileri."""
+    trade_categories: TradeCategories = TradeCategories()
+    contract_profiles: list[ContractProfile] = []
+    recent_decisions: list[EventItem] = []
+    regime_performance: list[CategoryGroup] = []
+    error_attributions: list[ErrorAttribution] = []
+    next_day_analyses: list[NextDayAnalysis] = []
+    strategy_pool: StrategyPool = StrategyPool()
+    regulation_suggestions: list[RegulationSuggestion] = []
+
+
+# Forward-ref güncelle
+UstatBrainResponse.model_rebuild()

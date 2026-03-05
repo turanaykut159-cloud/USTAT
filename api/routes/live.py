@@ -19,7 +19,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from api.deps import get_baba, get_db, get_engine, get_pipeline, get_ustat
+from api.deps import get_baba, get_db, get_engine, get_ogul, get_pipeline, get_ustat
 
 logger = logging.getLogger("ustat.api.ws")
 
@@ -126,11 +126,13 @@ async def _send_all_updates(ws: WebSocket):
             "daily_pnl": daily_pnl,
         })
 
-    # ── 3. Pozisyon güncellemesi (cache'den) ─────────────────────
+    # ── 3. Pozisyon güncellemesi (cache'den, strateji OĞUL'dan) ───
     if cache_ok and pipeline.latest_positions is not None:
+        ogul = get_ogul()
         pos_list = []
         for p in pipeline.latest_positions:
-            direction = "BUY" if p.get("type", -1) == 0 else "SELL"
+            _type = p.get("type", -1)
+            direction = "BUY" if _type == 0 or _type == "BUY" else "SELL"
             open_time = ""
             t = p.get("time")
             if t:
@@ -143,17 +145,30 @@ async def _send_all_updates(ws: WebSocket):
                 except (ValueError, OSError):
                     open_time = str(t)
 
+            profit = p.get("profit", 0.0)
+            swap = p.get("swap", 0.0)
+            ticket = p.get("ticket", 0)
+            symbol = p.get("symbol", "")
+            strategy = "bilinmiyor"
+            if ogul and getattr(ogul, "active_trades", None):
+                for _sym, trade in ogul.active_trades.items():
+                    if getattr(trade, "ticket", 0) == ticket and _sym == symbol:
+                        strategy = getattr(trade, "strategy", "") or "bilinmiyor"
+                        break
+
             pos_list.append({
-                "ticket": p.get("ticket", 0),
-                "symbol": p.get("symbol", ""),
+                "ticket": ticket,
+                "symbol": symbol,
                 "direction": direction,
                 "volume": p.get("volume", 0.0),
                 "entry_price": p.get("price_open", 0.0),
                 "current_price": p.get("price_current", 0.0),
                 "sl": p.get("sl", 0.0),
                 "tp": p.get("tp", 0.0),
-                "pnl": p.get("profit", 0.0),
+                "pnl": profit + swap,
+                "swap": swap,
                 "open_time": open_time,
+                "strategy": strategy,
             })
 
         messages.append({
@@ -182,6 +197,47 @@ async def _send_all_updates(ws: WebSocket):
             "regime": regime,
             "kill_switch_level": baba._kill_switch_level,
             "can_trade": can_trade,
+        })
+
+    # ── 5. Hibrit pozisyon güncellemesi ─────────────────────────
+    from api.deps import get_h_engine
+    h_engine = get_h_engine()
+    if h_engine and h_engine.hybrid_positions:
+        h_list = []
+        for hp in h_engine.hybrid_positions.values():
+            current_price = 0.0
+            pnl = 0.0
+            swap = 0.0
+            if pipeline and pipeline.latest_positions:
+                for p in pipeline.latest_positions:
+                    if p.get("ticket") == hp.ticket:
+                        current_price = p.get("price_current", 0.0)
+                        pnl = p.get("profit", 0.0) + p.get("swap", 0.0)
+                        swap = p.get("swap", 0.0)
+                        break
+            h_list.append({
+                "ticket": hp.ticket,
+                "symbol": hp.symbol,
+                "direction": hp.direction,
+                "volume": hp.volume,
+                "entry_price": hp.entry_price,
+                "current_price": current_price,
+                "entry_atr": hp.entry_atr,
+                "initial_sl": hp.initial_sl,
+                "initial_tp": hp.initial_tp,
+                "current_sl": hp.current_sl,
+                "current_tp": hp.current_tp,
+                "pnl": pnl,
+                "swap": swap,
+                "breakeven_hit": hp.breakeven_hit,
+                "trailing_active": hp.trailing_active,
+                "state": hp.state,
+            })
+        messages.append({
+            "type": "hybrid",
+            "positions": h_list,
+            "daily_pnl": h_engine._daily_hybrid_pnl,
+            "daily_limit": h_engine._config_daily_limit,
         })
 
     # ── Hepsini tek JSON olarak gönder ────────────────────────────

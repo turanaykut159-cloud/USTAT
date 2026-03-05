@@ -11,7 +11,7 @@ from collections import defaultdict
 
 from fastapi import APIRouter, Query
 
-from api.deps import get_db
+from api.deps import get_db, get_engine
 from engine.baba import RISK_BASELINE_DATE
 from api.schemas import EquityPoint, PerformanceResponse
 
@@ -22,7 +22,13 @@ router = APIRouter()
 async def get_performance(
     days: int = Query(30, ge=1, le=365, description="Performans penceresi (gün)"),
 ):
-    """Performans metriklerini hesapla."""
+    """Performans metriklerini hesapla. MT5'te değişim olduğunda anlık: önce son 3 gün sync."""
+    engine = get_engine()
+    if engine and getattr(engine.mt5, "_connected", False):
+        try:
+            engine.sync_mt5_history_recent(3)
+        except Exception:
+            pass
     db = get_db()
     if not db:
         return PerformanceResponse()

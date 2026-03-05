@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.0 — İşlem Paneli (Manuel İşlem).
+ * ÜSTAT v5.1 — Manuel İşlem Paneli.
  *
  * Kullanıcı sembol + yön + lot seçerek manuel işlem açar.
  * BABA risk kontrolü yapılır, OĞUL pozisyonu yönetir.
@@ -129,7 +129,7 @@ export default function ManualTrade() {
 
   return (
     <div className="manual-trade">
-      <h2>İşlem Paneli</h2>
+      <h2>Manuel İşlem Paneli</h2>
 
       <div className="mt-layout">
         {/* ── SOL PANEL: Form ──────────────────────────────────── */}

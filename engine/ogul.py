@@ -18,6 +18,7 @@ Rejim → Aktif sinyaller:
 from __future__ import annotations
 
 import math
+import time as _time
 from datetime import datetime, time
 from typing import Any
 
@@ -189,6 +190,7 @@ class Ogul:
         self.risk_params = risk_params or RiskParams()
         self.active_trades: dict[str, Trade] = {}
         self.last_signals: dict[str, str] = {}  # symbol → "BUY"|"SELL"|"BEKLE"
+        self.h_engine: Any | None = None  # HEngine referansı (main.py tarafından atanır)
 
     # ═════════════════════════════════════════════════════════════════
     #  ANA GİRİŞ
@@ -244,6 +246,11 @@ class Ogul:
         for symbol in symbols:
             # Sembol başına 1 aktif işlem kuralı
             if symbol in self.active_trades:
+                continue
+
+            # Hibrit yönetimindeki sembol atla (netting koruması)
+            if self.h_engine and symbol in self.h_engine.get_hybrid_symbols():
+                logger.debug(f"Hibrit yönetiminde: {symbol} — sinyal atlanıyor")
                 continue
 
             # Kill-switch kontrolü
@@ -1848,6 +1855,12 @@ class Ogul:
                         logger.error(f"EOD close_position hatası [{symbol}] ticket={trade.ticket}: {exc}")
                 self._remove_trade(symbol, trade, "end_of_day")
 
+        # Hibrit pozisyonları da kapat (EOD)
+        if self.h_engine:
+            failed = self.h_engine.force_close_all(reason="EOD_17:45")
+            if failed:
+                logger.error(f"EOD hibrit kapatma başarısız: {failed}")
+
         self.db.insert_event(
             event_type="EOD_CLOSE",
             message="Gün sonu: tüm pozisyon ve emirler kapatıldı",
@@ -1913,10 +1926,25 @@ class Ogul:
                 self._handle_closed_trade(symbol, trade, "sl_tp")
                 continue
 
-            # Ticket senkronizasyonu
+            # Pozisyon senkronizasyonu (netting: lot/fiyat değişebilir)
             pos_ticket = pos.get("ticket", 0)
             if pos_ticket and pos_ticket != trade.ticket:
                 trade.ticket = pos_ticket
+            pos_vol = pos.get("volume", trade.volume)
+            pos_entry = pos.get("price_open", trade.entry_price)
+            sync_needed = False
+            if abs(pos_vol - trade.volume) > 1e-8:
+                trade.volume = pos_vol
+                sync_needed = True
+            if abs(pos_entry - trade.entry_price) > 1e-4:
+                trade.entry_price = pos_entry
+                sync_needed = True
+            if sync_needed and trade.db_id > 0:
+                self.db.update_trade(trade.db_id, {
+                    "lot": trade.volume,
+                    "entry_price": trade.entry_price,
+                    "mt5_position_id": trade.ticket,
+                })
 
             # Strateji bazlı çıkış kontrolleri
             if trade.strategy == "trend_follow":
@@ -2255,7 +2283,7 @@ class Ogul:
             if not df.empty:
                 trade.exit_price = float(df["close"].values[-1])
 
-        # PnL hesapla — kontrat bazlı çarpan
+        # PnL hesapla — önce fiyat farkından (fallback)
         if trade.entry_price > 0 and trade.exit_price > 0:
             contract_size = CONTRACT_SIZE  # varsayılan fallback
             sym_info = self.mt5.get_symbol_info(symbol)
@@ -2267,13 +2295,37 @@ class Ogul:
             else:
                 trade.pnl = (trade.entry_price - trade.exit_price) * trade.volume * contract_size
 
-        # DB güncelle
+        # MT5 deal verisinden gerçek PnL/komisyon/swap al (geçmişe yazılma gecikmesi için retry)
+        commission = 0.0
+        swap = 0.0
+        deal_summary = None
+        for attempt in range(3):
+            deal_summary = self.mt5.get_deal_summary(trade.ticket)
+            if deal_summary is not None:
+                break
+            if attempt < 2:
+                _time.sleep(0.8)
+        if deal_summary is not None:
+            trade.pnl = deal_summary["pnl"]
+            commission = deal_summary["commission"]
+            swap = deal_summary["swap"]
+            logger.debug(
+                f"MT5 deal verisi kullanıldı [{symbol}]: "
+                f"pnl={trade.pnl:.2f} comm={commission:.2f} swap={swap:.2f}"
+            )
+
+        # DB güncelle — entry_price/lot da dahil (netting değişikliği yansısın)
         if trade.db_id > 0:
             self.db.update_trade(trade.db_id, {
                 "exit_time": now.isoformat(),
                 "exit_price": trade.exit_price,
+                "entry_price": trade.entry_price,
+                "lot": trade.volume,
                 "pnl": trade.pnl,
                 "exit_reason": exit_reason,
+                "mt5_position_id": trade.ticket,
+                "commission": commission,
+                "swap": swap,
             })
 
         # Event kaydet
@@ -2374,6 +2426,22 @@ class Ogul:
             restored_count += 1
 
             if db_trade:
+                # DB'yi MT5 pozisyonuyla senkronize et (netting farkı düzeltme)
+                sync_fields: dict[str, Any] = {}
+                db_lot = db_trade.get("lot", 0.0)
+                db_entry = db_trade.get("entry_price", 0.0)
+                if abs(trade.volume - db_lot) > 1e-8:
+                    sync_fields["lot"] = trade.volume
+                if abs(trade.entry_price - db_entry) > 1e-4:
+                    sync_fields["entry_price"] = trade.entry_price
+                if trade.ticket and not db_trade.get("mt5_position_id"):
+                    sync_fields["mt5_position_id"] = trade.ticket
+                if sync_fields and trade.db_id > 0:
+                    self.db.update_trade(trade.db_id, sync_fields)
+                    logger.info(
+                        f"DB senkronize [{symbol}]: {sync_fields}"
+                    )
+
                 logger.info(
                     f"Geri yüklendi [{symbol}]: ticket={ticket} "
                     f"{direction} {trade.volume} lot "

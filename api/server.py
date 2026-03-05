@@ -32,6 +32,7 @@ from api.deps import set_engine
 from api.routes import (
     account,
     events,
+    hybrid_trade,
     killswitch,
     live,
     manual_trade,
@@ -41,6 +42,7 @@ from api.routes import (
     status,
     top5,
     trades,
+    ustat_brain,
 )
 
 logger = logging.getLogger("ustat.api")
@@ -140,6 +142,8 @@ app.include_router(top5.router, prefix="/api", tags=["top5"])
 app.include_router(killswitch.router, prefix="/api", tags=["killswitch"])
 app.include_router(events.router, prefix="/api", tags=["events"])
 app.include_router(manual_trade.router, prefix="/api", tags=["manual-trade"])
+app.include_router(hybrid_trade.router, prefix="/api", tags=["hybrid-trade"])
+app.include_router(ustat_brain.router, prefix="/api", tags=["ustat-brain"])
 app.include_router(live.router, tags=["websocket"])
 
 

@@ -1,7 +1,7 @@
 {
   "name": "ustat-desktop",
-  "version": "5.0.0",
-  "description": "ÜSTAT v5.0 — VİOP Algorithmic Trading Desktop",
+  "version": "5.1.0",
+  "description": "ÜSTAT v5.1 — VİOP Algorithmic Trading Desktop",
   "main": "main.js",
   "scripts": {
     "dev": "concurrently \"npm run vite-dev\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .\"",

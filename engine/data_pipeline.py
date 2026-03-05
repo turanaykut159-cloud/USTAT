@@ -534,8 +534,11 @@ class DataPipeline:
             self.latest_positions = positions
             self._cache_time = datetime.now()
 
-            # Floating PnL = pozisyonların toplam profit'i
-            floating_pnl = sum(p.get("profit", 0.0) for p in positions)
+            # Floating PnL = pozisyonların toplam profit + swap
+            # MT5: equity = balance + profit + swap, dolayısıyla her ikisi de dahil
+            floating_pnl = sum(
+                p.get("profit", 0.0) + p.get("swap", 0.0) for p in positions
+            )
 
             # Günlük PnL — gün başı equity'den fark
             daily_pnl = self._calculate_daily_pnl(account.equity)

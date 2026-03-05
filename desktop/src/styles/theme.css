@@ -1,4 +1,4 @@
-/* ÜSTAT v5.0 — Tema Değişkenleri */
+/* ÜSTAT v5.1 — Tema Değişkenleri */
 
 /* ── Koyu Tema (varsayılan) ──────────────────────────────────── */
 :root {
@@ -567,12 +567,165 @@ body {
   font-weight: 400;
 }
 
-/* ── Kill-Switch Button ──────────────────────────────────────── */
+/* ── Side nav alt: Güvenli Kapat + Kill-Switch ────────────────── */
 .side-nav-bottom {
   padding: 12px;
   border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
+.safe-quit-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.safe-quit-btn:hover {
+  background: var(--bg-tertiary);
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+.safe-quit-btn:active {
+  transform: scale(0.98);
+}
+
+.safe-quit-icon {
+  font-size: 14px;
+}
+
+.safe-quit-label {
+  white-space: nowrap;
+}
+
+/* ── ConfirmModal (Güvenli Kapat / uyarı ekranları) ───────────── */
+.confirm-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+  animation: confirm-modal-fade-in 0.2s ease-out;
+}
+
+@keyframes confirm-modal-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.confirm-modal-card {
+  min-width: 360px;
+  max-width: 440px;
+  padding: 24px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+  animation: confirm-modal-slide-in 0.25s ease-out;
+}
+
+@keyframes confirm-modal-slide-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.confirm-modal-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 14px 0;
+  letter-spacing: 0.3px;
+}
+
+.confirm-modal-message {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  margin: 0 0 22px 0;
+  white-space: pre-line;
+}
+
+.confirm-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.confirm-modal-btn {
+  padding: 10px 20px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  border: 1px solid transparent;
+}
+
+.confirm-modal-btn-cancel {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-color: var(--border);
+}
+
+.confirm-modal-btn-cancel:hover {
+  background: var(--bg-hover);
+  border-color: var(--text-dim);
+}
+
+.confirm-modal-btn-confirm {
+  color: #fff;
+}
+
+.confirm-modal-btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.confirm-modal-btn--primary:hover {
+  filter: brightness(1.1);
+}
+
+.confirm-modal-btn--warning {
+  background: #c17a1a;
+  border-color: #c17a1a;
+}
+
+.confirm-modal-btn--warning:hover {
+  filter: brightness(1.12);
+}
+
+.confirm-modal-btn--danger {
+  background: #da3633;
+  border-color: #da3633;
+}
+
+.confirm-modal-btn--danger:hover {
+  filter: brightness(1.1);
+}
+
+/* ── Kill-Switch Button ──────────────────────────────────────── */
 .kill-switch-btn {
   width: 100%;
   display: flex;
@@ -1712,6 +1865,32 @@ h2 {
   font-size: 13px;
 }
 
+.th-loading.th-error-msg {
+  flex-direction: column;
+  gap: 12px;
+  text-align: center;
+}
+
+.th-error-hint {
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+.th-retry-btn {
+  margin-top: 8px;
+  padding: 8px 20px;
+  background: var(--accent);
+  color: var(--bg-primary);
+  border: none;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.th-retry-btn:hover {
+  opacity: 0.9;
+}
+
 .th-table {
   width: 100%;
   border-collapse: collapse;
@@ -1797,6 +1976,34 @@ h2 {
 .th-approve-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* İşlem Geçmişi — Tür (Otomatik / Manuel / Hibrit) */
+.th-tur-cell {
+  white-space: nowrap;
+}
+
+.th-tur-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.th-tur--manual {
+  background: rgba(88, 166, 255, 0.15);
+  color: var(--accent);
+}
+
+.th-tur--auto {
+  background: rgba(136, 136, 136, 0.2);
+  color: var(--text-secondary);
+}
+
+.th-tur--hybrid {
+  background: rgba(210, 153, 34, 0.18);
+  color: var(--warning);
 }
 
 /* ── Performans + Risk Panelleri ──────────────────────────────── */
@@ -2030,6 +2237,103 @@ h2 {
 
 .op-pnl-cell {
   font-size: 14px;
+}
+
+/* Tür (Manuel / Otomatik) */
+.op-tur-cell {
+  white-space: nowrap;
+}
+
+.op-tur-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.op-tur--manual {
+  background: rgba(88, 166, 255, 0.15);
+  color: var(--accent);
+}
+
+.op-tur--auto {
+  background: rgba(136, 136, 136, 0.2);
+  color: var(--text-secondary);
+}
+
+.op-tur--external {
+  background: rgba(88, 166, 255, 0.10);
+  color: var(--accent);
+}
+
+.op-tur--hybrid {
+  background: rgba(210, 153, 34, 0.18);
+  color: var(--warning);
+}
+
+/* İşlemi Kapat butonu (sadece manuel) */
+.op-action-cell {
+  white-space: nowrap;
+}
+
+.op-close-btn {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.op-close-btn:hover:not(:disabled) {
+  background: rgba(248, 81, 73, 0.12);
+  border-color: rgba(248, 81, 73, 0.4);
+  color: var(--loss);
+}
+
+.op-close-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.op-hybrid-btn {
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  border: 1px solid rgba(210, 153, 34, 0.3);
+  border-radius: 4px;
+  background: rgba(210, 153, 34, 0.1);
+  color: var(--warning);
+  cursor: pointer;
+  margin-left: 4px;
+  transition: background 0.2s, border-color 0.2s;
+}
+.op-hybrid-btn:hover:not(:disabled) {
+  background: rgba(210, 153, 34, 0.2);
+  border-color: rgba(210, 153, 34, 0.5);
+}
+.op-hybrid-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.op-hybrid-link-btn {
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  border: 1px solid rgba(210, 153, 34, 0.3);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--warning);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.op-hybrid-link-btn:hover {
+  background: rgba(210, 153, 34, 0.12);
 }
 
 /* Satır arka plan renkleri (hafif) */
@@ -2428,6 +2732,221 @@ h2 {
     #3fb950 0px, #3fb950 4px,
     transparent 4px, transparent 8px
   ) !important;
+}
+
+/* ── Performans Sekme Çubuğu ────────────────────────────────── */
+
+.pf-tab-bar {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+
+.pf-tab-btn {
+  padding: 8px 20px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.pf-tab-btn:hover {
+  color: var(--text-primary);
+}
+
+.pf-tab-btn.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+/* ── Kategori Grid (2x2) ───────────────────────────────────── */
+
+.pf-category-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+/* ── Kontrat Profilleri Grid ───────────────────────────────── */
+
+.pf-contract-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.pf-contract-card {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pf-contract-symbol {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.pf-contract-stat {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.pf-contract-stat .value {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.pf-contract-stat .value.profit { color: var(--profit); }
+.pf-contract-stat .value.loss   { color: var(--loss); }
+
+.pf-contract-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+
+.pf-contract-badge.buy {
+  background: rgba(63, 185, 80, 0.15);
+  color: var(--profit);
+}
+
+.pf-contract-badge.sell {
+  background: rgba(248, 81, 73, 0.15);
+  color: var(--loss);
+}
+
+/* ── Karar Akışı (Timeline) ────────────────────────────────── */
+
+.pf-decision-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.pf-decision-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.pf-decision-item:last-child {
+  border-bottom: none;
+}
+
+.pf-decision-time {
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+  min-width: 100px;
+}
+
+.pf-decision-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+  min-width: 56px;
+  text-align: center;
+}
+
+.pf-decision-badge.INFO {
+  background: rgba(88, 166, 255, 0.15);
+  color: var(--accent);
+}
+
+.pf-decision-badge.WARNING {
+  background: rgba(210, 153, 34, 0.15);
+  color: var(--warning);
+}
+
+.pf-decision-badge.CRITICAL {
+  background: rgba(248, 81, 73, 0.15);
+  color: var(--loss);
+}
+
+.pf-decision-msg {
+  color: var(--text-secondary);
+  flex: 1;
+  line-height: 1.4;
+}
+
+/* ── Placeholder (Yakında) Kartlar ─────────────────────────── */
+
+.pf-placeholder-card {
+  background: var(--bg-secondary);
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  padding: 28px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 8px;
+  min-height: 120px;
+}
+
+.pf-placeholder-icon {
+  font-size: 28px;
+  opacity: 0.5;
+}
+
+.pf-placeholder-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.pf-placeholder-desc {
+  font-size: 12px;
+  color: var(--text-dim);
+  max-width: 280px;
+  line-height: 1.4;
+}
+
+.pf-placeholder-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(88, 166, 255, 0.12);
+  color: var(--accent);
+  text-transform: uppercase;
+  margin-top: 4px;
+}
+
+/* ── Placeholder Grid (3 kolon) ────────────────────────────── */
+
+.pf-placeholder-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -3184,4 +3703,90 @@ h2 {
   margin-bottom: 8px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   HİBRİT İŞLEM PANELİ
+═══════════════════════════════════════════════════════════════════ */
+.hybrid-trade { padding: 16px; }
+.hybrid-trade h2 { margin-bottom: 16px; color: var(--text-primary); }
+.hybrid-trade h3 {
+  font-size: 14px;
+  color: var(--text-primary);
+  margin-bottom: 10px;
+}
+
+/* Hibrit SL/TP modu badge'i */
+.ht-sltp-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  margin-left: 10px;
+  vertical-align: middle;
+  letter-spacing: 0.3px;
+}
+.ht-sltp--software {
+  background: rgba(210, 153, 34, 0.20);
+  color: var(--warning);
+}
+.ht-sltp--native {
+  background: rgba(63, 185, 80, 0.15);
+  color: var(--profit);
+}
+
+/* Hibrit durum badge'leri */
+.ht-state--active {
+  background: rgba(88, 166, 255, 0.15);
+  color: var(--accent);
+}
+.ht-state--breakeven {
+  background: rgba(210, 153, 34, 0.18);
+  color: var(--warning);
+}
+.ht-state--trailing {
+  background: rgba(63, 185, 80, 0.15);
+  color: var(--profit);
+}
+
+/* Hibrit event badge'leri */
+.ht-event-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ht-event--transfer {
+  background: rgba(88, 166, 255, 0.15);
+  color: var(--accent);
+}
+.ht-event--breakeven {
+  background: rgba(210, 153, 34, 0.18);
+  color: var(--warning);
+}
+.ht-event--trailing_update,
+.ht-event--trailing_start {
+  background: rgba(63, 185, 80, 0.15);
+  color: var(--profit);
+}
+.ht-event--software_sl,
+.ht-event--software_tp,
+.ht-event--sl_hit,
+.ht-event--tp_hit,
+.ht-event--close,
+.ht-event--eod_close,
+.ht-event--force_close {
+  background: rgba(248, 81, 73, 0.12);
+  color: var(--loss);
+}
+.ht-event--remove {
+  background: rgba(136, 136, 136, 0.15);
+  color: var(--text-secondary);
+}
+.ht-event--external_close {
+  background: rgba(136, 136, 136, 0.2);
+  color: var(--text-dim);
 }

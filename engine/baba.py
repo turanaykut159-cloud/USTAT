@@ -16,7 +16,7 @@ Erken uyarı tetikleyicileri (likidite sınıfına göre farklı eşik):
     USD/TRY şoku      — 5 dk'da %0.5+ hareket (tüm sınıflar)
 
 Risk yönetimi:
-    Günlük zarar %2  → tüm işlemler dur → ertesi gün 09:30 sıfırla
+    Günlük zarar %1.8 → tüm işlemler dur → ertesi gün 09:30 sıfırla
     Haftalık zarar %4 → lot %50 azalt → Pazartesi 09:30 sıfırla
     Aylık zarar %7    → sistem dur → manuel onay
     Max DD %10 / Hard DD %15 → tam kapanış → manuel onay
