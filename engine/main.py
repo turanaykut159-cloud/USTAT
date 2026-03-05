@@ -1,4 +1,4 @@
-"""ÜSTAT Trading Engine — Ana döngü (v12.2).
+"""ÜSTAT Trading Engine — Ana döngü (v13.0).
 
 Her 10 saniyede çalışan ana döngü:
     1. MT5 heartbeat / reconnect
@@ -6,9 +6,11 @@ Her 10 saniyede çalışan ana döngü:
     2.5. Pozisyon kapanma tespiti: ticket set diff → kapanma varsa history sync
     3. BABA açık pozisyon denetimi: fake analiz, risk limitleri, erken uyarı
     4. BABA risk kontrolü: günlük/haftalık/aylık zarar, floating, korelasyon
-    5. OĞUL emir state-machine ilerletme (her zaman, risk verdiktinden bağımsız)
+    5. Top 5 kontrat seçimi (OĞUL — v13.0'da ÜSTAT'tan taşındı)
     6. OĞUL sinyal: risk müsaitse + günlük limit dolmadıysa + Top 5 için sinyal ara
-    7. Loglama: tüm kararlar SQLite'a
+    6.5. H-Engine hibrit pozisyon yönetimi
+    7. ÜSTAT brain: raporlama + strateji havuzu
+    8. Loglama: tüm kararlar SQLite'a
 
 BABA HER ZAMAN ÖNCE ÇALIŞIR — sıralama değiştirilemez.
 
@@ -66,9 +68,9 @@ class Engine:
         Database     → SQLite (thread-safe)
         MT5Bridge    → MetaTrader 5 bağlantısı
         DataPipeline → Veri çekme, temizleme, depolama
-        Ustat        → Top 5 kontrat seçimi
+        Ustat        → Strateji yönetimi, raporlama (brain)
         Baba         → Risk yönetimi, rejim algılama
-        Ogul         → Sinyal üretimi, emir state-machine
+        Ogul         → Sinyal üretimi, Top 5 seçimi, emir state-machine
     """
 
     def __init__(
@@ -220,9 +222,11 @@ class Engine:
             2.5. Pozisyon kapanma tespiti (ticket set diff → history sync + pending retry)
             3. BABA cycle (rejim + erken uyarı + fake + period reset + kill-switch)
             4. BABA risk kontrolü
-            5. Top 5 seçimi (ÜSTAT)
+            5. Top 5 seçimi (OĞUL — v13.0)
             6. OĞUL sinyal üretimi + emir yönetimi
-            7. Cycle loglama
+            6.5. H-Engine hibrit pozisyon yönetimi
+            7. ÜSTAT brain (raporlama + strateji havuzu)
+            8. Cycle loglama
         """
         while self._running:
             cycle_start = _time.monotonic()
@@ -322,8 +326,8 @@ class Engine:
                 f"(KS={risk_verdict.kill_switch_level})"
             )
 
-        # ── 5. Top 5 Kontrat Seçimi ───────────────────────────────
-        top5 = self.ustat.select_top5(regime)
+        # ── 5. Top 5 Kontrat Seçimi (v13.0: OĞUL sorumlu) ────────
+        top5 = self.ogul.select_top5(regime)
 
         # ── 6. OĞUL — Sinyal Üretimi + Emir Yönetimi ─────────────
         # process_signals() içinde:
@@ -359,7 +363,13 @@ class Engine:
                 "H_ENGINE_ERROR", f"H-Engine cycle hatası: {exc}", "ERROR",
             )
 
-        # ── 7. Cycle Loglama ──────────────────────────────────────
+        # ── 7. ÜSTAT Brain — Raporlama + Strateji Havuzu ─────────
+        try:
+            self.ustat.run_cycle(self.baba, self.ogul)
+        except Exception as exc:
+            logger.error(f"ÜSTAT brain cycle hatası: {exc}")
+
+        # ── 8. Cycle Loglama ──────────────────────────────────────
         self._log_cycle_summary(regime, risk_verdict, top5)
 
     # ═════════════════════════════════════════════════════════════════

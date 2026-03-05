@@ -19,7 +19,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from api.deps import get_baba, get_db, get_engine, get_ogul, get_pipeline, get_ustat
+from api.deps import get_baba, get_db, get_engine, get_ogul, get_pipeline
 
 logger = logging.getLogger("ustat.api.ws")
 
@@ -84,7 +84,7 @@ async def _send_all_updates(ws: WebSocket):
     """
     baba = get_baba()
     db = get_db()
-    ustat = get_ustat()
+    ogul = get_ogul()
     pipeline = get_pipeline()
 
     messages: list[dict] = []
@@ -93,8 +93,8 @@ async def _send_all_updates(ws: WebSocket):
     cache_ok = pipeline and not pipeline.is_cache_stale()
 
     # ── 1. Tick verileri (Top 5 kontrat, cache'den) ──────────────
-    if pipeline and ustat:
-        scores = ustat.current_scores or {}
+    if pipeline and ogul:
+        scores = ogul.current_scores or {}
         top_symbols = sorted(scores, key=scores.get, reverse=True)[:5]
 
         for symbol in top_symbols:

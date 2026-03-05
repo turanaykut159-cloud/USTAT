@@ -1,13 +1,13 @@
 """GET /api/top5 — Güncel Top 5 kontrat.
 
-Ustat modülünden seçilen en iyi 5 kontrat, skorlar, rejim.
+Oğul modülünden seçilen en iyi 5 kontrat, skorlar, rejim (v13.0).
 """
 
 from __future__ import annotations
 
 from fastapi import APIRouter
 
-from api.deps import get_baba, get_db, get_ogul, get_ustat
+from api.deps import get_baba, get_db, get_ogul
 from api.schemas import Top5Item, Top5Response
 
 router = APIRouter()
@@ -16,21 +16,20 @@ router = APIRouter()
 @router.get("/top5", response_model=Top5Response)
 async def get_top5():
     """Güncel Top 5 kontratları döndür."""
-    ustat = get_ustat()
     baba = get_baba()
     ogul = get_ogul()
     db = get_db()
 
-    if not ustat:
+    if not ogul:
         return Top5Response()
 
-    # Tüm skorlar (property)
-    all_scores = ustat.current_scores or {}
+    # Tüm skorlar (v13.0: OĞUL'dan)
+    all_scores = ogul.current_scores or {}
 
     # Son refresh zamanı
     last_refresh = None
-    if ustat.last_refresh:
-        last_refresh = ustat.last_refresh.isoformat()
+    if ogul.last_refresh:
+        last_refresh = ogul.last_refresh.isoformat()
 
     # Mevcut rejim
     regime_str = ""
