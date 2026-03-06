@@ -180,6 +180,63 @@ EXPIRY_NO_NEW_TRADE_DAYS: int = 3   # vade bitişinden 3 iş günü öncesi
 EXPIRY_CLOSE_DAYS: int = 1          # vade bitişinden 1 iş günü öncesi
 EXPIRY_OBSERVATION_DAYS: int = 2    # yeni vadede ilk 2 gün gözlem
 
+# ═════════════════════════════════════════════════════════════════════
+#  EVRENSEL POZİSYON YÖNETİMİ SABİTLERİ
+# ═════════════════════════════════════════════════════════════════════
+
+# Feature flag — True: evrensel yönetim, False: eski strateji bazlı
+USE_UNIVERSAL_MANAGEMENT: bool = True
+
+# ── Breakeven eşikleri (likidite sınıfı bazlı) ─────────────────────
+BE_ATR_BY_CLASS: dict[str, float] = {
+    "A": 1.0,    # kâr ≥ 1×ATR → breakeven
+    "B": 1.3,    # kâr ≥ 1.3×ATR → breakeven
+    "C": 1.5,    # kâr ≥ 1.5×ATR → breakeven
+}
+
+# ── TP1 (yarım kapanış) ────────────────────────────────────────────
+TP1_ATR_MULT: float = 1.5          # kâr ≥ 1.5×ATR → toplam pozisyonun yarısı kapatılır
+
+# ── Trailing Stop (EMA20 bazlı, likidite sınıfı ATR çarpanı) ──────
+TRAIL_ATR_BY_CLASS: dict[str, float] = {
+    "A": 1.0,    # EMA20 − 1.0×ATR
+    "B": 1.3,    # EMA20 − 1.3×ATR
+    "C": 1.5,    # EMA20 − 1.5×ATR
+}
+
+# ── Giriş ───────────────────────────────────────────────────────────
+ENTRY_LOT_FRACTION: float = 0.5    # ilk giriş: hesaplanan lotun %50'si
+LIMIT_OFFSET_ATR: float = 0.25     # limit emir ofset: mum kapanışından 0.25×ATR geri
+
+# ── Geri çekilme toleransı (volatilite bazlı dinamik) ──────────────
+PULLBACK_LOW_VOL: float = 0.20     # düşük volatilite: en yüksek kârın %20'si
+PULLBACK_NORMAL_VOL: float = 0.30  # normal: %30
+PULLBACK_HIGH_VOL: float = 0.40    # yüksek volatilite: %40
+PULLBACK_LOW_THRESHOLD: float = 0.005    # ATR/fiyat < %0.5 = düşük vol
+PULLBACK_HIGH_THRESHOLD: float = 0.012   # ATR/fiyat > %1.2 = yüksek vol
+
+# ── Maliyetlendirme (cost averaging) ───────────────────────────────
+AVG_PULLBACK_ATR: float = 1.0      # geri çekilme ≥ 1×ATR gerekli
+AVG_MAX_RISK_MULT: float = 1.2     # toplam risk ≤ başlangıcın %120'si
+
+# ── Zaman kuralları ─────────────────────────────────────────────────
+FLAT_CANDLE_COUNT: int = 8          # 8 × M15 = 2 saat
+FLAT_ATR_MULT: float = 0.5         # range < 0.5×ATR = yatay
+LUNCH_START: time = time(12, 30)    # öğle arası başlangıç
+LUNCH_END: time = time(14, 0)       # öğle arası bitiş
+LAST_45_MIN: time = time(17, 0)     # son 45 dakika
+LUNCH_TRAIL_WIDEN: float = 1.3      # öğle arası trailing %30 genişlet
+
+# ── Gelişmiş risk kuralları ─────────────────────────────────────────
+DAILY_LOSS_STOP_PCT: float = 0.03           # günlük zarar ≥ equity'nin %3'ü → dur
+SYMBOL_CONSECUTIVE_LOSS_LIMIT: int = 2      # aynı sembolde 2 ardışık zarar → o gün dur
+SPREAD_SPIKE_MULT: float = 2.0             # spread ≥ ort×2 = anormal
+VOLUME_SPIKE_MULT: float = 3.0             # hacim ≥ ort×3 = patlama
+SPREAD_AVG_LOOKBACK: int = 100              # son 100 tick spread ortalaması
+
+# ── Oylama sistemi ──────────────────────────────────────────────────
+VOTING_ATR_LOOKBACK: int = 5        # ATR genişleme: son 5 bar ATR vs önceki 5 bar
+
 
 # ═════════════════════════════════════════════════════════════════════
 #  YARDIMCI FONKSİYONLAR
@@ -289,6 +346,13 @@ class Ogul:
         self._news_deactivated: set[str] = set()
         self._news_deactivate_date: date | None = None
 
+        # ── İki döngü mimarisi (sinyal: M15 kapanış, yönetim: 10 sn) ──
+        self._last_m15_candle_ts: str = ""          # son işlenen M15 mum timestamp
+        self._daily_loss_stop: bool = False          # %3 günlük zarar durdurucu
+        self._daily_loss_stop_date: date | None = None  # sıfırlama takibi
+        self._symbol_loss_count: dict[str, int] = {}    # sembol bazlı ardışık zarar
+        self._symbol_loss_date: date | None = None       # günlük sıfırlama
+
     # ═════════════════════════════════════════════════════════════════
     #  ANA GİRİŞ
     # ═════════════════════════════════════════════════════════════════
@@ -297,37 +361,64 @@ class Ogul:
         """Seçilen kontratlar için sinyal üret ve emirleri yönet.
 
         Her 10 sn'de ``main_loop`` tarafından çağrılır.
+        İki döngü mimarisi:
+            HIZLI DÖNGÜ (her 10 sn): pozisyon yönetimi, risk, acil çıkış
+            SİNYAL DÖNGÜSÜ (M15 kapanış): sinyal üretimi, yeni işlem
 
         Çağrı sırası:
-            1. _check_end_of_day()         — 17:45 kapatma (EN ÖNCE)
-            2. _advance_orders(regime)      — SENT/PARTIAL/TIMEOUT ilerletme
-            3. _manage_active_trades(regime) — trailing stop, çıkış
-            4. _sync_positions()            — MT5 senkronizasyon
-            5. Rejim kontrolü               — aktif stratejiler
-            6. _is_trading_allowed()        — 09:45-17:45 kontrolü
-            7. Sinyal üretimi               — per-symbol
+            1. _check_end_of_day()             — 17:45 kapatma (EN ÖNCE)
+            2. _advance_orders(regime)          — SENT/PARTIAL/TIMEOUT ilerletme
+            3. _manage_active_trades(regime)    — evrensel pozisyon yönetimi
+            4. _sync_positions()               — MT5 senkronizasyon
+            5. _check_advanced_risk_rules()     — gelişmiş risk kontrolleri
+            6. _check_time_rules(regime)        — zaman bazlı kurallar
+            7. Oylama hesapla                  — 4 gösterge, Dashboard için
+            8. M15 kapanış → sinyal üretimi    — yeni mum yoksa atla
 
         Args:
             symbols: Top-5 kontrat sembolleri.
             regime: Mevcut piyasa rejimi.
         """
+        now = datetime.now()
+
+        # ── Günlük sıfırlamalar ────────────────────────────────────
+        today = now.date()
+        if self._daily_loss_stop_date != today:
+            self._daily_loss_stop = False
+            self._daily_loss_stop_date = today
+        if self._symbol_loss_date != today:
+            self._symbol_loss_count.clear()
+            self._symbol_loss_date = today
+
+        # ═══ HIZLI DÖNGÜ (her 10 sn) ══════════════════════════════
+
         # 1. Gün sonu kontrolü — 17:45 tüm pozisyon/emir kapatma
         self._check_end_of_day()
 
         # 2. Bekleyen emir state-machine ilerletme
         self._advance_orders(regime)
 
-        # 3. Mevcut işlemleri yönet (trailing, çıkış kontrolleri)
+        # 3. Mevcut işlemleri yönet (evrensel veya strateji bazlı)
         self._manage_active_trades(regime)
 
         # 4. MT5 ile pozisyon senkronizasyonu
         self._sync_positions()
 
-        # 5. Her sembol için yön eğilimi (bias) hesapla — her zaman, koşulsuz
+        # 5. Her sembol için oylama hesapla — her zaman, koşulsuz (Dashboard)
         for symbol in symbols:
-            self.last_signals[symbol] = self._calculate_bias(symbol)
+            self.last_signals[symbol] = self._calculate_voting(symbol)
 
-        # 6. Rejim kontrolü — aktif stratejiler
+        # Günlük zarar durdurucu aktifse sinyal üretme
+        if self._daily_loss_stop:
+            return
+
+        # ═══ SİNYAL DÖNGÜSÜ (sadece M15 mum kapanışında) ═════════
+
+        # 6. M15 mum kapanış kontrolü — kapanmamışsa sinyal üretme
+        if not self._is_new_m15_candle():
+            return
+
+        # 7. Rejim kontrolü — aktif stratejiler
         strategies = REGIME_STRATEGIES.get(regime.regime_type, [])
         if not strategies:
             logger.debug(
@@ -335,11 +426,17 @@ class Ogul:
             )
             return
 
-        # 7. İşlem saatleri kontrolü
+        # 8. İşlem saatleri kontrolü
         if not self._is_trading_allowed():
             return
 
-        # 8. Her sembol için sinyal üretimi
+        # 9. Öğle arası kontrolü — yeni işlem yok
+        current_time = now.time()
+        if LUNCH_START <= current_time <= LUNCH_END:
+            logger.debug("Öğle arası: yeni sinyal üretimi atlandı")
+            return
+
+        # 10. Her sembol için sinyal üretimi
         for symbol in symbols:
             # Sembol başına 1 aktif işlem kuralı
             if symbol in self.active_trades:
@@ -355,13 +452,68 @@ class Ogul:
                 logger.debug(f"Sembol durdurulmuş (L1): {symbol}")
                 continue
 
+            # Ardışık zarar kontrolü — o gün sembol kapalı
+            if self._symbol_loss_count.get(symbol, 0) >= SYMBOL_CONSECUTIVE_LOSS_LIMIT:
+                logger.debug(
+                    f"Ardışık {SYMBOL_CONSECUTIVE_LOSS_LIMIT} zarar: "
+                    f"{symbol} bugün sinyal atlanıyor"
+                )
+                continue
+
             signal = self._generate_signal(symbol, regime, strategies)
             if signal:
                 self.last_signals[symbol] = signal.signal_type.value
                 self._execute_signal(signal, regime)
 
     # ═════════════════════════════════════════════════════════════════
-    #  YÖN EĞİLİMİ (BIAS)
+    #  M15 MUM KAPANIŞ TESPİTİ
+    # ═════════════════════════════════════════════════════════════════
+
+    def _is_new_m15_candle(self) -> bool:
+        """Yeni bir M15 mum kapanıp kapanmadığını kontrol et.
+
+        DB'deki en son M15 bar timestamp'ını izler.
+        Aynı mum iki kez işlenmez.
+
+        Returns:
+            True: yeni mum kapanmış, sinyal üretilebilir.
+            False: aynı mum, sinyal üretme.
+        """
+        # İzlenen herhangi bir sembolden en son M15 barı al
+        sample_symbol = None
+        if self._current_top5:
+            sample_symbol = self._current_top5[0]
+        else:
+            # Top5 henüz belirlenmemişse WATCHED_SYMBOLS'dan al
+            from engine.mt5_bridge import WATCHED_SYMBOLS
+            if WATCHED_SYMBOLS:
+                sample_symbol = list(WATCHED_SYMBOLS)[0]
+
+        if sample_symbol is None:
+            return False
+
+        try:
+            df = self.db.get_bars(sample_symbol, "M15", limit=1)
+            if df is None or df.empty:
+                return False
+
+            latest_ts = str(df.iloc[-1].get("timestamp", ""))
+            if not latest_ts:
+                return False
+
+            if latest_ts != self._last_m15_candle_ts:
+                self._last_m15_candle_ts = latest_ts
+                logger.debug(f"Yeni M15 mum kapanışı tespit edildi: {latest_ts}")
+                return True
+
+            return False
+
+        except Exception as exc:
+            logger.error(f"M15 mum kontrolü hatası: {exc}")
+            return False
+
+    # ═════════════════════════════════════════════════════════════════
+    #  YÖN EĞİLİMİ (OYLAMA)
     # ═════════════════════════════════════════════════════════════════
 
     @staticmethod
@@ -370,55 +522,120 @@ class Ogul:
         return LIQUIDITY_CLASSES.get(symbol, "C")  # bilinmeyen = C (en muhafazakâr)
 
     def _calculate_bias(self, symbol: str) -> str:
-        """İndikatör bazlı yön eğilimi (sinyal eşiği olmadan).
+        """Geriye uyumluluk: _calculate_voting'e yönlendir."""
+        return self._calculate_voting(symbol)
 
-        3 temel indikatörün çoğunluk oyu:
-        RSI(14), EMA(20/50) crossover, MACD histogram.
+    def _calculate_voting(self, symbol: str) -> str:
+        """4 göstergeli oylama sistemi ile yön eğilimi hesapla.
+
+        4 farklı veri türünden bağımsız sinyaller:
+            1. Momentum  — RSI(14): >50 BUY, <50 SELL
+            2. Trend     — EMA(20) vs EMA(50) crossover
+            3. Volatilite — ATR(14) genişliyor mu (güç doğrulama)
+            4. Likidite  — Hacim > 20-bar ortalaması mı (güç doğrulama)
 
         Returns:
             ``"BUY"``, ``"SELL"`` veya ``"NOTR"``.
         """
+        detail = self._get_voting_detail(symbol)
+        return detail["direction"]
+
+    def _get_voting_detail(self, symbol: str) -> dict:
+        """Detaylı oylama sonucu (pozisyon yönetiminde kullanılır).
+
+        Returns:
+            dict: direction, buy_votes, sell_votes, total_favorable,
+                  rsi_vote, ema_vote, atr_expanding, volume_above_avg
+        """
+        result = {
+            "direction": "NOTR",
+            "buy_votes": 0,
+            "sell_votes": 0,
+            "total_favorable": 0,
+            "rsi_vote": "NOTR",
+            "ema_vote": "NOTR",
+            "atr_expanding": False,
+            "volume_above_avg": False,
+        }
+
         df = self.db.get_bars(symbol, "M15", limit=MIN_BARS_M15)
         if df is None or df.empty or len(df) < MIN_BARS_M15:
-            return "NOTR"
+            return result
 
         close = df["close"].values.astype(np.float64)
-        votes = 0  # pozitif=BUY, negatif=SELL
+        high = df["high"].values.astype(np.float64)
+        low = df["low"].values.astype(np.float64)
+        volume = df["volume"].values.astype(np.float64)
 
-        # 1. RSI — 50 üstü bullish, 50 altı bearish
+        buy_votes = 0
+        sell_votes = 0
+
+        # ── Oy 1: Momentum — RSI(14) ──────────────────────────────
         rsi_arr = calc_rsi(close, period=MR_RSI_PERIOD)
         rsi_val = last_valid(rsi_arr)
         if rsi_val is not None:
             if rsi_val > 50:
-                votes += 1
+                buy_votes += 1
+                result["rsi_vote"] = "BUY"
             elif rsi_val < 50:
-                votes -= 1
+                sell_votes += 1
+                result["rsi_vote"] = "SELL"
 
-        # 2. EMA crossover — fast > slow bullish
+        # ── Oy 2: Trend — EMA(20) vs EMA(50) crossover ────────────
         ema_f = ema(close, period=TF_EMA_FAST)
         ema_s = ema(close, period=TF_EMA_SLOW)
         ef = last_valid(ema_f)
         es = last_valid(ema_s)
         if ef is not None and es is not None:
             if ef > es:
-                votes += 1
+                buy_votes += 1
+                result["ema_vote"] = "BUY"
             elif ef < es:
-                votes -= 1
+                sell_votes += 1
+                result["ema_vote"] = "SELL"
 
-        # 3. MACD histogram — pozitif bullish
-        _, _, hist = calc_macd(close)
-        h = last_valid(hist)
-        if h is not None:
-            if h > 0:
-                votes += 1
-            elif h < 0:
-                votes -= 1
+        # ── Oy 3: Volatilite — ATR(14) genişliyor mu ──────────────
+        atr_arr = calc_atr(high, low, close, period=ATR_PERIOD)
+        if atr_arr is not None and len(atr_arr) >= VOTING_ATR_LOOKBACK * 2:
+            recent_atr = np.nanmean(atr_arr[-VOTING_ATR_LOOKBACK:])
+            prev_atr = np.nanmean(
+                atr_arr[-(VOTING_ATR_LOOKBACK * 2):-VOTING_ATR_LOOKBACK]
+            )
+            if prev_atr > 0 and recent_atr > prev_atr:
+                result["atr_expanding"] = True
+                # ATR genişleme yön nötr — ama çoğunluk yönünü destekler
+                if buy_votes > sell_votes:
+                    buy_votes += 1
+                elif sell_votes > buy_votes:
+                    sell_votes += 1
 
-        if votes > 0:
-            return "BUY"
-        elif votes < 0:
-            return "SELL"
-        return "NOTR"
+        # ── Oy 4: Likidite — Hacim > 20-bar ortalaması mı ─────────
+        if len(volume) >= VOL_LOOKBACK + 1:
+            current_vol = volume[-1]
+            avg_vol = np.nanmean(volume[-(VOL_LOOKBACK + 1):-1])
+            if avg_vol > 0 and current_vol > avg_vol:
+                result["volume_above_avg"] = True
+                # Hacim yön nötr — ama çoğunluk yönünü destekler
+                if buy_votes > sell_votes:
+                    buy_votes += 1
+                elif sell_votes > buy_votes:
+                    sell_votes += 1
+
+        result["buy_votes"] = buy_votes
+        result["sell_votes"] = sell_votes
+
+        # Sonuç: en yüksek oy alan yön
+        if buy_votes > sell_votes:
+            result["direction"] = "BUY"
+            result["total_favorable"] = buy_votes
+        elif sell_votes > buy_votes:
+            result["direction"] = "SELL"
+            result["total_favorable"] = sell_votes
+        else:
+            result["direction"] = "NOTR"
+            result["total_favorable"] = 0
+
+        return result
 
     # ═════════════════════════════════════════════════════════════════
     #  SİNYAL ÜRETİMİ
@@ -947,7 +1164,7 @@ class Ogul:
             self._log_cancelled_trade(trade)
             return
 
-        # Lot hesaplama
+        # Lot hesaplama (evrensel yönetimde yarım lot ile giriş)
         lot = self._calculate_lot(signal, regime, equity, self.risk_params)
         if lot <= 0:
             trade.state = TradeState.CANCELLED
@@ -955,8 +1172,29 @@ class Ogul:
             self._log_cancelled_trade(trade)
             return
 
+        if USE_UNIVERSAL_MANAGEMENT:
+            lot = lot * ENTRY_LOT_FRACTION  # yarım lot, ekleme payı bırakılır
+            # Lot step yuvarlama
+            try:
+                sym_info = self.mt5.get_symbol_info(signal.symbol)
+                if sym_info and hasattr(sym_info, "volume_step"):
+                    step = sym_info.volume_step
+                    if step > 0:
+                        lot = round(
+                            math.floor(lot / step) * step,
+                            int(round(-math.log10(step))),
+                        )
+            except Exception:
+                pass
+            if lot <= 0:
+                trade.state = TradeState.CANCELLED
+                trade.cancel_reason = "lot_zero_after_fraction"
+                self._log_cancelled_trade(trade)
+                return
+
         trade.volume = lot
         trade.requested_volume = lot
+        trade.initial_volume = lot  # orijinal lot kaydı
 
         # Max slippage hesapla
         atr_val = self._get_current_atr(symbol)
@@ -965,12 +1203,21 @@ class Ogul:
         )
 
         # ── FAZ 3: SENT (LIMIT emir gönder) ─────────────────────────
-        trade.limit_price = signal.price
+        # Evrensel yönetimde limit fiyat ofsetli (mum kapanışından 0.25×ATR geri)
+        if USE_UNIVERSAL_MANAGEMENT and atr_val and atr_val > 0:
+            if direction == "BUY":
+                limit_price = signal.price - LIMIT_OFFSET_ATR * atr_val
+            else:
+                limit_price = signal.price + LIMIT_OFFSET_ATR * atr_val
+        else:
+            limit_price = signal.price
+
+        trade.limit_price = limit_price
         result = self.mt5.send_order(
             symbol=symbol,
             direction=direction,
             lot=lot,
-            price=signal.price,
+            price=limit_price,
             sl=signal.sl,
             tp=signal.tp,
             order_type="limit",
@@ -2039,13 +2286,641 @@ class Ogul:
                     "mt5_position_id": trade.ticket,
                 })
 
-            # Strateji bazlı çıkış kontrolleri
-            if trade.strategy == "trend_follow":
-                self._manage_trend_follow(symbol, trade, pos)
-            elif trade.strategy == "mean_reversion":
-                self._manage_mean_reversion(symbol, trade, pos)
-            elif trade.strategy == "breakout":
-                self._manage_breakout(symbol, trade, pos)
+            # Pozisyon yönetimi (evrensel veya eski strateji bazlı)
+            if USE_UNIVERSAL_MANAGEMENT:
+                self._manage_position(symbol, trade, pos)
+            else:
+                if trade.strategy == "trend_follow":
+                    self._manage_trend_follow(symbol, trade, pos)
+                elif trade.strategy == "mean_reversion":
+                    self._manage_mean_reversion(symbol, trade, pos)
+                elif trade.strategy == "breakout":
+                    self._manage_breakout(symbol, trade, pos)
+
+    # ═════════════════════════════════════════════════════════════════
+    #  EVRENSEL POZİSYON YÖNETİMİ
+    # ═════════════════════════════════════════════════════════════════
+
+    def _manage_position(
+        self,
+        symbol: str,
+        trade: Trade,
+        pos: dict[str, Any],
+    ) -> None:
+        """Evrensel pozisyon yönetimi — tüm stratejiler için tek metod.
+
+        Sıra (her 10 sn, her FILLED pozisyon için):
+            1. Peak profit güncelle
+            2. Sinyal devam kontrolü (4 gösterge oylama)
+            3. Hacim patlaması kontrolü
+            4. Breakeven kontrolü (likidite sınıfı bazlı)
+            5. TP1 kontrolü (1.5×ATR → yarı kapanış)
+            6. Trailing stop güncelle (EMA20 - ATR × liq_mult)
+            7. Geri çekilme toleransı (dinamik, volatiliteye göre)
+            8. Maliyetlendirme kontrolü
+
+        Args:
+            symbol: Kontrat sembolü.
+            trade: Trade nesnesi.
+            pos: MT5 pozisyon sözlüğü.
+        """
+        current_price = pos.get("price_current", 0.0)
+        if current_price <= 0:
+            return
+
+        # ── Gösterge verileri (tek seferde al) ─────────────────────
+        df = self.db.get_bars(symbol, "M15", limit=MIN_BARS_M15)
+        if df is None or df.empty or len(df) < 30:
+            return
+
+        close = df["close"].values.astype(np.float64)
+        high = df["high"].values.astype(np.float64)
+        low = df["low"].values.astype(np.float64)
+        volume = df["volume"].values.astype(np.float64)
+
+        atr_arr = calc_atr(high, low, close, period=ATR_PERIOD)
+        atr_val = last_valid(atr_arr)
+        if atr_val is None or atr_val <= 0:
+            return
+
+        liq_class = self._get_liq_class(symbol)
+
+        # ── 1. Peak Profit Güncelle ────────────────────────────────
+        if trade.direction == "BUY":
+            current_profit_pts = current_price - trade.entry_price
+        else:
+            current_profit_pts = trade.entry_price - current_price
+        trade.peak_profit = max(trade.peak_profit, current_profit_pts)
+
+        # ── 2. Sinyal Devam Kontrolü (4 gösterge oylama) ──────────
+        voting = self._get_voting_detail(symbol)
+        if trade.direction == "BUY":
+            favorable = voting["buy_votes"]
+            reverse = voting["sell_votes"]
+        else:
+            favorable = voting["sell_votes"]
+            reverse = voting["buy_votes"]
+        trade.voting_score = favorable
+
+        # 3/4+ ters oy veya ≤1/4 lehte → çık
+        if reverse >= 3 or favorable <= 1:
+            exit_reason = "signal_reversal" if reverse >= 3 else "signal_loss"
+            logger.info(
+                f"Oylama çıkışı [{symbol}]: lehte={favorable}, "
+                f"ters={reverse} → {exit_reason}"
+            )
+            try:
+                self.mt5.close_position(trade.ticket)
+            except Exception as exc:
+                logger.error(f"Oylama çıkış kapatma hatası [{symbol}]: {exc}")
+            self._handle_closed_trade(symbol, trade, exit_reason)
+            return
+
+        # ── 3. Hacim Patlaması Kontrolü ────────────────────────────
+        spike_action = self._check_volume_spike(
+            symbol, trade, volume, current_price, atr_val
+        )
+        if spike_action == "close":
+            try:
+                self.mt5.close_position(trade.ticket)
+            except Exception as exc:
+                logger.error(f"Hacim spike kapatma hatası [{symbol}]: {exc}")
+            self._handle_closed_trade(symbol, trade, "volume_spike_adverse")
+            return
+
+        # ── 4. Breakeven Kontrolü ──────────────────────────────────
+        be_threshold = BE_ATR_BY_CLASS.get(liq_class, 1.5)
+        if not trade.breakeven_hit and current_profit_pts >= be_threshold * atr_val:
+            try:
+                tick = self.mt5.get_tick(symbol)
+                spread = (tick.ask - tick.bid) if tick else 0.0
+            except Exception:
+                spread = 0.0
+
+            if trade.direction == "BUY":
+                new_sl = trade.entry_price + spread
+            else:
+                new_sl = trade.entry_price - spread
+
+            try:
+                result = self.mt5.modify_position(trade.ticket, sl=new_sl)
+                if result:
+                    trade.breakeven_hit = True
+                    trade.sl = new_sl
+                    trade.trailing_sl = max(trade.trailing_sl, new_sl) \
+                        if trade.direction == "BUY" \
+                        else min(trade.trailing_sl, new_sl) \
+                        if trade.trailing_sl > 0 else new_sl
+                    logger.info(
+                        f"Breakeven çekildi [{symbol}]: SL={new_sl:.4f}, "
+                        f"kâr={current_profit_pts:.4f}, eşik={be_threshold}×ATR"
+                    )
+                    self.db.insert_event(
+                        "BREAKEVEN_SET",
+                        f"{symbol} SL={new_sl:.4f} profit={current_profit_pts:.4f}",
+                        severity="INFO",
+                    )
+            except Exception as exc:
+                logger.error(f"Breakeven modify hatası [{symbol}]: {exc}")
+
+        # ── 5. TP1 Kontrolü (1.5×ATR → yarı kapanış) ──────────────
+        if not trade.tp1_hit and current_profit_pts >= TP1_ATR_MULT * atr_val:
+            close_vol = round(trade.volume / 2, 2)
+            # Lot step doğrulaması
+            try:
+                sym_info = self.mt5.get_symbol_info(symbol)
+                if sym_info and hasattr(sym_info, "volume_step"):
+                    step = sym_info.volume_step
+                    if step > 0:
+                        close_vol = round(
+                            math.floor(close_vol / step) * step,
+                            int(round(-math.log10(step))),
+                        )
+            except Exception:
+                pass
+
+            if close_vol > 0:
+                try:
+                    result = self.mt5.close_position_partial(
+                        trade.ticket, close_vol
+                    )
+                    if result:
+                        trade.tp1_hit = True
+                        trade.tp1_price = current_price
+                        if trade.initial_volume == 0.0:
+                            trade.initial_volume = trade.volume
+                        trade.volume -= close_vol
+
+                        # TP'yi kaldır — kalan yarı sinyal + trailing ile yönetilir
+                        try:
+                            self.mt5.modify_position(trade.ticket, tp=0.0)
+                        except Exception:
+                            pass
+
+                        logger.info(
+                            f"TP1 tetiklendi [{symbol}]: {close_vol} lot kapatıldı, "
+                            f"kalan={trade.volume:.2f}, kâr_pts={current_profit_pts:.4f}"
+                        )
+                        self.db.insert_event(
+                            "TP1_TRIGGERED",
+                            f"{symbol} closed={close_vol} remaining={trade.volume:.2f} "
+                            f"profit={current_profit_pts:.4f}",
+                            severity="INFO",
+                        )
+                        # DB güncelle
+                        if trade.db_id > 0:
+                            self.db.update_trade(trade.db_id, {
+                                "lot": trade.volume,
+                                "tp1_hit": 1,
+                                "initial_volume": trade.initial_volume,
+                            })
+                except Exception as exc:
+                    logger.error(f"TP1 kısmi kapanış hatası [{symbol}]: {exc}")
+
+        # ── 6. Trailing Stop Güncelle (EMA20 bazlı) ───────────────
+        ema_20 = ema(close, period=TF_EMA_FAST)
+        ema_val = last_valid(ema_20)
+        if ema_val is not None:
+            trail_mult = TRAIL_ATR_BY_CLASS.get(liq_class, 1.5)
+
+            # Öğle arası genişletme
+            now_time = datetime.now().time()
+            if LUNCH_START <= now_time <= LUNCH_END:
+                trail_mult *= LUNCH_TRAIL_WIDEN
+
+            if trade.direction == "BUY":
+                new_trailing = ema_val - trail_mult * atr_val
+                if new_trailing > trade.trailing_sl:
+                    try:
+                        result = self.mt5.modify_position(
+                            trade.ticket, sl=new_trailing
+                        )
+                        if result:
+                            trade.trailing_sl = new_trailing
+                            trade.sl = new_trailing
+                            logger.debug(
+                                f"Trailing güncellendi [{symbol}]: "
+                                f"SL={new_trailing:.4f}"
+                            )
+                    except Exception as exc:
+                        logger.error(
+                            f"Trailing modify hatası [{symbol}]: {exc}"
+                        )
+            else:
+                new_trailing = ema_val + trail_mult * atr_val
+                update = False
+                if trade.trailing_sl <= 0:
+                    update = True
+                elif new_trailing < trade.trailing_sl:
+                    update = True
+                if update:
+                    try:
+                        result = self.mt5.modify_position(
+                            trade.ticket, sl=new_trailing
+                        )
+                        if result:
+                            trade.trailing_sl = new_trailing
+                            trade.sl = new_trailing
+                            logger.debug(
+                                f"Trailing güncellendi [{symbol}]: "
+                                f"SL={new_trailing:.4f}"
+                            )
+                    except Exception as exc:
+                        logger.error(
+                            f"Trailing modify hatası [{symbol}]: {exc}"
+                        )
+
+        # ── 7. Geri Çekilme Toleransı (dinamik) ───────────────────
+        if trade.peak_profit > 0 and current_profit_pts > 0:
+            price_ratio = atr_val / current_price if current_price > 0 else 0
+            if price_ratio < PULLBACK_LOW_THRESHOLD:
+                tolerance_pct = PULLBACK_LOW_VOL
+            elif price_ratio > PULLBACK_HIGH_THRESHOLD:
+                tolerance_pct = PULLBACK_HIGH_VOL
+            else:
+                tolerance_pct = PULLBACK_NORMAL_VOL
+
+            pullback = trade.peak_profit - current_profit_pts
+            max_pullback = trade.peak_profit * tolerance_pct
+            if pullback > max_pullback:
+                logger.info(
+                    f"Geri çekilme toleransı aşıldı [{symbol}]: "
+                    f"peak={trade.peak_profit:.4f}, "
+                    f"current={current_profit_pts:.4f}, "
+                    f"pullback={pullback:.4f} > max={max_pullback:.4f} "
+                    f"(tolerans={tolerance_pct:.0%})"
+                )
+                try:
+                    self.mt5.close_position(trade.ticket)
+                except Exception as exc:
+                    logger.error(
+                        f"Pullback kapatma hatası [{symbol}]: {exc}"
+                    )
+                self._handle_closed_trade(
+                    symbol, trade, "pullback_tolerance"
+                )
+                return
+
+        # ── 8. Maliyetlendirme Kontrolü ────────────────────────────
+        self._check_cost_average(symbol, trade, pos, voting, atr_val, volume)
+
+    def _check_volume_spike(
+        self,
+        symbol: str,
+        trade: Trade,
+        volume: np.ndarray,
+        current_price: float,
+        atr_val: float,
+    ) -> str | None:
+        """Ani hacim patlaması kontrolü.
+
+        Returns:
+            "close": pozisyon kapatılmalı (aleyhine patlama)
+            None: aksiyon gerekmez
+        """
+        if len(volume) < VOL_LOOKBACK + 1:
+            return None
+
+        current_vol = volume[-1]
+        avg_vol = np.nanmean(volume[-(VOL_LOOKBACK + 1):-1])
+        if avg_vol <= 0:
+            return None
+
+        ratio = current_vol / avg_vol
+        if ratio < VOLUME_SPIKE_MULT:
+            return None  # patlama yok
+
+        # Aleyhine hareket kontrolü
+        last_close = volume[-1]  # dummy — asıl fiyat hareketi
+        if trade.direction == "BUY":
+            profit = current_price - trade.entry_price
+        else:
+            profit = trade.entry_price - current_price
+
+        if profit < -0.3 * atr_val:
+            # Hacim patlaması + pozisyon aleyhine → anında kapat
+            logger.warning(
+                f"Hacim patlaması (aleyhine) [{symbol}]: "
+                f"hacim_ratio={ratio:.1f}x, kâr={profit:.4f}"
+            )
+            self.db.insert_event(
+                "VOLUME_SPIKE_EXIT",
+                f"{symbol} ratio={ratio:.1f}x adverse profit={profit:.4f}",
+                severity="WARNING",
+            )
+            return "close"
+
+        if ratio >= VOLUME_SPIKE_MULT and profit > 0:
+            # Lehine patlama — log yaz, çıkış kararı trailing'e bırakılır
+            logger.info(
+                f"Hacim patlaması (lehine) [{symbol}]: "
+                f"hacim_ratio={ratio:.1f}x, kâr={profit:.4f}"
+            )
+
+        return None
+
+    def _check_cost_average(
+        self,
+        symbol: str,
+        trade: Trade,
+        pos: dict[str, Any],
+        voting: dict,
+        atr_val: float,
+        volume: np.ndarray,
+    ) -> None:
+        """Maliyetlendirme (cost averaging) kontrolü.
+
+        Şartlar (hepsi geçerli olmalı):
+            1. Daha önce maliyetlendirme yapılmamış
+            2. Sinyal 3/4+ aynı yönde
+            3. Fiyat 1×ATR geri çekilmiş
+            4. Hacim düşmüyor
+            5. Toplam risk ≤ başlangıcın %120'si
+        """
+        # 1. Zaten yapılmışsa atla
+        if trade.cost_averaged:
+            return
+
+        # 2. Oylama: 3/4+ lehte olmalı
+        if trade.direction == "BUY":
+            favorable = voting.get("buy_votes", 0)
+        else:
+            favorable = voting.get("sell_votes", 0)
+        if favorable < 3:
+            return
+
+        # 3. Fiyat 1×ATR geri çekilmiş olmalı
+        current_price = pos.get("price_current", 0.0)
+        if trade.direction == "BUY":
+            pullback = trade.entry_price - current_price
+        else:
+            pullback = current_price - trade.entry_price
+        if pullback < AVG_PULLBACK_ATR * atr_val:
+            return
+
+        # 4. Hacim düşmüyor olmalı
+        if len(volume) >= VOL_LOOKBACK + 1:
+            recent_vol = np.nanmean(volume[-4:])
+            avg_vol = np.nanmean(volume[-(VOL_LOOKBACK + 1):-1])
+            if avg_vol > 0 and recent_vol < avg_vol:
+                return  # hacim düşüyor, ekleme yapma
+
+        # 5. Toplam risk kontrolü (≤ %120)
+        initial_risk = trade.initial_volume * atr_val if trade.initial_volume > 0 \
+            else trade.volume * atr_val
+        add_lot = trade.volume  # mevcut lot kadar ekle (toplam max 1.0)
+        total_after = trade.volume + add_lot
+        if total_after > MAX_LOT_PER_CONTRACT:
+            add_lot = MAX_LOT_PER_CONTRACT - trade.volume
+        if add_lot <= 0:
+            return
+
+        new_total_risk = total_after * atr_val
+        if new_total_risk > initial_risk * AVG_MAX_RISK_MULT:
+            return
+
+        # Spread kontrolü
+        try:
+            tick = self.mt5.get_tick(symbol)
+            if not tick:
+                return
+            if trade.direction == "BUY":
+                price = tick.ask
+            else:
+                price = tick.bid
+        except Exception:
+            return
+
+        # Ekleme emri gönder (market)
+        try:
+            result = self.mt5.send_order(
+                symbol,
+                trade.direction,
+                add_lot,
+                price=price,
+                sl=trade.sl,
+                tp=trade.tp,
+                order_type="market",
+            )
+            if result:
+                old_entry = trade.entry_price
+                old_vol = trade.volume
+                # Yeni ortalama maliyet
+                trade.entry_price = (
+                    (old_entry * old_vol + price * add_lot) / (old_vol + add_lot)
+                )
+                trade.volume = old_vol + add_lot
+                trade.cost_averaged = True
+                if trade.initial_volume == 0.0:
+                    trade.initial_volume = old_vol
+
+                logger.info(
+                    f"Maliyetlendirme [{symbol}]: +{add_lot} lot @ {price:.4f}, "
+                    f"ort.maliyet={trade.entry_price:.4f}, "
+                    f"toplam={trade.volume:.2f} lot"
+                )
+                self.db.insert_event(
+                    "COST_AVERAGE",
+                    f"{symbol} +{add_lot} lot @ {price:.4f} "
+                    f"avg_entry={trade.entry_price:.4f} total={trade.volume:.2f}",
+                    severity="INFO",
+                )
+                # DB güncelle
+                if trade.db_id > 0:
+                    self.db.update_trade(trade.db_id, {
+                        "lot": trade.volume,
+                        "entry_price": trade.entry_price,
+                        "cost_averaged": 1,
+                        "initial_volume": trade.initial_volume,
+                    })
+                # BABA günlük sayaç (ekleme de bir işlem sayılır)
+                if self.baba:
+                    self.baba.increment_daily_trade_count()
+        except Exception as exc:
+            logger.error(f"Maliyetlendirme emri hatası [{symbol}]: {exc}")
+
+    # ═════════════════════════════════════════════════════════════════
+    #  ZAMAN KURALLARI
+    # ═════════════════════════════════════════════════════════════════
+
+    def _check_time_rules(self, regime: Regime) -> None:
+        """Zaman bazlı pozisyon yönetim kuralları.
+
+        Kurallar:
+            1. Yatay kontrol: son 8 mum range < 0.5×ATR → kapat
+            2. Son 45 dk (17:00+): kârdaysan kapat
+        """
+        if not USE_UNIVERSAL_MANAGEMENT:
+            return
+        if not self.active_trades:
+            return
+
+        now = datetime.now()
+        current_time = now.time()
+
+        for symbol in list(self.active_trades):
+            trade = self.active_trades[symbol]
+            if trade.state != TradeState.FILLED:
+                continue
+
+            # ── Son 45 dk kârdaysan kapat ──────────────────────────
+            if current_time >= LAST_45_MIN:
+                current_price = 0.0
+                try:
+                    tick = self.mt5.get_tick(symbol)
+                    if tick:
+                        current_price = tick.bid if trade.direction == "BUY" else tick.ask
+                except Exception:
+                    pass
+
+                if current_price > 0:
+                    if trade.direction == "BUY":
+                        profit = current_price - trade.entry_price
+                    else:
+                        profit = trade.entry_price - current_price
+
+                    if profit > 0:
+                        logger.info(
+                            f"Son 45 dk kâr kapanışı [{symbol}]: "
+                            f"kâr={profit:.4f}"
+                        )
+                        try:
+                            self.mt5.close_position(trade.ticket)
+                        except Exception as exc:
+                            logger.error(
+                                f"Son 45 dk kapatma hatası [{symbol}]: {exc}"
+                            )
+                        self._handle_closed_trade(
+                            symbol, trade, "last_45min_profit"
+                        )
+                        continue
+
+            # ── Yatay kontrol (2 saat = 8 × M15 mum) ──────────────
+            try:
+                df = self.db.get_bars(symbol, "M15", limit=FLAT_CANDLE_COUNT)
+                if df is not None and len(df) >= FLAT_CANDLE_COUNT:
+                    highs = df["high"].values.astype(np.float64)
+                    lows = df["low"].values.astype(np.float64)
+                    closes = df["close"].values.astype(np.float64)
+
+                    candle_range = np.max(highs) - np.min(lows)
+                    atr_arr = calc_atr(highs, lows, closes, period=ATR_PERIOD)
+                    atr_val = last_valid(atr_arr)
+
+                    if atr_val and atr_val > 0:
+                        if candle_range < FLAT_ATR_MULT * atr_val:
+                            logger.info(
+                                f"Yatay piyasa [{symbol}]: range={candle_range:.4f} "
+                                f"< {FLAT_ATR_MULT}×ATR={FLAT_ATR_MULT * atr_val:.4f}"
+                            )
+                            try:
+                                self.mt5.close_position(trade.ticket)
+                            except Exception as exc:
+                                logger.error(
+                                    f"Yatay kapatma hatası [{symbol}]: {exc}"
+                                )
+                            self._handle_closed_trade(
+                                symbol, trade, "flat_market"
+                            )
+                            continue
+            except Exception as exc:
+                logger.error(f"Yatay kontrol hatası [{symbol}]: {exc}")
+
+    # ═════════════════════════════════════════════════════════════════
+    #  GELİŞMİŞ RİSK KURALLARI
+    # ═════════════════════════════════════════════════════════════════
+
+    def _check_advanced_risk_rules(self) -> None:
+        """Gelişmiş risk kuralları — her cycle'da kontrol edilir.
+
+        Kurallar:
+            1. Günlük zarar ≥ equity'nin %3'ü → hepsini kapat, gün sonu
+            2. Spread anormal (≥ ort×2) → kârdaysa kapat
+            3. Gap kontrolü: açılışta SL aşılmışsa → anında kapat
+        """
+        if not USE_UNIVERSAL_MANAGEMENT:
+            return
+        if not self.active_trades:
+            return
+
+        # ── 1. Günlük zarar limiti (%3 equity) ────────────────────
+        if not self._daily_loss_stop:
+            try:
+                account = self.mt5.get_account_info()
+                if account:
+                    equity = account.equity
+                    balance = account.balance
+                    if balance > 0:
+                        daily_pnl_pct = (equity - balance) / balance
+                        if daily_pnl_pct <= -DAILY_LOSS_STOP_PCT:
+                            logger.warning(
+                                f"Günlük zarar limiti aşıldı: "
+                                f"{daily_pnl_pct:.2%} ≤ -{DAILY_LOSS_STOP_PCT:.0%}"
+                            )
+                            self._daily_loss_stop = True
+                            self.db.insert_event(
+                                "DAILY_LOSS_STOP",
+                                f"equity={equity:.0f} balance={balance:.0f} "
+                                f"pnl={daily_pnl_pct:.2%}",
+                                severity="CRITICAL",
+                                action="close_all",
+                            )
+                            # Tüm FILLED pozisyonları kapat
+                            for sym in list(self.active_trades):
+                                t = self.active_trades[sym]
+                                if t.state == TradeState.FILLED:
+                                    try:
+                                        self.mt5.close_position(t.ticket)
+                                    except Exception:
+                                        pass
+                                    self._handle_closed_trade(
+                                        sym, t, "daily_loss_limit"
+                                    )
+                            return
+            except Exception as exc:
+                logger.error(f"Günlük zarar kontrol hatası: {exc}")
+
+        # ── 2. Spread anormalliği ──────────────────────────────────
+        for symbol in list(self.active_trades):
+            trade = self.active_trades[symbol]
+            if trade.state != TradeState.FILLED:
+                continue
+
+            try:
+                tick = self.mt5.get_tick(symbol)
+                if tick and tick.spread > 0:
+                    # Basit kontrol: spread çok yüksekse
+                    df = self.db.get_bars(symbol, "M15", limit=20)
+                    if df is not None and len(df) >= 10:
+                        highs = df["high"].values.astype(np.float64)
+                        lows = df["low"].values.astype(np.float64)
+                        avg_range = np.nanmean(highs[-10:] - lows[-10:])
+                        if avg_range > 0:
+                            spread_ratio = tick.spread / avg_range
+                            if spread_ratio > SPREAD_SPIKE_MULT:
+                                # Kârdaysa kapat
+                                if trade.direction == "BUY":
+                                    profit = tick.bid - trade.entry_price
+                                else:
+                                    profit = trade.entry_price - tick.ask
+                                if profit > 0:
+                                    logger.warning(
+                                        f"Spread anormal [{symbol}]: "
+                                        f"ratio={spread_ratio:.1f}x, kapat"
+                                    )
+                                    try:
+                                        self.mt5.close_position(trade.ticket)
+                                    except Exception:
+                                        pass
+                                    self._handle_closed_trade(
+                                        symbol, trade, "spread_anomaly"
+                                    )
+            except Exception as exc:
+                logger.error(f"Spread kontrol hatası [{symbol}]: {exc}")
+
+    # ═════════════════════════════════════════════════════════════════
+    #  ESKİ STRATEJİ BAZLI YÖNETİM (feature flag=False için korunur)
+    # ═════════════════════════════════════════════════════════════════
 
     def _manage_trend_follow(
         self,
@@ -2438,6 +3313,21 @@ class Ogul:
             f"PnL={trade.pnl:.2f}"
         )
 
+        # ── Ardışık zarar sayacı (Faz 6) ─────────────────────────
+        today = datetime.now().date()
+        if self._symbol_loss_date != today:
+            self._symbol_loss_count.clear()
+            self._symbol_loss_date = today
+
+        if trade.pnl < 0:
+            self._symbol_loss_count[symbol] = self._symbol_loss_count.get(symbol, 0) + 1
+            logger.info(
+                f"Ardışık zarar [{symbol}]: "
+                f"{self._symbol_loss_count[symbol]}/{SYMBOL_CONSECUTIVE_LOSS_LIMIT}"
+            )
+        else:
+            self._symbol_loss_count[symbol] = 0
+
         # Aktif işlemlerden sil
         self.active_trades.pop(symbol, None)
 
@@ -2491,6 +3381,13 @@ class Ogul:
             regime_at_entry = db_trade.get("regime", "") if db_trade else ""
             entry_time_str = db_trade.get("entry_time", "") if db_trade else ""
 
+            # Evrensel yönetim alanlarını DB'den kurtar
+            tp1_hit = bool(db_trade.get("tp1_hit", 0)) if db_trade else False
+            cost_averaged = bool(db_trade.get("cost_averaged", 0)) if db_trade else False
+            breakeven_hit = bool(db_trade.get("breakeven_hit", 0)) if db_trade else False
+            peak_profit = float(db_trade.get("peak_profit", 0.0) or 0.0) if db_trade else 0.0
+            initial_volume = float(db_trade.get("initial_volume", 0.0) or 0.0) if db_trade else 0.0
+
             opened_at = None
             if entry_time_str:
                 try:
@@ -2511,6 +3408,12 @@ class Ogul:
                 trailing_sl=pos.get("sl", 0.0),
                 db_id=db_trade.get("id", 0) if db_trade else 0,
                 regime_at_entry=regime_at_entry,
+                # Evrensel yönetim alanları
+                tp1_hit=tp1_hit,
+                cost_averaged=cost_averaged,
+                breakeven_hit=breakeven_hit,
+                peak_profit=peak_profit,
+                initial_volume=initial_volume,
             )
             if opened_at:
                 trade.opened_at = opened_at

@@ -38,6 +38,7 @@ from engine.models.regime import RegimeType
 from engine.models.risk import RiskParams
 from engine.mt5_bridge import MT5Bridge
 from engine.h_engine import HEngine
+from engine.health import HealthCollector, CycleTimings
 from engine.ogul import Ogul
 from engine.ustat import Ustat
 
@@ -106,6 +107,10 @@ class Engine:
         # OĞUL'a h_engine referansı ver (netting koruması)
         self.ogul.h_engine = self.h_engine
 
+        # ── Sistem Sağlığı ─────────────────────────────────────────
+        self.health = HealthCollector()
+        self.mt5._health = self.health
+
         # ── Durum ───────────────────────────────────────────────────
         self._running: bool = False
         self._cycle_count: int = 0
@@ -151,6 +156,7 @@ class Engine:
             logger.critical("MT5 bağlantısı kurulamadı — engine başlatılamıyor.")
             self._log_event("ENGINE_START_FAIL", "MT5 bağlantısı kurulamadı", "CRITICAL")
             return
+        self.health.record_connection_established()
 
         # 1.5. MT5 işlem geçmişi senkronizasyonu (tek seferlik)
         self._sync_mt5_history()
@@ -300,21 +306,27 @@ class Engine:
             _SystemStopError: MT5 bağlantısı 5 denemede kurulamadı.
             _DBError: Veritabanı yazma/okuma hatası.
         """
+        _pc = _time.perf_counter
+        t0 = _pc()
 
         # ── 1. MT5 Heartbeat ──────────────────────────────────────
         if not self._heartbeat_mt5():
             raise _SystemStopError(
                 "MT5 bağlantısı kurtarılamadı — sistem durduruluyor"
             )
+        t1 = _pc()
 
         # ── 2. Veri Güncelleme ────────────────────────────────────
         self._update_data()
+        t2 = _pc()
 
         # ── 2.5 Pozisyon Kapanma Tespiti ─────────────────────────
         self._check_position_closures()
+        t3 = _pc()
 
         # ── 3. BABA Cycle (HER ZAMAN ÖNCE!) ──────────────────────
         regime = self._run_baba_cycle()
+        t4 = _pc()
 
         # ── 4. BABA Risk Kontrolü ─────────────────────────────────
         risk_verdict = self.baba.check_risk_limits(self.risk_params)
@@ -325,9 +337,11 @@ class Engine:
                 f"İşlem engeli: {risk_verdict.reason} "
                 f"(KS={risk_verdict.kill_switch_level})"
             )
+        t5 = _pc()
 
         # ── 5. Top 5 Kontrat Seçimi (v13.0: OĞUL sorumlu) ────────
         top5 = self.ogul.select_top5(regime)
+        t6 = _pc()
 
         # ── 6. OĞUL — Sinyal Üretimi + Emir Yönetimi ─────────────
         # process_signals() içinde:
@@ -359,6 +373,7 @@ class Engine:
             self._log_event_safe(
                 "OGUL_ERROR", f"OĞUL sinyal/emir hatası: {exc}", "ERROR",
             )
+        t7 = _pc()
 
         # ── 6.5. H-Engine — Hibrit Pozisyon Yönetimi ─────────────
         try:
@@ -368,15 +383,37 @@ class Engine:
             self._log_event_safe(
                 "H_ENGINE_ERROR", f"H-Engine cycle hatası: {exc}", "ERROR",
             )
+        t8 = _pc()
 
         # ── 7. ÜSTAT Brain — Raporlama + Strateji Havuzu ─────────
         try:
             self.ustat.run_cycle(self.baba, self.ogul)
         except Exception as exc:
             logger.error(f"ÜSTAT brain cycle hatası: {exc}")
+        t9 = _pc()
 
         # ── 8. Cycle Loglama ──────────────────────────────────────
         self._log_cycle_summary(regime, risk_verdict, top5)
+        t10 = _pc()
+
+        # ── Health: cycle zamanlama kaydı ─────────────────────────
+        total_ms = (t10 - t0) * 1000
+        self.health.record_cycle(CycleTimings(
+            cycle_number=self._cycle_count,
+            timestamp=_time.time(),
+            total_ms=total_ms,
+            heartbeat_ms=(t1 - t0) * 1000,
+            data_update_ms=(t2 - t1) * 1000,
+            closure_check_ms=(t3 - t2) * 1000,
+            baba_cycle_ms=(t4 - t3) * 1000,
+            risk_check_ms=(t5 - t4) * 1000,
+            top5_ms=(t6 - t5) * 1000,
+            ogul_signals_ms=(t7 - t6) * 1000,
+            h_engine_ms=(t8 - t7) * 1000,
+            ustat_brain_ms=(t9 - t8) * 1000,
+            log_summary_ms=(t10 - t9) * 1000,
+            overrun=total_ms > (CYCLE_INTERVAL * 1000),
+        ))
 
     # ═════════════════════════════════════════════════════════════════
     #  MT5 GEÇMİŞ SENKRONİZASYONU

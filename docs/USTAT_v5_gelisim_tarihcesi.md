@@ -342,3 +342,101 @@ Bu düzeltmeler native SLTP çalışmadığı için sorunu çözmedi ama kod kal
 ### Analiz Sonucu İptal Edilen Öneriler
 - `_volatile_reason()` dead code DEĞİL — `baba.py:469`'da kullanılıyor
 - RiskVerdict çift çağrı sorun DEĞİL — API ve cycle farklı bağlam, her biri güncel veri almak zorunda
+
+---
+
+## #13 — OĞUL Evrensel Pozisyon Yönetim Sistemi (2026-03-06)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-06 |
+| **Neden** | Strateji bazlı pozisyon yönetimi (trend_follow, mean_reversion, breakout — her biri farklı çıkış mantığı) dağınık ve tutarsızdı. 10sn döngüde sinyal üretimi fake sinyal riski taşıyordu. 3 gösterge (RSI, EMA, MACD) hepsi fiyat bazlıydı. |
+| **Çözüm** | Strateji bazlı yönetim yerine evrensel (universal) pozisyon yönetimi. İki döngü mimarisi. 4 göstergeli oylama sistemi. Feature flag ile anında geri dönüş imkanı. |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `engine/models/trade.py` | 8 yeni alan: peak_profit, tp1_hit, tp1_price, cost_averaged, initial_volume, breakeven_hit, voting_score, flat_candle_count |
+| `engine/database.py` | `_migrate_schema()` metodu: 5 ALTER TABLE (tp1_hit, cost_averaged, initial_volume, peak_profit, breakeven_hit) |
+| `engine/mt5_bridge.py` | `close_position_partial(ticket, volume)` metodu: TP1 yarı kapanış için kısmi pozisyon kapatma |
+| `engine/ogul.py` | ~50 yeni sabit (BE_ATR_BY_CLASS, TP1_ATR_MULT, TRAIL_ATR_BY_CLASS, PULLBACK, FLAT, LUNCH, RISK vb.) |
+| `engine/ogul.py` | `_is_new_m15_candle()`: M15 kapanış kontrolü (iki döngü mimarisi) |
+| `engine/ogul.py` | `_calculate_voting()` + `_get_voting_detail()`: RSI + EMA + ATR genişleme + Hacim (4 gösterge, 3/4 çoğunluk) |
+| `engine/ogul.py` | `process_signals()` yeniden yazıldı: hızlı döngü (10sn, yönetim) + sinyal döngüsü (M15 kapanış) |
+| `engine/ogul.py` | `_manage_position()`: evrensel yönetim (peak_profit, oylama çıkışı, hacim patlaması, breakeven, TP1 yarı kapanış, trailing stop, pullback toleransı, maliyetlendirme) |
+| `engine/ogul.py` | `_check_volume_spike()`: 3x ort. hacim algılama ve yön bazlı aksiyon |
+| `engine/ogul.py` | `_check_cost_average()`: 5 koşullu maliyetlendirme (max 1 kez, sinyal 3/4+, 1xATR geri çekilme) |
+| `engine/ogul.py` | `_check_time_rules()`: yatay piyasa (8 mum < 0.5xATR), son 45dk kâr kapanışı |
+| `engine/ogul.py` | `_check_advanced_risk_rules()`: günlük %3 zarar stop, spread anomalisi |
+| `engine/ogul.py` | `_manage_active_trades()` router: USE_UNIVERSAL_MANAGEMENT feature flag |
+| `engine/ogul.py` | `_execute_signal()`: yarım lot giriş (0.5x), limit fiyat ofseti (0.25xATR) |
+| `engine/ogul.py` | `_handle_closed_trade()`: ardışık zarar sayacı (sembol bazlı, günlük sıfırlama) |
+| `engine/ogul.py` | `restore_active_trades()`: evrensel alanlar DB'den kurtarılıyor (tp1_hit, breakeven_hit, cost_averaged, peak_profit, initial_volume) |
+| `api/schemas.py` | PositionItem: tp1_hit, breakeven_hit, cost_averaged, peak_profit, voting_score |
+| `api/routes/positions.py` | `_universal_fields()` helper: OĞUL active_trades'den evrensel alanları oku |
+| `api/routes/live.py` | WebSocket position mesajlarına evrensel yönetim alanları eklendi |
+| `desktop/src/components/OpenPositions.jsx` | "Yönetim" sütunu: TP1/BE/MA badge'leri + oylama skoru göstergesi |
+| `desktop/src/styles/theme.css` | Yönetim badge CSS stilleri (op-mgmt-badge, tp1, be, avg, vote-strong, vote-weak) |
+
+### Eklenen
+- 8 yeni metot (ogul.py): _is_new_m15_candle, _calculate_voting, _get_voting_detail, _manage_position, _check_volume_spike, _check_cost_average, _check_time_rules, _check_advanced_risk_rules
+- 1 yeni metot (mt5_bridge.py): close_position_partial
+- 1 yeni metot (database.py): _migrate_schema
+- 1 yeni helper (positions.py): _universal_fields
+- ~50 yeni sabit (ogul.py)
+- 8 yeni Trade alanı (trade.py)
+- 5 yeni DB kolonu
+- Desktop "Yönetim" sütunu + badge'ler
+
+### Çıkartılan (Devre dışı, silinmedi)
+- `_manage_trend_follow()`, `_manage_mean_reversion()`, `_manage_breakout()` — USE_UNIVERSAL_MANAGEMENT=False ile geri dönülebilir
+
+### Geri Alma Planı
+- `USE_UNIVERSAL_MANAGEMENT = False` → eski strateji bazlı yönetim anında aktif
+- Eski metotlar silinmedi, yorum satırına alınmadı — feature flag ile bypass ediliyor
+- 5 işlem günü stabil çalışma sonrası eski metotlar silinebilir
+
+---
+
+## #14 — Sistem Sağlığı Paneli (2026-03-06)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-06 |
+| **Neden** | Canlı trading sırasında döngü performansı, MT5 bağlantı kalitesi, emir süreleri, katman durumları ve hataları tek ekranda izleme ihtiyacı. Bilgi sadece loglarda dağınıktı, operatör için görünürlük yoktu. |
+| **Prensip** | Memory-only metrik toplama. DB'ye yazma yok. `time.perf_counter()` overhead ~0.01ms — 10sn döngüde görünmez. |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `engine/health.py` | **YENİ** — HealthCollector sınıfı: thread-safe deque tabanlı metrik toplama. CycleTimings (11 adım zamanlama), OrderTiming (emir süresi), ReconnectEvent dataclass'ları. `snapshot()` ile anlık kopya. |
+| `engine/main.py` | HealthCollector import + `__init__`'e `self.health` + `self.mt5._health` eklendi. `_run_single_cycle` her adıma `perf_counter` timer. `record_connection_established()` çağrısı. |
+| `engine/mt5_bridge.py` | `_health` attr + heartbeat'te ping kaydı (`record_ping`) + disconnect kaydı (`record_disconnect`) + `send_order`'da emir süresi kaydı (`record_order`) |
+| `engine/ustat.py` | `_last_run_time` 1 satır (run_cycle başında ISO format) |
+| `api/schemas.py` | `HealthResponse` Pydantic modeli (cycle, mt5, orders, layers, recent_events, system) |
+| `api/routes/health.py` | **YENİ** — `GET /api/health` endpoint. Veri kaynakları: health.snapshot(), katman öznitelikleri, db.get_events(), os.path.getsize, get_uptime(), WS istemci sayısı, cache durumu |
+| `api/server.py` | `health` import + `include_router(health.router)` kayıt |
+| `desktop/src/services/api.js` | `getHealth()` fonksiyonu |
+| `desktop/src/components/SystemHealth.jsx` | **YENİ** — 6 bölümlü React sayfası: Döngü performansı (adım barlar + trend grafik), MT5 bağlantı (ping, kopma, reconnect), Emir performansı (son 10, başarı/ret/timeout), Katman durumu (BABA/OĞUL/H-Engine/ÜSTAT kartları), Hata tablosu (severity filtre), Sistem bilgisi (uptime, DB boyut, WS, cache) |
+| `desktop/src/components/SideNav.jsx` | NAV_ITEMS'a "Sistem Sağlığı" (🩺) eklendi |
+| `desktop/src/App.jsx` | SystemHealth import + `/health` Route |
+| `desktop/src/styles/theme.css` | `.sh-*` prefix ile ~300 satır CSS: kartlar, barlar, trend grafik, tablolar, badge'ler, filtre butonları, katman grid |
+
+### Eklenen
+- `engine/health.py` dosyası (HealthCollector, CycleTimings, OrderTiming, ReconnectEvent)
+- `api/routes/health.py` dosyası (GET /api/health endpoint)
+- `desktop/src/components/SystemHealth.jsx` dosyası (6 bölümlü sayfa)
+- `getHealth()` API fonksiyonu
+- `.sh-*` CSS stilleri (~300 satır)
+- SideNav menü öğesi + App Route
+
+### Çıkartılan
+- Yok (tamamen additive değişiklik)
+
+### Geri Alma Planı
+- Tüm değişiklikler additive — mevcut işlevselliğe dokunmuyor
+- `health.py` silinemese bile `HealthCollector` sadece `record_*` çağrılmazsa boş deque tutar
+- `_health = None` default olduğu için MT5Bridge standalone kullanımda sorun çıkmaz
+- Desktop sayfası kaldırmak için SideNav + App Route + SystemHealth.jsx silinmesi yeterli

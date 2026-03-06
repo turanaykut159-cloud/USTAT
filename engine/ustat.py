@@ -165,6 +165,7 @@ class Ustat:
             ogul: Sinyal üretici instance (okuma).
         """
         now = datetime.now()
+        self._last_run_time: str = now.isoformat()
 
         # 1. Olay/karar kaydı — her cycle
         self._track_events(baba, ogul, now)

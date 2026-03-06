@@ -18,6 +18,7 @@ const NAV_ITEMS = [
   { path: '/positions',   label: 'Açık Pozisyonlar',   icon: '📈' },
   { path: '/performance', label: 'Üstat & Performans', icon: '🏆' },
   { path: '/risk',        label: 'Risk Yönetimi',      icon: '🛡️' },
+  { path: '/health',      label: 'Sistem Sağlığı',     icon: '🩺' },
   { path: '/settings',    label: 'Ayarlar',            icon: '⚙️' },
 ];
 

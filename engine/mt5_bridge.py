@@ -13,6 +13,7 @@ Heartbeat : 10 saniyede bir bağlantı kontrolü.
 
 from __future__ import annotations
 
+import math
 import threading
 import time as _time
 from dataclasses import dataclass
@@ -105,6 +106,8 @@ class MT5Bridge:
         self._last_modify_error: dict[str, Any] = {}
         # Emir gönderimi tek seferde bir çağrı (manuel + engine race önlemi)
         self._order_lock: threading.Lock = threading.Lock()
+        # Sistem sağlığı metrikleri (Engine tarafından set edilir)
+        self._health: Any = None
 
     # ── property ─────────────────────────────────────────────────────
     @property
@@ -310,25 +313,35 @@ class MT5Bridge:
             return self._connected
 
         self._last_heartbeat = now
+        _ping_start = _time.perf_counter()
 
         try:
             info = mt5.terminal_info()
             if info is None:
                 logger.warning("Heartbeat başarısız — terminal_info None döndü.")
                 self._connected = False
+                if self._health:
+                    self._health.record_disconnect()
                 return self._ensure_connection()
 
             if not info.connected:
                 logger.warning("Heartbeat: terminal bağlantı yok.")
                 self._connected = False
+                if self._health:
+                    self._health.record_disconnect()
                 return self._ensure_connection()
 
+            # Ping kaydı (başarılı heartbeat)
+            if self._health:
+                self._health.record_ping((_time.perf_counter() - _ping_start) * 1000)
             logger.debug("Heartbeat OK.")
             return True
 
         except Exception as exc:
             logger.error(f"Heartbeat istisnası: {exc}")
             self._connected = False
+            if self._health:
+                self._health.record_disconnect()
             return self._ensure_connection()
 
     # ── get_account_info ─────────────────────────────────────────────
@@ -519,6 +532,7 @@ class MT5Bridge:
             sözlüğünde retcode/comment detayı bulunur.
         """
         self._last_order_error = {}
+        _order_start = _time.perf_counter()
 
         with self._order_lock:
             if not self._ensure_connection():
@@ -643,6 +657,17 @@ class MT5Bridge:
                         "retcode": result.retcode,
                         "comment": result.comment,
                     }
+                    # Health: reddedilen emir kaydı
+                    if self._health:
+                        from engine.health import OrderTiming
+                        self._health.record_order(OrderTiming(
+                            timestamp=_time.time(),
+                            symbol=symbol,
+                            direction=direction,
+                            duration_ms=(_time.perf_counter() - _order_start) * 1000,
+                            success=False,
+                            retcode=result.retcode,
+                        ))
                     return None
 
                 order_result = result._asdict()
@@ -736,6 +761,17 @@ class MT5Bridge:
                         order_result["sl_tp_applied"] = False
                         order_result["force_closed"] = True
 
+                # Health: başarılı emir kaydı
+                if self._health:
+                    from engine.health import OrderTiming
+                    self._health.record_order(OrderTiming(
+                        timestamp=_time.time(),
+                        symbol=symbol,
+                        direction=direction,
+                        duration_ms=(_time.perf_counter() - _order_start) * 1000,
+                        success=True,
+                        retcode=result.retcode,
+                    ))
                 return order_result
 
             except Exception as exc:
@@ -743,6 +779,17 @@ class MT5Bridge:
                 self._last_order_error = {
                     "reason": f"Beklenmeyen hata: {exc}",
                 }
+                # Health: başarısız emir kaydı
+                if self._health:
+                    from engine.health import OrderTiming
+                    self._health.record_order(OrderTiming(
+                        timestamp=_time.time(),
+                        symbol=symbol,
+                        direction=direction,
+                        duration_ms=(_time.perf_counter() - _order_start) * 1000,
+                        success=False,
+                        retcode=-1,
+                    ))
                 return None
 
     # ── close_position ───────────────────────────────────────────────
@@ -826,6 +873,116 @@ class MT5Bridge:
 
         except Exception as exc:
             logger.error(f"close_position istisnası [ticket={ticket}]: {exc}")
+            return None
+
+    # ── close_position_partial ─────────────────────────────────────────
+    def close_position_partial(
+        self,
+        ticket: int,
+        volume: float,
+    ) -> dict[str, Any] | None:
+        """Pozisyonun belirtilen kısmını kapat (TP1 yarım kapanış için).
+
+        Netting modda, belirtilen hacim kadar ters yönde emir gönderir.
+        Kalan pozisyon açık kalır.
+
+        Args:
+            ticket: Pozisyon ticket numarası.
+            volume: Kapatılacak lot miktarı.
+
+        Returns:
+            Kapanış sonuç sözlüğü veya None.
+        """
+        if not self._ensure_connection():
+            return None
+
+        try:
+            positions = mt5.positions_get(ticket=ticket)
+            if positions is None or len(positions) == 0:
+                logger.error(f"Pozisyon bulunamadı (partial): ticket={ticket}")
+                return None
+
+            pos = positions[0]
+            symbol = pos.symbol
+
+            # Hacim doğrulama: istenen hacim pozisyon hacminden büyük olamaz
+            if volume > pos.volume:
+                logger.error(
+                    f"Kısmi kapanış hacmi pozisyon hacminden büyük: "
+                    f"{volume} > {pos.volume} [{symbol}]"
+                )
+                return None
+
+            # Lot step yuvarlama
+            info = mt5.symbol_info(symbol)
+            if info and info.volume_step > 0:
+                step = info.volume_step
+                volume = round(
+                    math.floor(volume / step) * step,
+                    int(round(-math.log10(step))),
+                )
+            if volume <= 0:
+                logger.warning(f"Kısmi kapanış hacmi sıfır/negatif: {volume}")
+                return None
+
+            # Ters yön
+            if pos.type == mt5.ORDER_TYPE_BUY:
+                close_type = mt5.ORDER_TYPE_SELL
+                tick = mt5.symbol_info_tick(symbol)
+                price = tick.bid if tick else 0.0
+            else:
+                close_type = mt5.ORDER_TYPE_BUY
+                tick = mt5.symbol_info_tick(symbol)
+                price = tick.ask if tick else 0.0
+
+            if price == 0.0:
+                logger.error(
+                    f"Kısmi kapanış fiyatı alınamadı [{symbol}]: "
+                    f"{mt5.last_error()}"
+                )
+                return None
+
+            request: dict[str, Any] = {
+                "action": mt5.TRADE_ACTION_DEAL,
+                "symbol": symbol,
+                "volume": volume,
+                "type": close_type,
+                "price": price,
+                "position": ticket,
+                "type_filling": mt5.ORDER_FILLING_IOC,
+                "comment": "USTAT_PARTIAL_CLOSE",
+            }
+
+            logger.info(
+                f"Kısmi kapanış: ticket={ticket}, "
+                f"{symbol} {volume}/{pos.volume} lot @ {price:.4f}"
+            )
+
+            result = mt5.order_send(request)
+            if result is None:
+                logger.error(
+                    f"Kısmi kapanış emri None [{ticket}]: {mt5.last_error()}"
+                )
+                return None
+
+            if result.retcode != mt5.TRADE_RETCODE_DONE:
+                logger.error(
+                    f"Kısmi kapanış reddedildi [{ticket}]: "
+                    f"retcode={result.retcode}, comment={result.comment}"
+                )
+                return None
+
+            close_result = result._asdict()
+            logger.info(
+                f"Kısmi kapanış başarılı: ticket={ticket}, "
+                f"kapatılan={volume} lot, order={close_result.get('order')}"
+            )
+            return close_result
+
+        except Exception as exc:
+            logger.error(
+                f"close_position_partial istisnası [ticket={ticket}]: {exc}"
+            )
             return None
 
     # ── modify_position ──────────────────────────────────────────────

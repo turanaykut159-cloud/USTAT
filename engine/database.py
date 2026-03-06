@@ -214,6 +214,7 @@ class Database:
         self._conn.execute("PRAGMA foreign_keys=ON")
 
         self._create_tables()
+        self._migrate_schema()
         logger.info(f"Veritabanı hazır: {self._db_path}")
 
     def _create_tables(self) -> None:
@@ -236,6 +237,24 @@ class Database:
                 pass  # kolon zaten varsa hata verir, sorun yok
             self._conn.commit()
         logger.debug("Tablo şeması doğrulandı.")
+
+    def _migrate_schema(self) -> None:
+        """Evrensel pozisyon yönetimi için trades tablosuna yeni kolonlar ekle."""
+        _MIGRATIONS = [
+            "ALTER TABLE trades ADD COLUMN tp1_hit INTEGER DEFAULT 0",
+            "ALTER TABLE trades ADD COLUMN cost_averaged INTEGER DEFAULT 0",
+            "ALTER TABLE trades ADD COLUMN initial_volume REAL",
+            "ALTER TABLE trades ADD COLUMN peak_profit REAL DEFAULT 0",
+            "ALTER TABLE trades ADD COLUMN breakeven_hit INTEGER DEFAULT 0",
+        ]
+        with self._lock:
+            for sql in _MIGRATIONS:
+                try:
+                    self._conn.execute(sql)
+                except Exception:
+                    pass  # kolon zaten varsa hata verir, sorun yok
+            self._conn.commit()
+        logger.debug("Pozisyon yönetimi migration tamamlandı.")
 
     def close(self) -> None:
         """Bağlantıyı kapat."""

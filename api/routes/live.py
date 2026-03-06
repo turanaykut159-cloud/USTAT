@@ -150,10 +150,20 @@ async def _send_all_updates(ws: WebSocket):
             ticket = p.get("ticket", 0)
             symbol = p.get("symbol", "")
             strategy = "bilinmiyor"
+            tp1_hit = False
+            breakeven_hit = False
+            cost_averaged = False
+            peak_profit = 0.0
+            voting_score = 0
             if ogul and getattr(ogul, "active_trades", None):
                 for _sym, trade in ogul.active_trades.items():
                     if getattr(trade, "ticket", 0) == ticket and _sym == symbol:
                         strategy = getattr(trade, "strategy", "") or "bilinmiyor"
+                        tp1_hit = getattr(trade, "tp1_hit", False)
+                        breakeven_hit = getattr(trade, "breakeven_hit", False)
+                        cost_averaged = getattr(trade, "cost_averaged", False)
+                        peak_profit = getattr(trade, "peak_profit", 0.0)
+                        voting_score = getattr(trade, "voting_score", 0)
                         break
 
             pos_list.append({
@@ -169,6 +179,11 @@ async def _send_all_updates(ws: WebSocket):
                 "swap": swap,
                 "open_time": open_time,
                 "strategy": strategy,
+                "tp1_hit": tp1_hit,
+                "breakeven_hit": breakeven_hit,
+                "cost_averaged": cost_averaged,
+                "peak_profit": round(peak_profit, 2),
+                "voting_score": voting_score,
             })
 
         messages.append({

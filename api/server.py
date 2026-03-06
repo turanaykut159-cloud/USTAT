@@ -14,6 +14,7 @@ Endpoint'ler:
     GET  /api/risk           — Risk snapshot
     GET  /api/performance    — Performans metrikleri
     GET  /api/top5           — Top 5 kontrat
+    GET  /api/health         — Sistem sağlığı metrikleri
     POST /api/trades/approve — İşlem onaylama
     POST /api/killswitch     — Kill-switch tetikleme
     WS   /ws/live            — Canlı veri akışı
@@ -32,6 +33,7 @@ from api.deps import set_engine
 from api.routes import (
     account,
     events,
+    health,
     hybrid_trade,
     killswitch,
     live,
@@ -144,6 +146,7 @@ app.include_router(events.router, prefix="/api", tags=["events"])
 app.include_router(manual_trade.router, prefix="/api", tags=["manual-trade"])
 app.include_router(hybrid_trade.router, prefix="/api", tags=["hybrid-trade"])
 app.include_router(ustat_brain.router, prefix="/api", tags=["ustat-brain"])
+app.include_router(health.router, prefix="/api", tags=["health"])
 app.include_router(live.router, tags=["websocket"])
 
 

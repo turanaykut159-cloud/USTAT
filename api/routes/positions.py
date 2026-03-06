@@ -36,6 +36,26 @@ def _strategy_for_position(ticket: int, symbol: str, ogul) -> str:
     return "bilinmiyor"
 
 
+def _universal_fields(ticket: int, symbol: str, ogul) -> dict:
+    """OĞUL active_trades'den evrensel yönetim alanlarını oku."""
+    defaults = {
+        "tp1_hit": False, "breakeven_hit": False, "cost_averaged": False,
+        "peak_profit": 0.0, "voting_score": 0,
+    }
+    if not ogul or not getattr(ogul, "active_trades", None):
+        return defaults
+    for _sym, trade in ogul.active_trades.items():
+        if getattr(trade, "ticket", 0) == ticket and _sym == symbol:
+            return {
+                "tp1_hit": getattr(trade, "tp1_hit", False),
+                "breakeven_hit": getattr(trade, "breakeven_hit", False),
+                "cost_averaged": getattr(trade, "cost_averaged", False),
+                "peak_profit": getattr(trade, "peak_profit", 0.0),
+                "voting_score": getattr(trade, "voting_score", 0),
+            }
+    return defaults
+
+
 # Sadece bu üç strateji "Otomatik" sayılır; diğer tümü (manual, bilinmiyor, boş) → Manuel
 _OTOMATIK_STRATEJILER = frozenset({"trend_follow", "mean_reversion", "breakout"})
 
@@ -89,6 +109,7 @@ async def get_positions():
         symbol = p.get("symbol", "")
         strategy = _strategy_for_position(ticket, symbol, ogul)
         tur = _tur_for_position(ticket, strategy, hybrid_tickets)
+        ufields = _universal_fields(ticket, symbol, ogul)
 
         items.append(PositionItem(
             ticket=ticket,
@@ -104,6 +125,7 @@ async def get_positions():
             open_time=open_time,
             strategy=strategy,
             tur=tur,
+            **ufields,
         ))
 
     return PositionsResponse(count=len(items), positions=items)

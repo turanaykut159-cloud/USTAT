@@ -84,6 +84,12 @@ class PositionItem(BaseModel):
     open_time: str = ""
     strategy: str = ""   # "manual" | "trend_follow" | "mean_reversion" | "breakout" | "bilinmiyor"
     tur: str = ""        # "Otomatik" | "Manuel" | "Hibrit" — backend tek kaynak
+    # ── Evrensel pozisyon yönetimi alanları ──────────────────────
+    tp1_hit: bool = False         # TP1 yarı kapanış tetiklendi mi
+    breakeven_hit: bool = False   # breakeven seviyesi çekildi mi
+    cost_averaged: bool = False   # maliyetlendirme yapıldı mı
+    peak_profit: float = 0.0     # ulaşılan en yüksek kâr (puan)
+    voting_score: int = 0        # anlık 4-gösterge oylama skoru (0-4)
 
 
 class PositionsResponse(BaseModel):
@@ -620,6 +626,20 @@ class UstatBrainResponse(BaseModel):
     next_day_analyses: list[NextDayAnalysis] = []
     strategy_pool: StrategyPool = StrategyPool()
     regulation_suggestions: list[RegulationSuggestion] = []
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  SİSTEM SAĞLIĞI
+# ═══════════════════════════════════════════════════════════════════
+
+class HealthResponse(BaseModel):
+    """GET /api/health — Sistem sağlığı metrikleri."""
+    cycle: dict = {}        # döngü zamanlama metrikleri
+    mt5: dict = {}          # MT5 bağlantı metrikleri
+    orders: dict = {}       # emir performans metrikleri
+    layers: dict = {}       # katman durumları (BABA, OĞUL, H-Engine, ÜSTAT)
+    recent_events: list[dict] = []  # son 30 olay
+    system: dict = {}       # sistem bilgileri (uptime, DB boyutu, WS istemci)
 
 
 # Forward-ref güncelle

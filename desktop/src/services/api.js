@@ -311,6 +311,21 @@ export async function getHybridEvents(params = {}) {
   }
 }
 
+// ── Health (Sistem Sağlığı) ──────────────────────────────────────
+
+export async function getHealth() {
+  try {
+    const { data } = await client.get('/health');
+    return data;
+  } catch (err) {
+    console.error('[ÜSTAT API] getHealth:', err?.message ?? err);
+    return {
+      cycle: {}, mt5: {}, orders: {},
+      layers: {}, recent_events: [], system: {},
+    };
+  }
+}
+
 // ── WebSocket ────────────────────────────────────────────────────
 
 /**
