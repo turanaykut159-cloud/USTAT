@@ -440,3 +440,49 @@ Bu düzeltmeler native SLTP çalışmadığı için sorunu çözmedi ama kod kal
 - `health.py` silinemese bile `HealthCollector` sadece `record_*` çağrılmazsa boş deque tutar
 - `_health = None` default olduğu için MT5Bridge standalone kullanımda sorun çıkmaz
 - Desktop sayfası kaldırmak için SideNav + App Route + SystemHealth.jsx silinmesi yeterli
+
+## #15 — v14.0: 12 Eksiklik Giderme (2026-03-07)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-07 |
+| **Neden** | Derinlemesine sorgulama sonucu tespit edilen 12 eksiklik — aktif işlemde para kaybettirebilecek kritik açıklar |
+| **Kapsam** | ogul.py, h_engine.py, baba.py, mt5_bridge.py |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `engine/ogul.py` | `_close_with_retry()` yardımcı metod — pozisyon kapatmada 3 deneme retry |
+| `engine/ogul.py` | VOLATILE rejim + EOD kapatma: başarısız close'da trade silinmez, sonraki cycle'da tekrar denenir |
+| `engine/ogul.py` | `_advance_timeout`: kısmi dolum orphan pozisyon kontrolü + kapatma |
+| `engine/ogul.py` | TP1 bloğu sonrası MT5'ten gerçek lot senkronizasyonu |
+| `engine/ogul.py` | `_sync_positions`: SENT/PARTIAL/TIMEOUT/MARKET_RETRY state'lerde 60sn+ takılı trade temizleme |
+| `engine/ogul.py` | `_execute_signal`: `sl_tp_failed` flag kontrolü + software SL/TP loglama |
+| `engine/ogul.py` | `_check_cost_average`: BABA korelasyon kontrolü eklendi (bypass kapandı) |
+| `engine/ogul.py` | `_manage_active_trades`: CRITICAL spread uyarısında SL 0.5×ATR'ye sıkılaştırma |
+| `engine/h_engine.py` | `force_close_all`: 3 deneme retry (tek deneme yerine) |
+| `engine/h_engine.py` | `_check_breakeven`: modify_position 3 deneme retry |
+| `engine/h_engine.py` | `_check_trailing`: modify_position 3 deneme retry |
+| `engine/baba.py` | CENTRAL_BANK_DATES: 2026 TCMB Tem-Ara + 2026 FED FOMC (20 yeni tarih) |
+| `engine/baba.py` | `restore_risk_state`: monthly_paused flag restore eklendi |
+| `engine/baba.py` | `_check_calendar_expiry()`: takvim bitiş/90 gün uyarı metodu |
+| `engine/mt5_bridge.py` | SL/TP 3 denemede başarısız → pozisyon kapatma yerine `sl_tp_failed=True` flag |
+
+### Eklenen
+- `_close_with_retry()` metodu (ogul.py)
+- `_check_calendar_expiry()` metodu (baba.py)
+- Orphan pozisyon kontrolü (_advance_timeout)
+- TP1 lot senkronizasyonu
+- Stale trade temizleme (_sync_positions)
+- Maliyetlendirme korelasyon kontrolü
+- Spread SL sıkılaştırma
+
+### Çıkartılan
+- `force_closed=True` flag (mt5_bridge.py) — pozisyon artık kapatılmıyor, software izlemeye alınıyor
+
+### Geri Alma Planı
+- Tüm değişiklikler additive veya kontrol akışı iyileştirmesi
+- mt5_bridge'de `force_closed` kaldırıldı → eski davranışa dönmek için `sl_tp_failed` bloğu yerine eski close_position çağrısı geri konulmalı
+- Retry pattern'ler: kaldırılırsa eski tek deneme davranışına dönülür (kötüleşme, bozulma yok)
+- Takvim tarihleri: statik set, risk sıfır

@@ -752,14 +752,14 @@ class MT5Bridge:
                                 _time.sleep(0.5)
 
                     if not sltp_applied:
-                        # 3 deneme de başarısız — pozisyonu kapat (korumasız bırakma)
+                        # 3 deneme de başarısız — yazılımsal SL/TP izleme aktif
                         logger.error(
                             f"SL/TP {SLTP_MAX_RETRIES} denemede eklenemedi [{symbol}] "
-                            f"— pozisyon korumasız, kapatılıyor"
+                            f"— yazılımsal SL/TP izleme aktif"
                         )
-                        self.close_position(position_ticket)
                         order_result["sl_tp_applied"] = False
-                        order_result["force_closed"] = True
+                        order_result["sl_tp_failed"] = True
+                        # Pozisyonu KAPATMA — evrensel yönetim software olarak izleyecek
 
                 # Health: başarılı emir kaydı
                 if self._health:

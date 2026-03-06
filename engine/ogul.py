@@ -1235,6 +1235,13 @@ class Ogul:
             )
             return
 
+        # SL/TP software fallback kontrolü
+        if result.get("sl_tp_failed"):
+            logger.warning(
+                f"Software SL/TP izleme aktif [{symbol}]: "
+                f"SL={signal.sl}, TP={signal.tp}"
+            )
+
         # Başarılı → SENT
         trade.state = TradeState.SENT
         trade.order_ticket = result.get("order", 0)
@@ -1938,6 +1945,23 @@ class Ogul:
         except Exception as exc:
             logger.error(f"cancel_order hatası [{symbol}] ticket={trade.order_ticket}: {exc}")
 
+        # Kısmi dolum kontrolü — MT5'te pozisyon kalmış olabilir
+        try:
+            positions = self.mt5.get_positions()
+            orphan = next(
+                (p for p in (positions or []) if p.get("symbol") == symbol),
+                None,
+            )
+            if orphan:
+                orphan_ticket = orphan.get("ticket", 0)
+                logger.warning(
+                    f"TIMEOUT sonrası kısmi pozisyon bulundu [{symbol}] "
+                    f"ticket={orphan_ticket}"
+                )
+                self._close_with_retry(orphan_ticket, symbol)
+        except Exception as exc:
+            logger.error(f"Orphan pozisyon kontrolü hatası [{symbol}]: {exc}")
+
         # VOLATILE/OLAY rejimde market emir yasak
         if trade.regime_at_entry in ("VOLATILE", "OLAY"):
             self._remove_trade(
@@ -2141,6 +2165,42 @@ class Ogul:
         current_time = now.time()
         return TRADING_OPEN <= current_time <= TRADING_CLOSE
 
+    def _close_with_retry(
+        self,
+        ticket: int,
+        symbol: str,
+        max_retries: int = 3,
+        wait: float = 0.5,
+    ) -> bool:
+        """Pozisyonu retry ile kapat.
+
+        Args:
+            ticket: MT5 pozisyon ticket.
+            symbol: Kontrat sembolü.
+            max_retries: Maksimum deneme sayısı.
+            wait: Denemeler arası bekleme (saniye).
+
+        Returns:
+            True ise kapanış başarılı.
+        """
+        for attempt in range(1, max_retries + 1):
+            try:
+                result = self.mt5.close_position(ticket)
+                if result:
+                    return True
+            except Exception as exc:
+                logger.error(
+                    f"close_position retry {attempt}/{max_retries} "
+                    f"[{symbol}] ticket={ticket}: {exc}"
+                )
+            if attempt < max_retries:
+                _time.sleep(wait)
+        logger.error(
+            f"close_position {max_retries} denemede BAŞARISIZ "
+            f"[{symbol}] ticket={ticket}"
+        )
+        return False
+
     def _check_end_of_day(
         self,
         now: datetime | None = None,
@@ -2170,12 +2230,15 @@ class Ogul:
             trade = self.active_trades[symbol]
 
             if trade.state == TradeState.FILLED:
-                # Pozisyonu kapat
-                try:
-                    self.mt5.close_position(trade.ticket)
-                except Exception as exc:
-                    logger.error(f"EOD close_position hatası [{symbol}] ticket={trade.ticket}: {exc}")
-                self._handle_closed_trade(symbol, trade, "end_of_day")
+                # Pozisyonu kapat (retry ile)
+                closed = self._close_with_retry(trade.ticket, symbol)
+                if closed:
+                    self._handle_closed_trade(symbol, trade, "end_of_day")
+                else:
+                    logger.error(
+                        f"EOD kapatma BAŞARISIZ [{symbol}] ticket={trade.ticket} "
+                        f"— sonraki cycle'da tekrar denenecek"
+                    )
 
             elif trade.state in (
                 TradeState.SENT, TradeState.PARTIAL,
@@ -2187,12 +2250,9 @@ class Ogul:
                         self.mt5.cancel_order(trade.order_ticket)
                     except Exception as exc:
                         logger.error(f"EOD cancel_order hatası [{symbol}] ticket={trade.order_ticket}: {exc}")
-                # Kısmi dolum varsa pozisyonu da kapat
+                # Kısmi dolum varsa pozisyonu da kapat (retry ile)
                 if trade.ticket and trade.filled_volume > 0:
-                    try:
-                        self.mt5.close_position(trade.ticket)
-                    except Exception as exc:
-                        logger.error(f"EOD close_position hatası [{symbol}] ticket={trade.ticket}: {exc}")
+                    self._close_with_retry(trade.ticket, symbol)
                 self._remove_trade(symbol, trade, "end_of_day")
 
         # Hibrit pozisyonları da kapat (EOD)
@@ -2240,18 +2300,64 @@ class Ogul:
                 trade = self.active_trades[symbol]
                 if trade.state != TradeState.FILLED:
                     continue
-                try:
-                    close_result = self.mt5.close_position(trade.ticket)
-                except Exception as exc:
-                    logger.error(f"close_position hatası [{symbol}] ticket={trade.ticket}: {exc}")
-                    close_result = None
                 reason = f"regime_{regime.regime_type.value.lower()}"
-                if close_result:
+                closed = self._close_with_retry(trade.ticket, symbol)
+                if closed:
                     logger.warning(
                         f"Rejim değişimi kapanış [{symbol}]: {reason}"
                     )
-                self._handle_closed_trade(symbol, trade, reason)
+                    self._handle_closed_trade(symbol, trade, reason)
+                else:
+                    logger.error(
+                        f"Rejim kapatma BAŞARISIZ [{symbol}] ticket={trade.ticket} "
+                        f"— sonraki cycle'da tekrar denenecek"
+                    )
             return
+
+        # Spread patlaması — CRITICAL uyarı olan sembollerde SL sıkılaştır
+        if self.baba and self.baba.active_warnings:
+            critical_symbols = {
+                w.symbol for w in self.baba.active_warnings
+                if w.severity == "CRITICAL"
+            }
+            for symbol in list(self.active_trades):
+                if symbol not in critical_symbols:
+                    continue
+                trade = self.active_trades[symbol]
+                if trade.state != TradeState.FILLED:
+                    continue
+                pos = pos_by_symbol.get(symbol)
+                if not pos:
+                    continue
+                current_price = pos.get("price_current", 0.0)
+                if current_price <= 0:
+                    continue
+                # SL'yi sıkılaştır: 0.5×ATR mesafe
+                atr_val = self._get_current_atr(symbol)
+                if atr_val is None or atr_val <= 0:
+                    continue
+                tight_dist = 0.5 * atr_val
+                if trade.direction == "BUY":
+                    tight_sl = current_price - tight_dist
+                    if tight_sl <= trade.sl:
+                        continue  # mevcut SL zaten daha iyi
+                else:
+                    tight_sl = current_price + tight_dist
+                    if tight_sl >= trade.sl and trade.sl > 0:
+                        continue
+                try:
+                    mod = self.mt5.modify_position(trade.ticket, sl=tight_sl)
+                    if mod:
+                        logger.warning(
+                            f"Spread CRITICAL SL sıkılaştırma [{symbol}]: "
+                            f"SL {trade.sl:.4f} → {tight_sl:.4f}"
+                        )
+                        trade.sl = tight_sl
+                        trade.trailing_sl = tight_sl
+                except Exception as exc:
+                    logger.error(
+                        f"Spread SL sıkılaştırma hatası [{symbol}]: {exc}"
+                    )
 
         # Her aktif işlem için strateji bazlı kontrol (sadece FILLED)
         for symbol in list(self.active_trades):
@@ -2477,6 +2583,20 @@ class Ogul:
                 except Exception as exc:
                     logger.error(f"TP1 kısmi kapanış hatası [{symbol}]: {exc}")
 
+            # TP1 sonrası MT5'ten gerçek lot senkronizasyonu
+            try:
+                real_vol = pos.get("volume", trade.volume)
+                if abs(real_vol - trade.volume) > 1e-8:
+                    logger.info(
+                        f"TP1 lot senkronizasyonu [{symbol}]: "
+                        f"{trade.volume:.2f} → {real_vol:.2f}"
+                    )
+                    trade.volume = real_vol
+                    if trade.db_id > 0:
+                        self.db.update_trade(trade.db_id, {"lot": trade.volume})
+            except Exception:
+                pass
+
         # ── 6. Trailing Stop Güncelle (EMA20 bazlı) ───────────────
         ema_20 = ema(close, period=TF_EMA_FAST)
         ema_val = last_valid(ema_20)
@@ -2678,6 +2798,18 @@ class Ogul:
         new_total_risk = total_after * atr_val
         if new_total_risk > initial_risk * AVG_MAX_RISK_MULT:
             return
+
+        # Korelasyon kontrolü — maliyetlendirme de BABA kurallarına uymalı
+        if self.baba:
+            corr = self.baba.check_correlation_limits(
+                symbol, trade.direction, self.risk_params,
+            )
+            if not corr.can_trade:
+                logger.info(
+                    f"Maliyetlendirme korelasyon engeli [{symbol}]: "
+                    f"{corr.reason}"
+                )
+                return
 
         # Spread kontrolü
         try:
@@ -3216,6 +3348,27 @@ class Ogul:
                     f"Pozisyon harici kapanmış [{symbol}]: ticket={trade.ticket}"
                 )
                 self._handle_closed_trade(symbol, trade, "external_close")
+
+        # Takılı kalan bekleyen trade'leri temizle (60sn+ eski, MT5'te karşılığı yok)
+        _STALE_THRESHOLD_SEC = 60
+        now = datetime.now()
+        for symbol in list(self.active_trades):
+            trade = self.active_trades[symbol]
+            if trade.state in (
+                TradeState.SENT, TradeState.PARTIAL,
+                TradeState.TIMEOUT, TradeState.MARKET_RETRY,
+            ):
+                if trade.sent_at and (
+                    now - trade.sent_at
+                ).total_seconds() > _STALE_THRESHOLD_SEC:
+                    if symbol not in open_symbols:
+                        logger.warning(
+                            f"Takılı trade temizlendi [{symbol}] "
+                            f"state={trade.state.value}"
+                        )
+                        self._remove_trade(
+                            symbol, trade, f"stale_{trade.state.value}",
+                        )
 
     def _handle_closed_trade(
         self,

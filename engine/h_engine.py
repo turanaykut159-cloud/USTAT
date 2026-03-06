@@ -614,10 +614,22 @@ class HEngine:
 
         # MT5'e yaz (native mod) veya sadece internal güncelle (software mod)
         if self._native_sltp:
-            modify_result = self.mt5.modify_position(hp.ticket, sl=new_sl)
-            if modify_result is None:
-                logger.warning(
-                    f"Breakeven SL modify başarısız: ticket={hp.ticket} {hp.symbol}"
+            modify_ok = False
+            for attempt in range(1, 4):
+                modify_result = self.mt5.modify_position(hp.ticket, sl=new_sl)
+                if modify_result is not None:
+                    modify_ok = True
+                    break
+                if attempt < 3:
+                    _time.sleep(0.5)
+                    logger.warning(
+                        f"Breakeven modify retry {attempt}/3: "
+                        f"ticket={hp.ticket} {hp.symbol}"
+                    )
+            if not modify_ok:
+                logger.error(
+                    f"Breakeven SL modify 3 denemede BAŞARISIZ: "
+                    f"ticket={hp.ticket} {hp.symbol}"
                 )
                 return
 
@@ -690,10 +702,22 @@ class HEngine:
 
         # MT5'e yaz (native mod) veya sadece internal güncelle (software mod)
         if self._native_sltp:
-            modify_result = self.mt5.modify_position(hp.ticket, sl=new_sl)
-            if modify_result is None:
-                logger.warning(
-                    f"Trailing SL modify başarısız: ticket={hp.ticket} {hp.symbol}"
+            modify_ok = False
+            for attempt in range(1, 4):
+                modify_result = self.mt5.modify_position(hp.ticket, sl=new_sl)
+                if modify_result is not None:
+                    modify_ok = True
+                    break
+                if attempt < 3:
+                    _time.sleep(0.5)
+                    logger.warning(
+                        f"Trailing modify retry {attempt}/3: "
+                        f"ticket={hp.ticket} {hp.symbol}"
+                    )
+            if not modify_ok:
+                logger.error(
+                    f"Trailing SL modify 3 denemede BAŞARISIZ: "
+                    f"ticket={hp.ticket} {hp.symbol}"
                 )
                 return
 
@@ -766,11 +790,24 @@ class HEngine:
             except Exception:
                 pass
 
-            # MT5'te kapat
-            close_result = self.mt5.close_position(ticket)
-            if close_result is None:
+            # MT5'te kapat (3 deneme retry)
+            closed = False
+            for attempt in range(1, 4):
+                close_result = self.mt5.close_position(ticket)
+                if close_result is not None:
+                    closed = True
+                    break
+                if attempt < 3:
+                    _time.sleep(0.5)
+                    logger.warning(
+                        f"force_close retry {attempt}/3: "
+                        f"ticket={ticket} {hp.symbol}"
+                    )
+
+            if not closed:
                 logger.error(
-                    f"Hibrit force_close başarısız: ticket={ticket} {hp.symbol}"
+                    f"Hibrit force_close 3 denemede BAŞARISIZ: "
+                    f"ticket={ticket} {hp.symbol}"
                 )
                 failed_tickets.append(ticket)
                 continue

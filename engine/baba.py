@@ -201,6 +201,12 @@ CENTRAL_BANK_DATES: set[date] = {
     # 2026 TCMB (tahmini)
     date(2026, 1, 22), date(2026, 2, 19), date(2026, 3, 19),
     date(2026, 4, 16), date(2026, 5, 21), date(2026, 6, 18),
+    date(2026, 7, 23), date(2026, 8, 20), date(2026, 9, 17),
+    date(2026, 10, 22), date(2026, 11, 19), date(2026, 12, 24),
+    # 2026 FED FOMC (tahmini — resmi ajanda çıkınca güncelle)
+    date(2026, 1, 28), date(2026, 3, 18), date(2026, 4, 29),
+    date(2026, 6, 17), date(2026, 7, 29), date(2026, 9, 16),
+    date(2026, 10, 28), date(2026, 12, 9),
 }
 
 # VİOP vade bitiş tarihleri (her ayın son iş günü)
@@ -331,6 +337,10 @@ class Baba:
 
         self._check_period_resets()
         self._evaluate_kill_switch_triggers()
+
+        # Takvim bitiş kontrolü — günde 1 kez (ilk cycle'da)
+        if self._cycle_count == 1:
+            self._check_calendar_expiry()
 
         return regime
 
@@ -2049,6 +2059,30 @@ class Baba:
         )
 
     # ═════════════════════════════════════════════════════════════════
+    #  TAKVİM BİTİŞ KONTROLÜ
+    # ═════════════════════════════════════════════════════════════════
+
+    def _check_calendar_expiry(self) -> None:
+        """Merkez bankası takviminin bitiş durumunu kontrol et."""
+        today = date.today()
+        future_cb = [d for d in CENTRAL_BANK_DATES if d > today]
+        if not future_cb:
+            logger.error(
+                "TCMB/FED takvimi BİTMİŞ — OLAY rejimi takvim bazlı "
+                "tetiklenemez!"
+            )
+            self._db.insert_event(
+                event_type="CALENDAR_EXPIRED",
+                message="Merkez bankası takvimi bitmiş",
+                severity="ERROR",
+            )
+        elif (min(future_cb) - today).days < 90:
+            logger.warning(
+                f"Takvim uyarısı: Son tarih {min(future_cb)}, "
+                f"90 gün içerisinde bitiyor"
+            )
+
+    # ═════════════════════════════════════════════════════════════════
     #  DURUM GERİ YÜKLEME
     # ═════════════════════════════════════════════════════════════════
 
@@ -2076,6 +2110,15 @@ class Baba:
                     )
                 except (ValueError, IndexError):
                     pass
+
+        # Aylık kayıp durumunu geri yükle (monthly_paused)
+        if self._kill_switch_level >= 2:
+            msg = self._kill_switch_details.get("message", "")
+            if "aylık" in msg.lower() or "monthly" in msg.lower():
+                self._risk_state["monthly_paused"] = True
+                logger.warning(
+                    "Aylık kayıp durumu geri yüklendi: monthly_paused=True"
+                )
 
         # Cooldown
         cd_events = self._db.get_events(event_type="COOLDOWN", limit=1)
