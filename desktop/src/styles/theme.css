@@ -1353,6 +1353,49 @@ h2 {
   letter-spacing: 0.2px;
 }
 
+/* ── Dashboard Stale/Reconnect Banner ─────────────────────── */
+.dash-stale-banner {
+  background: var(--warning, #e6a817);
+  color: #1a1a2e;
+  text-align: center;
+  padding: 6px 12px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  border-radius: 6px;
+  margin-bottom: 8px;
+  animation: stale-pulse 2s ease-in-out infinite;
+}
+@keyframes stale-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* ── Dashboard API Error Banner ──────────────────────────── */
+.dash-api-error-banner {
+  background: rgba(231, 76, 60, 0.15);
+  color: var(--loss, #e74c3c);
+  text-align: center;
+  padding: 8px 12px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  border-radius: 6px;
+  margin-bottom: 8px;
+  border: 1px solid rgba(231, 76, 60, 0.3);
+}
+
+/* ── Dashboard Onaylanmamış Badge ─────────────────────────── */
+.dash-unapproved-badge {
+  display: inline-block;
+  background: var(--warning, #e6a817);
+  color: #1a1a2e;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 10px;
+  margin-left: 10px;
+  vertical-align: middle;
+}
+
 /* ── Dashboard Hesap Durumu Şeridi ─────────────────────────── */
 .dash-account-strip {
   display: grid;
@@ -1930,6 +1973,30 @@ h2 {
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+.th-sync-btn {
+  padding: 6px 14px;
+  background: var(--accent, #3498db);
+  border: 1px solid var(--accent, #3498db);
+  color: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  transition: all 0.15s;
+  margin-left: 8px;
+}
+.th-sync-btn:hover { opacity: 0.85; }
+.th-sync-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.th-sync-result {
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  margin-bottom: 8px;
+}
+.th-sync-ok { background: rgba(46, 204, 113, 0.15); color: var(--profit, #2ecc71); }
+.th-sync-err { background: rgba(231, 76, 60, 0.15); color: var(--loss, #e74c3c); }
 
 /* ── Özet Kartlar (4) ────────────────────────────────────────── */
 .th-summary-row {
@@ -4439,4 +4506,177 @@ h2 {
 
 .sh-reconnect {
   margin-top: 8px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   OĞUL AKTİVİTE KARTI
+   ═══════════════════════════════════════════════════════════════════ */
+
+.ogul-activity-card {
+  border-left: 3px solid var(--accent) !important;
+}
+
+/* ── Header ──────────────────────────────────────────────────────── */
+
+.ogul-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.ogul-header h3 {
+  margin-bottom: 0 !important;
+}
+
+.ogul-header-meta {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.ogul-m15-label,
+.ogul-strategy-label,
+.ogul-adx-label {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(48, 54, 61, 0.5);
+  color: var(--text-secondary);
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+}
+
+.ogul-adx-label {
+  color: var(--accent);
+}
+
+/* ── Sayaçlar ────────────────────────────────────────────────────── */
+
+.ogul-counters {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(48, 54, 61, 0.5);
+}
+
+.ogul-counter {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 60px;
+}
+
+.ogul-counter-val {
+  font-size: 20px;
+  font-weight: 700;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.ogul-counter-lbl {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+/* ── Oylama Tablosu ──────────────────────────────────────────────── */
+
+.ogul-vote-table th {
+  font-size: 9px !important;
+}
+
+.ogul-vote-chip {
+  display: inline-block;
+  width: 22px;
+  height: 18px;
+  line-height: 18px;
+  text-align: center;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.ogul-vote-buy {
+  background: rgba(63, 185, 80, 0.15);
+  color: var(--profit);
+}
+
+.ogul-vote-sell {
+  background: rgba(248, 81, 73, 0.15);
+  color: var(--loss);
+}
+
+.ogul-vote-notr {
+  background: rgba(48, 54, 61, 0.4);
+  color: var(--text-dim);
+}
+
+.ogul-vote-active {
+  background: rgba(88, 166, 255, 0.15);
+  color: var(--accent);
+}
+
+/* ── Oy Skoru ────────────────────────────────────────────────────── */
+
+.ogul-score {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.ogul-score-strong {
+  background: rgba(63, 185, 80, 0.15);
+  color: var(--profit);
+}
+
+.ogul-score-mid {
+  background: rgba(210, 153, 34, 0.15);
+  color: var(--warning);
+}
+
+.ogul-score-weak {
+  background: rgba(48, 54, 61, 0.4);
+  color: var(--text-dim);
+}
+
+/* ── Açılamayan İşlemler ─────────────────────────────────────────── */
+
+.ogul-unopened {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(48, 54, 61, 0.5);
+}
+
+.ogul-unopened h4 {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--warning);
+  margin-bottom: 6px;
+}
+
+.ogul-unopened-item {
+  display: flex;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 11px;
+  border-bottom: 1px solid rgba(48, 54, 61, 0.3);
+}
+
+.ogul-unopened-time {
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  color: var(--text-dim);
+  min-width: 40px;
+}
+
+.ogul-unopened-msg {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

@@ -377,6 +377,44 @@ EventsResponse.model_rebuild()
 
 
 # ═══════════════════════════════════════════════════════════════════
+#  OĞUL AKTİVİTE
+# ═══════════════════════════════════════════════════════════════════
+
+class OgulSignalItem(BaseModel):
+    """Tek sembol için OĞUL sinyal durumu."""
+    symbol: str = ""
+    direction: str = "NOTR"       # BUY / SELL / NOTR
+    buy_votes: int = 0
+    sell_votes: int = 0
+    rsi_vote: str = "NOTR"
+    ema_vote: str = "NOTR"
+    atr_expanding: bool = False
+    volume_above_avg: bool = False
+
+
+class OgulUnopenedItem(BaseModel):
+    """Açılamayan işlem kaydı."""
+    timestamp: str = ""
+    message: str = ""
+
+
+class OgulActivityResponse(BaseModel):
+    """GET /api/ogul/activity — OĞUL sinyal aktivitesi."""
+    last_m15_close: str = ""          # son M15 mum kapanışı
+    regime: str = "TREND"
+    active_strategies: list[str] = []  # ["TREND_FOLLOW"] vb.
+    adx_value: float = 0.0
+    scan_symbols: int = 0             # taranan sembol sayısı
+    signal_count: int = 0             # üretilen sinyal sayısı
+    unopened_count: int = 0           # reddedilen sinyal sayısı
+    signals: list[OgulSignalItem] = []
+    unopened: list[OgulUnopenedItem] = []
+
+
+OgulActivityResponse.model_rebuild()
+
+
+# ═══════════════════════════════════════════════════════════════════
 #  GENEL
 # ═══════════════════════════════════════════════════════════════════
 

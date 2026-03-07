@@ -739,3 +739,143 @@ Bu düzeltmeler native SLTP çalışmadığı için sorunu çözmedi ama kod kal
 ### Davranış Değişikliği
 - Önceki: Profit Factor bugünün tarihinden hesaplanıyor → veri yok → "—"
 - Yeni: 01.02.2026 sonrası tüm işlemlerden hesaplanıyor → 0.77 (doğru değer)
+
+---
+
+## #25 — Stres Testi Bulguları: 6 Düzeltme (2026-03-07)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-07 |
+| **Neden** | Kapsamlı stres testi ve sağlık analizinde tespit edilen 6 gerçek sorunun düzeltilmesi |
+| **Kök Neden** | WebSocket reconnect eksikliği, sessiz hata yutma, equity staleness kontrolü yokluğu, dead code, onay mekanizması görünürlüğü, engine stop davranışı |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `desktop/src/services/api.js` | `connectLiveWS()` exponential backoff ile otomatik reconnect (1s→30s), `onStateChange` callback, `getState()` API |
+| `api/routes/trades.py` | Logger eklendi; 3 bare `except: pass` → `logger.warning(...)` |
+| `api/routes/performance.py` | Logger eklendi; 1 bare `except: pass` → `logger.warning(...)` |
+| `api/routes/health.py` | Logger eklendi; 2 bare `except: pass` → `logger.debug/warning(...)` |
+| `api/routes/risk.py` | Logger eklendi; 1 bare `except: pass` → `logger.exception(...)` (en kritik — risk limitleri) |
+| `api/routes/live.py` | Equity WS mesajına `"ts": time.time()` timestamp eklendi |
+| `desktop/src/components/Dashboard.jsx` | Equity staleness kontrolü (10sn eşik), stale banner ("⚠ Veri eski" / "⚠ Bağlantı koptu"), stale durumda REST fallback, onaylanmamış trade badge ("N onaysız") |
+| `desktop/src/components/TradeHistory.jsx` | `syncTrades` import + "⟳ MT5 Senkronize Et" butonu, sync sonuç mesajı |
+| `desktop/src/styles/theme.css` | `.dash-stale-banner`, `.dash-unapproved-badge`, `.th-sync-btn`, `.th-sync-result` stilleri |
+| `engine/main.py` | `stop(close_positions=False)` opsiyonel parametre; True ise BABA `_close_all_positions()` ile kapatma |
+
+### Eklenen
+- WebSocket auto-reconnect (exponential backoff: 1s → 2s → 4s → 8s → 16s → 30s max)
+- Equity staleness kontrolü + banner (10sn eşik, REST fallback)
+- WS bağlantı durumu göstergesi (connected / reconnecting / disconnected)
+- 7 API route'ta proper exception logging
+- TradeHistory'de "MT5 Senkronize Et" butonu (syncTrades artık kullanılıyor)
+- Dashboard'da onaylanmamış trade sayısı badge'i
+- Engine stop'ta opsiyonel pozisyon kapatma mekanizması
+
+### Çıkartılan
+- 7 bare `except: pass` bloğu (sessiz hata yutma kaldırıldı)
+
+---
+
+## #26 — Sistem Sağlığı: 8 Sorun Düzeltme (2026-03-07)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-07 |
+| **Neden** | Sistem sağlığı analizi sonrası tespit edilen 8 sorunun düzeltilmesi: kritik event kaybı, UI bloklanma, bağlantı yönetimi, event loop bloklama, eksik veriler. |
+| **Kök Neden** | ENGINE_STOP event'i DB kapandıktan sonra yazılıyor (sessiz kayıp), window.alert UI'yı kilitliyor, WS broadcast çift silme riski, engine crash sessiz, shutdown thread beklemiyor, sync DB sorgusu async loop'u blokluyor, margin WS'te yok, push loop sonsuz retry. |
+
+| # | Dosya | Değişiklik |
+|---|-------|-----------|
+| 1 | `engine/main.py` | `_log_event_safe("ENGINE_STOP")` çağrısı `db.close()` öncesine taşındı |
+| 2 | `desktop/src/components/Dashboard.jsx` | 5 `window.alert()` → inline banner + ConfirmModal ile değiştirildi |
+| 3 | `api/routes/live.py` | `broadcast()` çift silme guard'ı eklendi |
+| 4 | `api/server.py` | Engine watchdog task eklendi (crash loglanır) |
+| 5 | `api/server.py` | Shutdown'da engine thread timeout ile bekleniyor (30sn) |
+| 6 | `api/routes/live.py` | Risk snapshot cache (5sn TTL) + `asyncio.to_thread()` |
+| 7 | `api/routes/live.py` + `Dashboard.jsx` | Margin/free_margin WS equity mesajına eklendi |
+| 8 | `api/routes/live.py` | Push loop circuit breaker (log throttle + artan backoff) |
+| 9 | `desktop/src/styles/theme.css` | `.dash-api-error-banner` stili eklendi |
+| 10 | `api/server.py` | `get_event_loop()` → `get_running_loop()` (deprecation) |
+
+### Eklenen
+- API hata banner'ı (kırmızı, otomatik temizlenir)
+- ConfirmModal ile hata gösterimi (window.alert yerine)
+- Engine crash watchdog task (pasif gözlemci)
+- Shutdown'da engine thread await mekanizması
+- Risk snapshot 5sn cache (event loop bloklama çözümü)
+- WS equity mesajında margin/free_margin alanları
+- Push loop log throttle (ilk 5 + her 60.)
+- Push loop artan backoff (5s → 10s → ... → max 30s)
+
+### Çıkartılan
+- 5 `window.alert()` çağrısı (blocking UI)
+- Sync DB sorgusu doğrudan event loop üzerinde (her 2sn)
+
+---
+
+## #27 — OĞUL İşlem Yapmama: 7 Engel Düzeltmesi (2026-03-07)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-07 |
+| **Neden** | OĞUL hiç işlem yapamıyor. Derinlemesine log analizi: Kill-Switch L2 kısır döngüsü (851 cycle risk_ok=False), ADX ölü bölge (20-25), lot floor(0), yetersiz Top5, rejim-strateji uyumsuzluğu |
+| **Kök Neden** | 6 farklı engel zinciri: (1) daily_pnl eski günden kalma → L2 sürekli tekrar aktif, (2) vol_min floor yok → rounding lot=0, (3) MR_ADX<20 ama rejim RANGE+ADX=30, (4) ENTRY_LOT_FRACTION=0.5 küçük lotları sıfıra düşürüyor, (5) Top5 ortalama filtresi 2 kontraya düşüyor, (6) bias nötr ×0.7 çok agresif |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `engine/baba.py` | Fix 1: `daily_reset_equity` ile günlük PnL bazı reset anına taşındı → L2 kısır döngü kırıldı |
+| `engine/baba.py` | Fix 2: `calculate_position_size()` sonunda `vol_min` floor eklendi → lot=0 koruması |
+| `engine/baba.py` | Fix 7: `detect_regime()` ADX çapraz kontrol → RANGE+yüksek ADX ise TREND override |
+| `engine/ogul.py` | Fix 2: `_execute_signal()` ENTRY_LOT_FRACTION sonrası `vol_min` floor |
+| `engine/ogul.py` | Fix 3: `MR_ADX_THRESHOLD` 20→25 — ADX ölü bölge kapatıldı |
+| `engine/ogul.py` | Fix 4: `ENTRY_LOT_FRACTION` lot≤2 ise 1.0 (yarılama atla) |
+| `engine/ogul.py` | Fix 5: Top5 minimum 3 kontrat garantisi |
+| `engine/ogul.py` | Fix 6: Bias nötr çarpanı 0.7→0.85 |
+
+### Eklenen
+- `daily_reset_equity` risk state alanı (baba.py)
+- `vol_min` lot floor koruması (baba.py + ogul.py)
+- Rejim ADX çapraz kontrol (baba.py)
+- Top5 minimum kontrat garantisi (ogul.py)
+- Dinamik ENTRY_LOT_FRACTION mantığı (ogul.py)
+
+### Çıkartılan
+- ADX 20-25 ölü bölge (MR_ADX 20→25 ile kapatıldı)
+- L2 kısır döngü (daily_reset_equity ile çözüldü)
+- Bias nötr %30 cezası (%15'e düşürüldü)
+
+---
+
+## #28 — OĞUL Aktivite Kartı + USDTRY Sembol Düzeltmesi (2026-03-07)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-07 |
+| **Neden** | OĞUL neden işlem açmıyor/açamıyor sorusu UI'dan izlenemiyor. USDTRY tick hatası her cycle loglanıyor. |
+| **Kapsam** | Yeni API endpoint + desktop kart + USDTRY dinamik sembol çözümleme |
+
+### Değişiklikler
+
+| Dosya | Değişiklik |
+|-------|-----------|
+| `api/routes/ogul_activity.py` | **YENİ** — `GET /api/ogul/activity` endpoint: oylama detayı, strateji parametreleri, açılamayan işlem sayaçları |
+| `api/schemas.py` | `OgulActivityResponse`, `OgulSignalItem`, `OgulUnopenedItem` schema'ları |
+| `api/server.py` | `ogul_activity` router kaydı |
+| `desktop/src/components/AutoTrading.jsx` | OĞUL Aktivite kartı: sayaçlar, 4-gösterge oylama tablosu, açılamayan işlemler listesi |
+| `desktop/src/services/api.js` | `getOgulActivity()` fonksiyonu |
+| `desktop/src/styles/theme.css` | `.ogul-*` CSS sınıfları (kart, sayaçlar, oylama chip'leri, skor renkleri) |
+| `engine/mt5_bridge.py` | USDTRY dinamik sembol çözümleme (`_resolve_symbols` → `USDTRY_YAKINVADE` eşlemesi) |
+
+### Eklenen
+- `/api/ogul/activity` endpoint (ogul_activity.py)
+- Oğul Aktivite kartı: Tarama/Sinyal/Reddedilen sayaçları + 4-gösterge oylama tablosu (RSI, EMA, ATR, Hacim)
+- USDTRY dinamik sembol çözümleme (GCM'deki `USDTRY_YAKINVADE` otomatik bulunuyor)
+- `getOgulActivity()` API fonksiyonu (api.js)
+
+### Çıkartılan
+- Hardcoded `"USDTRY"` sembol adı (dinamik çözümleme ile değiştirildi)

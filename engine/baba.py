@@ -281,6 +281,7 @@ class Baba:
             "last_trade_count": 0,
             "cooldown_until": None,
             "last_cooldown_end": None,
+            "daily_reset_equity": None,     # Fix: günlük sıfırlama anındaki equity
         }
 
         # ── Cycle sayacı (fake analiz frekansı için) ──────────────────
@@ -390,6 +391,16 @@ class Baba:
             winner = RegimeType.VOLATILE
         else:
             winner = max(votes, key=votes.get)
+
+        # Fix 7: RANGE + yüksek ADX çelişkisi → TREND'e override
+        if winner == RegimeType.RANGE and adx_vals:
+            avg_adx = float(np.mean(adx_vals))
+            if avg_adx > ADX_TREND_THRESHOLD:
+                logger.info(
+                    f"Rejim ADX çapraz kontrol: RANGE→TREND "
+                    f"(avg_adx={avg_adx:.1f}>{ADX_TREND_THRESHOLD})"
+                )
+                winner = RegimeType.TREND
 
         confidence = round(votes[winner] / total, 3)
 
@@ -794,6 +805,16 @@ class Baba:
             lot = math.floor(lot * 0.5 / vol_step) * vol_step if vol_step > 0 else lot * 0.5
             logger.debug(f"Haftalık yarılama uygulandı: {lot}")
 
+        # Fix 2: lot formula pozitifse ama rounding sıfırladıysa → vol_min uygula
+        if lot == 0 and risk_amount > 0 and vol_min > 0:
+            base_lot = risk_amount / (atr_value * contract_size)
+            if base_lot >= vol_min * 0.5:
+                lot = vol_min
+                logger.info(
+                    f"Lot floor [{symbol}]: lot=0→vol_min={vol_min} "
+                    f"(base_lot={base_lot:.3f})"
+                )
+
         logger.debug(
             f"Pozisyon [{symbol}]: {lot} lot "
             f"(eq={account_equity:.0f}, ATR={atr_value:.4f}, "
@@ -827,9 +848,16 @@ class Baba:
             )
             return False
 
-        # Madde 1.2: Gün başı equity bazlı hesaplama
-        # day_start_equity = anlık_equity - daily_pnl (daily_pnl = current - start)
-        day_start_equity = equity - daily_pnl
+        # Fix 1: Günlük sıfırlama sonrası reset equity varsa onu baz al
+        # Bu sayede önceki günün kaybı yeni günü bloklamaz
+        reset_eq = self._risk_state.get("daily_reset_equity")
+        if reset_eq is not None and reset_eq > 0:
+            day_start_equity = reset_eq
+            daily_pnl = equity - reset_eq
+        else:
+            # Orijinal mantık: gün başı equity = anlık - daily_pnl
+            day_start_equity = equity - daily_pnl
+
         if daily_pnl < 0 and day_start_equity > 0:
             daily_loss_pct = abs(daily_pnl) / day_start_equity
         else:
@@ -896,6 +924,7 @@ class Baba:
         """Günlük sayaçları sıfırla."""
         self._risk_state["daily_reset_date"] = today
         self._risk_state["daily_trade_count"] = 0
+        self._risk_state["daily_reset_equity"] = None   # önceki günü temizle
 
         # Günlük kayıp nedenli L2 varsa kaldır
         if (
@@ -904,7 +933,18 @@ class Baba:
         ):
             self._clear_kill_switch("Günlük sıfırlama — L2 kaldırıldı")
 
-        logger.info(f"Günlük risk sıfırlama: {today}")
+        # Fix 1: Reset anında equity'yi kaydet — yeni günün PnL bazı
+        # Bu sayede check_drawdown_limits() eski günün kaybını görmez
+        snap = self._db.get_latest_risk_snapshot()
+        if snap:
+            self._risk_state["daily_reset_equity"] = snap.get("equity", 0.0)
+            logger.info(
+                f"Günlük risk sıfırlama: {today} "
+                f"(reset equity={self._risk_state['daily_reset_equity']:.2f})"
+            )
+        else:
+            logger.info(f"Günlük risk sıfırlama: {today}")
+
         self._db.insert_event(
             event_type="RISK_RESET",
             message=f"Günlük sıfırlama: {today}",

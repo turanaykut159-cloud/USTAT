@@ -170,8 +170,21 @@ class MT5Bridge:
             self._reverse_map[mt5_name] = base
             logger.info(f"Sembol eşleme: {base} → {mt5_name} (visible={chosen.visible})")
 
+        # USDTRY — BABA şok kontrolü için gerekli
+        # GCM'de sembol adı farklı olabilir (ör. USDTRY_YAKINVADE)
+        usdtry_candidates = [
+            s for s in all_symbols
+            if "USDTRY" in s.name.upper()
+        ]
+        if usdtry_candidates:
+            usdtry_sym = min(usdtry_candidates, key=lambda s: len(s.name))
+            self._symbol_map["USDTRY"] = usdtry_sym.name
+            logger.info(f"Sembol eşleme: USDTRY → {usdtry_sym.name}")
+        else:
+            logger.warning("USDTRY sembolü bulunamadı — şok kontrolü pasif kalacak")
+
         resolved = len(self._symbol_map)
-        total = len(WATCHED_SYMBOLS)
+        total = len(WATCHED_SYMBOLS) + 1  # +1 USDTRY
         logger.info(f"Sembol çözümleme tamamlandı: {resolved}/{total} eşlendi")
 
     def _to_mt5(self, base_symbol: str) -> str:
@@ -261,6 +274,11 @@ class MT5Bridge:
                     mt5_name = self._to_mt5(base)
                     if not mt5.symbol_select(mt5_name, True):
                         logger.warning(f"Sembol etkinleştirilemedi: {base} → {mt5_name}")
+
+                # USDTRY — BABA şok kontrolü için gerekli
+                usdtry_mt5 = self._to_mt5("USDTRY")
+                if not mt5.symbol_select(usdtry_mt5, True):
+                    logger.warning(f"USDTRY ({usdtry_mt5}) MarketWatch'a eklenemedi — şok kontrolü pasif kalacak")
 
                 self._connected = True
                 self._last_heartbeat = _time.monotonic()

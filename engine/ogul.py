@@ -66,7 +66,7 @@ TF_TRAILING_ATR_MULT: float = 1.5   # trailing stop 1.5×ATR
 MR_RSI_PERIOD:    int   = 14
 MR_RSI_OVERSOLD:  float = 20.0
 MR_RSI_OVERBOUGHT: float = 80.0
-MR_ADX_THRESHOLD: float = 20.0      # ADX < 20 gerekli
+MR_ADX_THRESHOLD: float = 25.0      # ADX < 25 gerekli (Fix 3: ölü bölge kapatıldı)
 MR_BB_PERIOD:     int   = 20
 MR_BB_STD:        float = 2.0
 MR_SL_ATR_MULT:   float = 1.0       # BB bant ± 1 ATR
@@ -1164,8 +1164,15 @@ class Ogul:
             self._log_cancelled_trade(trade)
             return
 
+        lot_before_fraction = lot  # Fix 2: pre-fraction lot kaydı
+
         if USE_UNIVERSAL_MANAGEMENT:
-            lot = lot * ENTRY_LOT_FRACTION  # yarım lot, ekleme payı bırakılır
+            # Fix 4: Lot zaten minimumda ise yarılama — piramitleme kapasitesi yok
+            if lot <= 2:
+                fraction = 1.0
+            else:
+                fraction = ENTRY_LOT_FRACTION
+            lot = lot * fraction
             # Lot step yuvarlama
             try:
                 sym_info = self.mt5.get_symbol_info(signal.symbol)
@@ -1179,10 +1186,24 @@ class Ogul:
             except Exception:
                 pass
             if lot <= 0:
-                trade.state = TradeState.CANCELLED
-                trade.cancel_reason = "lot_zero_after_fraction"
-                self._log_cancelled_trade(trade)
-                return
+                # Fix 2: pre-fraction lot yeterliyse vol_min uygula
+                try:
+                    sym_info_f = self.mt5.get_symbol_info(signal.symbol)
+                    v_min = sym_info_f.volume_min if sym_info_f else 1.0
+                except Exception:
+                    v_min = 1.0
+                if lot_before_fraction >= v_min:
+                    lot = v_min
+                    logger.info(
+                        f"ENTRY_LOT_FRACTION floor [{signal.symbol}]: "
+                        f"lot=0→vol_min={v_min} "
+                        f"(pre_frac={lot_before_fraction:.2f})"
+                    )
+                else:
+                    trade.state = TradeState.CANCELLED
+                    trade.cancel_reason = "lot_zero_after_fraction"
+                    self._log_cancelled_trade(trade)
+                    return
 
         trade.volume = lot
         trade.requested_volume = lot
@@ -1659,10 +1680,10 @@ class Ogul:
             )
             return 0.0
         elif bias == "NOTR":
-            # Bias nötr → güven düşürme
-            lot = lot * 0.7
+            # Bias nötr → güven düşürme (Fix 6: 0.7→0.85 yumuşatma)
+            lot = lot * 0.85
             logger.debug(
-                f"Bias-lot nötr [{signal.symbol}]: lot*0.7={lot:.2f}"
+                f"Bias-lot nötr [{signal.symbol}]: lot*0.85={lot:.2f}"
             )
 
         return min(lot, MAX_LOT_PER_CONTRACT)
@@ -3626,6 +3647,15 @@ class Ogul:
         else:
             top5_above_avg = []
             avg = 0.0
+
+        # Fix 5: Minimum 3 kontrat garantisi
+        TOP5_MINIMUM = 3
+        if len(top5_above_avg) < TOP5_MINIMUM and len(top5_candidates) >= TOP5_MINIMUM:
+            top5_above_avg = top5_candidates[:TOP5_MINIMUM]
+            logger.info(
+                f"Top5 minimum garanti: {len(top5_above_avg)} kontrat "
+                f"(avg filtresi yetersiz, ilk {TOP5_MINIMUM} alındı)"
+            )
 
         # 6. Vade + haber filtresi
         expiry_status = self._get_expiry_status(today)

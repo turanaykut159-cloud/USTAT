@@ -38,6 +38,7 @@ from api.routes import (
     killswitch,
     live,
     manual_trade,
+    ogul_activity,
     performance,
     positions,
     risk,
@@ -48,6 +49,9 @@ from api.routes import (
 )
 
 logger = logging.getLogger("ustat.api")
+
+# Tek kaynak: OpenAPI ve root endpoint aynı versiyonu kullanır
+API_VERSION = "5.1.0"
 
 
 # ── Lifespan: Engine başlat / durdur ─────────────────────────────
@@ -61,6 +65,7 @@ async def lifespan(app: FastAPI):
     """
     engine = None
     engine_task = None
+    watchdog_task = None
 
     try:
         from engine.config import Config
@@ -89,8 +94,17 @@ async def lifespan(app: FastAPI):
         set_engine(engine)
 
         # Engine'i arka plan thread'inde başlat
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         engine_task = loop.run_in_executor(None, engine.start)
+
+        # Engine crash watchdog — thread sessizce ölürse logla
+        async def _engine_watchdog():
+            try:
+                await engine_task
+            except Exception as exc:
+                logger.critical(f"Engine thread CRASHED: {exc}")
+
+        watchdog_task = asyncio.create_task(_engine_watchdog())
 
         logger.info("ÜSTAT Engine başlatıldı.")
 
@@ -104,6 +118,16 @@ async def lifespan(app: FastAPI):
     if engine is not None:
         try:
             engine.stop("API shutdown")
+            # Engine thread'inin bitmesini bekle (max 30sn)
+            if engine_task is not None:
+                try:
+                    await asyncio.wait_for(engine_task, timeout=30)
+                except asyncio.TimeoutError:
+                    logger.warning("Engine thread 30s içinde durdurulamadı.")
+                except Exception:
+                    pass  # Engine kendi hatalarını logladı
+            if watchdog_task is not None:
+                watchdog_task.cancel()
             logger.info("ÜSTAT Engine durduruldu.")
         except Exception as e:
             logger.warning(f"Engine durdurma hatası: {e}")
@@ -113,7 +137,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="ÜSTAT API",
-    version="5.1.0",
+    version=API_VERSION,
     description="VİOP Algorithmic Trading — REST & WebSocket API",
     lifespan=lifespan,
 )
@@ -147,6 +171,7 @@ app.include_router(manual_trade.router, prefix="/api", tags=["manual-trade"])
 app.include_router(hybrid_trade.router, prefix="/api", tags=["hybrid-trade"])
 app.include_router(ustat_brain.router, prefix="/api", tags=["ustat-brain"])
 app.include_router(health.router, prefix="/api", tags=["health"])
+app.include_router(ogul_activity.router, prefix="/api", tags=["ogul"])
 app.include_router(live.router, tags=["websocket"])
 
 
@@ -155,6 +180,6 @@ async def root():
     """API kök endpoint."""
     return {
         "name": "ÜSTAT API",
-        "version": "5.0.0",
+        "version": API_VERSION,
         "docs": "/docs",
     }

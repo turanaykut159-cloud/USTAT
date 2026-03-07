@@ -176,6 +176,18 @@ export async function getEvents(params = {}) {
   }
 }
 
+// ── OĞUL Aktivite ────────────────────────────────────────────────
+
+export async function getOgulActivity() {
+  try {
+    const { data } = await client.get('/ogul/activity');
+    return data;
+  } catch (err) {
+    console.error('[ÜSTAT API] getOgulActivity:', err?.message ?? err);
+    return { signals: [], unopened: [], scan_symbols: 0, signal_count: 0, unopened_count: 0 };
+  }
+}
+
 // ── Kontrat Reactivation ─────────────────────────────────────────
 
 export async function reactivateSymbols() {
@@ -326,42 +338,116 @@ export async function getHealth() {
   }
 }
 
-// ── WebSocket ────────────────────────────────────────────────────
+// ── WebSocket (Auto-Reconnect) ──────────────────────────────────
 
 /**
  * Canlı veri WebSocket bağlantısı oluştur.
+ * Bağlantı koptuğunda otomatik yeniden bağlanır (exponential backoff).
  *
- * @param {function} onMessage - (data: object[]) => void
- * @param {function} onError   - (error: Event) => void
- * @returns {{ ws: WebSocket, close: () => void }}
+ * @param {function} onMessage    - (data: object[]) => void
+ * @param {function} [onError]    - (error: Event) => void
+ * @param {function} [onStateChange] - (state: 'connected'|'reconnecting'|'disconnected') => void
+ * @returns {{ close: () => void, getState: () => string }}
  */
-export function connectLiveWS(onMessage, onError = null) {
-  const ws = new WebSocket(`${WS_BASE}/ws/live`);
+export function connectLiveWS(onMessage, onError = null, onStateChange = null) {
+  const BACKOFF_INITIAL = 1000;   // 1 saniye
+  const BACKOFF_MAX = 30000;      // 30 saniye
+  const PING_INTERVAL = 30000;    // 30 saniye
 
-  ws.onmessage = (event) => {
+  let ws = null;
+  let pingInterval = null;
+  let reconnectTimeout = null;
+  let backoff = BACKOFF_INITIAL;
+  let state = 'disconnected';
+  let intentionalClose = false;
+
+  function setState(newState) {
+    if (state !== newState) {
+      state = newState;
+      if (onStateChange) onStateChange(state);
+    }
+  }
+
+  function connect() {
     try {
-      const messages = JSON.parse(event.data);
-      onMessage(messages);
+      ws = new WebSocket(`${WS_BASE}/ws/live`);
     } catch {
-      // Geçersiz JSON
+      scheduleReconnect();
+      return;
     }
-  };
 
-  ws.onerror = (err) => {
-    if (onError) onError(err);
-  };
+    ws.onopen = () => {
+      backoff = BACKOFF_INITIAL;  // Başarılı bağlantı → backoff sıfırla
+      setState('connected');
 
-  // Ping/pong keep-alive
-  const pingInterval = setInterval(() => {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send('ping');
+      // Ping/pong keep-alive
+      pingInterval = setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send('ping');
+        }
+      }, PING_INTERVAL);
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const messages = JSON.parse(event.data);
+        onMessage(messages);
+      } catch {
+        // Geçersiz JSON
+      }
+    };
+
+    ws.onerror = (err) => {
+      if (onError) onError(err);
+    };
+
+    ws.onclose = () => {
+      cleanup();
+      if (!intentionalClose) {
+        setState('reconnecting');
+        scheduleReconnect();
+      } else {
+        setState('disconnected');
+      }
+    };
+  }
+
+  function cleanup() {
+    if (pingInterval) {
+      clearInterval(pingInterval);
+      pingInterval = null;
     }
-  }, 30000);
+  }
 
-  const close = () => {
-    clearInterval(pingInterval);
-    ws.close();
-  };
+  function scheduleReconnect() {
+    if (intentionalClose) return;
+    reconnectTimeout = setTimeout(() => {
+      connect();
+      // Exponential backoff: 1s → 2s → 4s → 8s → 16s → 30s (max)
+      backoff = Math.min(backoff * 2, BACKOFF_MAX);
+    }, backoff);
+  }
 
-  return { ws, close };
+  function close() {
+    intentionalClose = true;
+    cleanup();
+    if (reconnectTimeout) {
+      clearTimeout(reconnectTimeout);
+      reconnectTimeout = null;
+    }
+    if (ws) {
+      ws.close();
+      ws = null;
+    }
+    setState('disconnected');
+  }
+
+  function getState() {
+    return state;
+  }
+
+  // İlk bağlantı
+  connect();
+
+  return { close, getState };
 }

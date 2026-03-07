@@ -13,6 +13,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   getStatus, getTop5, getPositions, getTrades, reactivateSymbols,
+  getOgulActivity,
 } from '../services/api';
 
 // ── Yardımcılar ──────────────────────────────────────────────────
@@ -80,17 +81,25 @@ export default function AutoTrading() {
   const [autoPositions, setAutoPositions] = useState([]);
   const [autoTrades, setAutoTrades] = useState([]);
   const [autoTradeCount, setAutoTradeCount] = useState(0);
+  const [ogulActivity, setOgulActivity] = useState({
+    signals: [], unopened: [], scan_symbols: 0,
+    signal_count: 0, unopened_count: 0,
+    last_m15_close: '', regime: 'TREND',
+    active_strategies: [], adx_value: 0,
+  });
   const [loading, setLoading] = useState(true);
 
   const fetchAll = useCallback(async () => {
-    const [st, t5, pos, trades] = await Promise.all([
+    const [st, t5, pos, trades, ogul] = await Promise.all([
       getStatus(),
       getTop5(),
       getPositions(),
       getTrades({ limit: 50 }),
+      getOgulActivity(),
     ]);
     setStatus(st);
     setTop5(t5);
+    setOgulActivity(ogul);
 
     // Otomatik pozisyonları filtrele
     const allPos = pos.positions || [];
@@ -357,6 +366,131 @@ export default function AutoTrading() {
             </table>
           ) : (
             <div className="auto-empty-msg">Henüz otomatik işlem yok</div>
+          )}
+        </div>
+      </div>
+
+      {/* ═══ OĞUL AKTİVİTE — Sinyal Tarama Durumu ═══════════════════ */}
+      <div className="auto-trades-row">
+        <div className="auto-card ogul-activity-card">
+          <div className="ogul-header">
+            <h3>Oğul Aktivite</h3>
+            <div className="ogul-header-meta">
+              {ogulActivity.last_m15_close && (
+                <span className="ogul-m15-label">
+                  Son M15: {ogulActivity.last_m15_close.replace('T', ' ').slice(0, 16)}
+                </span>
+              )}
+              <span className="ogul-strategy-label">
+                {ogulActivity.active_strategies?.length > 0
+                  ? ogulActivity.active_strategies.join(' + ')
+                  : 'Strateji yok'}
+              </span>
+              {ogulActivity.adx_value > 0 && (
+                <span className="ogul-adx-label">
+                  ADX: {ogulActivity.adx_value}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* ── Sayaçlar ─────────────────────────────────────────── */}
+          <div className="ogul-counters">
+            <div className="ogul-counter">
+              <span className="ogul-counter-val">{ogulActivity.scan_symbols}</span>
+              <span className="ogul-counter-lbl">Tarama</span>
+            </div>
+            <div className="ogul-counter">
+              <span className="ogul-counter-val" style={{
+                color: ogulActivity.signal_count > 0 ? 'var(--profit)' : 'var(--text-dim)'
+              }}>
+                {ogulActivity.signal_count}
+              </span>
+              <span className="ogul-counter-lbl">Sinyal</span>
+            </div>
+            <div className="ogul-counter">
+              <span className="ogul-counter-val" style={{
+                color: ogulActivity.unopened_count > 0 ? 'var(--warning)' : 'var(--text-dim)'
+              }}>
+                {ogulActivity.unopened_count}
+              </span>
+              <span className="ogul-counter-lbl">Reddedilen</span>
+            </div>
+          </div>
+
+          {/* ── Oylama Detayı (Top-5) ────────────────────────────── */}
+          {(ogulActivity.signals || []).length > 0 ? (
+            <table className="auto-table ogul-vote-table">
+              <thead>
+                <tr>
+                  <th>Sembol</th>
+                  <th>Yön</th>
+                  <th>RSI</th>
+                  <th>EMA</th>
+                  <th>ATR</th>
+                  <th>Hacim</th>
+                  <th>Oy</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ogulActivity.signals.map((s) => {
+                  const totalVotes = s.buy_votes + s.sell_votes;
+                  const favorable = Math.max(s.buy_votes, s.sell_votes);
+                  return (
+                    <tr key={s.symbol}>
+                      <td className="mono">{s.symbol}</td>
+                      <td>
+                        <span className={`dir-badge dir-badge--${s.direction.toLowerCase()}`}>
+                          {s.direction}
+                        </span>
+                      </td>
+                      <td>
+                        <span className={`ogul-vote-chip ogul-vote-${s.rsi_vote.toLowerCase()}`}>
+                          {s.rsi_vote === 'BUY' ? '▲' : s.rsi_vote === 'SELL' ? '▼' : '—'}
+                        </span>
+                      </td>
+                      <td>
+                        <span className={`ogul-vote-chip ogul-vote-${s.ema_vote.toLowerCase()}`}>
+                          {s.ema_vote === 'BUY' ? '▲' : s.ema_vote === 'SELL' ? '▼' : '—'}
+                        </span>
+                      </td>
+                      <td>
+                        <span className={`ogul-vote-chip ${s.atr_expanding ? 'ogul-vote-active' : 'ogul-vote-notr'}`}>
+                          {s.atr_expanding ? '✓' : '—'}
+                        </span>
+                      </td>
+                      <td>
+                        <span className={`ogul-vote-chip ${s.volume_above_avg ? 'ogul-vote-active' : 'ogul-vote-notr'}`}>
+                          {s.volume_above_avg ? '✓' : '—'}
+                        </span>
+                      </td>
+                      <td className="mono">
+                        <span className={`ogul-score ${favorable >= 3 ? 'ogul-score-strong' : favorable >= 2 ? 'ogul-score-mid' : 'ogul-score-weak'}`}>
+                          {favorable}/{totalVotes || 4}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          ) : (
+            <div className="auto-empty-msg">Oylama verisi yok</div>
+          )}
+
+          {/* ── Açılamayan İşlemler ──────────────────────────────── */}
+          {(ogulActivity.unopened || []).length > 0 && (
+            <div className="ogul-unopened">
+              <h4>Açılamayan İşlemler</h4>
+              {ogulActivity.unopened.map((u, i) => (
+                <div key={i} className="ogul-unopened-item">
+                  <span className="ogul-unopened-time">
+                    {u.timestamp?.slice(11, 16) || ''}
+                  </span>
+                  <span className="ogul-unopened-msg">{u.message}</span>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       </div>
