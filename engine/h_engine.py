@@ -374,6 +374,15 @@ class HEngine:
             result["message"] = f"DB kayıt hatası: {exc}"
             return result
 
+        # ── 2b. trades tablosundaki strategy'yi güncelle ─────────
+        try:
+            self.db._execute(
+                "UPDATE trades SET strategy='hibrit' WHERE mt5_position_id=?",
+                (ticket,),
+            )
+        except Exception:
+            pass  # trade kaydı henüz sync olmamış olabilir
+
         # ── 3. Belleğe ekle ───────────────────────────────────────
         hp = HybridPosition(
             ticket=ticket,

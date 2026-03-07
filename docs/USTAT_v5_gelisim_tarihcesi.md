@@ -616,3 +616,34 @@ Bu düzeltmeler native SLTP çalışmadığı için sorunu çözmedi ama kod kal
 ### Geri Alma Planı
 - `trades.py`'ye `from engine.baba import RISK_BASELINE_DATE` import'u geri eklenir
 - `get_trades` ve `get_trade_stats` sorgularına `since=RISK_BASELINE_DATE` parametresi geri eklenir
+
+---
+
+## #21 — Hibrit İşlem Türü Sınıflandırma (2026-03-07)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-07 |
+| **Neden** | Hibrit motora devredilen ve kapanan pozisyonlar İşlem Geçmişi'nde "Manuel" olarak görünüyordu. H-Engine `trades` tablosundaki `strategy` alanını hiç güncellemiyordu. MT5 sync tüm işlemleri "manual" olarak etiketliyordu. |
+| **Kök Neden** | 3 ayrı eksiklik: (1) `transfer_to_hybrid()` trades.strategy güncellemiyordu (2) Sync mevcut kaydı güncellerken hibrit kontrolü yoktu (3) Sync yeni kayıt eklerken hibrit kontrolü yoktu (4) UI'da `"hibrit"` strategy tanınmıyordu |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `engine/h_engine.py` | `transfer_to_hybrid()`: DB insert sonrası `trades.strategy='hibrit'` güncelleme eklendi |
+| `engine/database.py` | `sync_mt5_trades()` path 1 (mevcut kayıt): `hybrid_positions` kontrolü, eşleşirse `strategy='hibrit'` |
+| `engine/database.py` | `sync_mt5_trades()` path 3 (yeni kayıt): `hybrid_positions` kontrolü, eşleşirse `strategy='hibrit'` |
+| `desktop/src/components/TradeHistory.jsx` | `isHybrid` kontrolüne `stratLower === 'hibrit'` eklendi |
+
+### Eklenen
+- Hibrit pozisyon tespiti (3 noktada: devir, sync mevcut, sync yeni)
+- UI'da `"hibrit"` strategy tanıma
+
+### Çıkartılan
+- (yok)
+
+### Geri Alma Planı
+- `h_engine.py`: `transfer_to_hybrid()`'deki strategy UPDATE bloğu kaldırılır
+- `database.py`: `sync_mt5_trades()`'deki hibrit kontrol blokları kaldırılır, eski UPDATE/INSERT'e dönülür
+- `TradeHistory.jsx`: `isHybrid` koşulundan `stratLower === 'hibrit'` kaldırılır

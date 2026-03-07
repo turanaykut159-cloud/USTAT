@@ -434,7 +434,7 @@ export default function TradeHistory() {
                 const isHighlighted = highlight === t.id;
                 const stratLower = (t.strategy || '').toLowerCase();
                 const exitReason = (t.exit_reason || '').toUpperCase();
-                const isHybrid = exitReason.includes('SOFTWARE') || stratLower === 'hybrid';
+                const isHybrid = exitReason.includes('SOFTWARE') || stratLower === 'hybrid' || stratLower === 'hibrit';
                 const isAuto = !isHybrid && stratLower !== '' && stratLower !== 'manual' && stratLower !== 'bilinmiyor';
                 const turLabel = isHybrid ? 'Hibrit' : isAuto ? 'Otomatik' : 'Manuel';
                 const turClass = isHybrid ? 'hybrid' : isAuto ? 'auto' : 'manual';
