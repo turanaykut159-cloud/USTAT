@@ -1,7 +1,7 @@
 # Session Raporu — 2026-03-08
 
 ## Konu
-Ekran-ekran canlı dashboard incelemesi + tespit edilen sorunların düzeltilmesi + kod merkezileştirmesi
+Ekran-ekran canlı dashboard incelemesi + kod merkezileştirmesi + v5.1 → v5.2 versiyon yükseltmesi
 
 ## Yapılanlar
 
@@ -33,20 +33,36 @@ Tüm dashboard ekranları ekran görüntüleri ile tek tek incelendi:
 - `api/constants.py` oluşturuldu — `STATS_BASELINE = "2026-02-01"`
 - `performance.py` ve `trades.py` hardcoded tarihleri import ile değiştirildi
 
-### 4. İstatistikler
-- 16 dosya değişti: +156 / -283 satır
-- 2 yeni dosya oluşturuldu
-- Net ~127 satır azalma (tekrar eliminasyonu)
+### 4. Versiyon Yükseltme: v5.1 → v5.2
 
-## Versiyon Kontrolü
-- 326 değişiklik / 39.734 toplam satır = %0,82 → v5.1 korunuyor
+**Neden:** v5.1 commit'inden (52299aa, 2026-03-05) bu yana kümülatif değişiklik 14.817 satır / 36.000 baz = %41,2 — eşik %10.
 
-## Commit
-- `77f6c62` — `refactor: merkezi formatters + ekran inceleme düzeltmeleri`
-- Branch: `claude/ecstatic-mayer`
-- Push: Başarılı
-- PR: `gh auth` eksik — manuel oluşturulması gerekiyor
+**Güncellenen 33 dosya:**
+- Aktif sabitler: `package.json`, `Settings.jsx`, `api/server.py`, `engine/__init__.py`, `api/schemas.py`, `config/default.json`
+- UI görünür: `main.js` (APP_TITLE + splash), `index.html`, `LockScreen.jsx`, `TopBar.jsx`
+- Başlatıcılar: `start_ustat.py`, `start_ustat.bat`, `start_ustat.vbs`
+- JSDoc/Docstring: 14 bileşen + 6 altyapı dosyası
+
+**Doğrulama:** grep ile tüm kaynak dosyalar tarandı. Sadece 2 beklenen kalıntı:
+1. `api/schemas.py` — tarihsel yorum (`# Graduated lot (v5.1)`)
+2. `electron-builder` npm paket versiyonu (dış bağımlılık)
+
+### 5. İstatistikler
+- Merkezileştirme: 16 dosya, +156 / -283 satır (net ~127 satır azalma)
+- Versiyon yükseltme: 33 dosya, +67 / -41 satır
+
+## Commitler
+1. `77f6c62` — `refactor: merkezi formatters + ekran inceleme düzeltmeleri`
+2. `ff963d7` — `docs: session raporu 2026-03-08`
+3. `cd7eda9` — `feat: versiyon yükseltme v5.1 → v5.2`
+
+## Branch
+- `claude/ecstatic-mayer` — push başarılı
+
+## Gelişim Tarihçesi
+- #29 — Merkezi formatters + ekran inceleme düzeltmeleri
+- #30 — Versiyon yükseltme v5.1 → v5.2
 
 ## Notlar
-- MEMORY.md güncellendi: merkezileştirme kararları + versiyon güncelleme checklistine JSDoc ve Settings.jsx VERSION eklendi
-- Gelişim tarihçesi #29 yazıldı
+- MEMORY.md güncellendi: v5.2, merkezileştirme kararları, versiyon güncelleme checklist'i genişletildi
+- `islem_sonu_yapilacaklar.md` dosyası mevcut değil — MEMORY.md fallback adımları kullanıldı
