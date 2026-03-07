@@ -205,6 +205,7 @@ export default function OpenPositions() {
                 <th>Swap</th>
                 <th>Floating K/Z</th>
                 <th>Tür</th>
+                <th>Risk</th>
                 <th>Yönetim</th>
                 <th>Süre</th>
                 <th>Rejim</th>
@@ -252,6 +253,19 @@ export default function OpenPositions() {
                       <span className={`op-tur-badge op-tur--${turClass}`}>
                         {turLabel}
                       </span>
+                    </td>
+                    <td className="op-risk-cell">
+                      {turLabel === 'Manuel' && pos.risk_score?.overall ? (
+                        <span
+                          className={`op-risk-badge op-risk--${pos.risk_score.overall}`}
+                          title={`SL: ${pos.risk_score.sl_risk} | Rejim: ${pos.risk_score.regime_risk} | K/Z: ${pos.risk_score.pnl_risk} | Sistem: ${pos.risk_score.system_risk}`}
+                        >
+                          {pos.risk_score.overall === 'green' ? 'DUSUK' : pos.risk_score.overall === 'yellow' ? 'ORTA' : 'YUKSEK'}
+                          <span className="op-risk-score">{pos.risk_score.score}</span>
+                        </span>
+                      ) : (
+                        <span className="text-dim">—</span>
+                      )}
                     </td>
                     <td className="op-mgmt-cell">
                       {pos.tp1_hit && <span className="op-mgmt-badge op-mgmt--tp1" title="TP1 yarı kapanış yapıldı">TP1</span>}
@@ -318,7 +332,7 @@ export default function OpenPositions() {
                 <td className={`mono ${pnlClass(totalFloating)}`}>
                   <b>{formatMoney(totalFloating)}</b>
                 </td>
-                <td colSpan={5}></td>
+                <td colSpan={6}></td>
               </tr>
             </tfoot>
           </table>

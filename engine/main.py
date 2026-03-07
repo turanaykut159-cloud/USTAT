@@ -107,6 +107,20 @@ class Engine:
         # OĞUL'a h_engine referansı ver (netting koruması)
         self.ogul.h_engine = self.h_engine
 
+        # ManuelMotor (Bağımsız Manuel İşlem Motoru — v14.0)
+        from engine.manuel_motor import ManuelMotor
+        self.manuel_motor = ManuelMotor(
+            config=self.config,
+            mt5=self.mt5,
+            db=self.db,
+            baba=self.baba,
+            risk_params=self.risk_params,
+        )
+        # Cross-motor referansları
+        self.manuel_motor.ogul = self.ogul
+        self.manuel_motor.h_engine = self.h_engine
+        self.ogul.manuel_motor = self.manuel_motor
+
         # ── Sistem Sağlığı ─────────────────────────────────────────
         self.health = HealthCollector()
         self.mt5._health = self.health
@@ -385,6 +399,18 @@ class Engine:
             )
         t8 = _pc()
 
+        # ── 6.7. ManuelMotor — Pozisyon Senkronizasyonu ─────────
+        try:
+            self.manuel_motor.sync_positions()
+        except Exception as exc:
+            logger.error(f"ManuelMotor sync hatası: {exc}")
+            self._log_event_safe(
+                "MANUEL_MOTOR_ERROR",
+                f"ManuelMotor sync hatası: {exc}",
+                "ERROR",
+            )
+        t8b = _pc()
+
         # ── 7. ÜSTAT Brain — Raporlama + Strateji Havuzu ─────────
         try:
             self.ustat.run_cycle(self.baba, self.ogul)
@@ -410,7 +436,8 @@ class Engine:
             top5_ms=(t6 - t5) * 1000,
             ogul_signals_ms=(t7 - t6) * 1000,
             h_engine_ms=(t8 - t7) * 1000,
-            ustat_brain_ms=(t9 - t8) * 1000,
+            manuel_sync_ms=(t8b - t8) * 1000,
+            ustat_brain_ms=(t9 - t8b) * 1000,
             log_summary_ms=(t10 - t9) * 1000,
             overrun=total_ms > (CYCLE_INTERVAL * 1000),
         ))
@@ -763,6 +790,13 @@ class Engine:
             logger.info(f"H-Engine hibrit pozisyonlar geri yüklendi: {hybrid_count} adet")
         except Exception as exc:
             logger.error(f"H-Engine restore hatası: {exc}")
+
+        try:
+            self.manuel_motor.restore_active_trades()
+            manual_count = len(self.manuel_motor.active_trades)
+            logger.info(f"ManuelMotor aktif işlemler geri yüklendi: {manual_count} adet")
+        except Exception as exc:
+            logger.error(f"ManuelMotor restore hatası: {exc}")
 
 
 # ═════════════════════════════════════════════════════════════════════
