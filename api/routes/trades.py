@@ -84,6 +84,7 @@ def _duration_minutes(entry: str | None, exit_: str | None) -> float | None:
 async def get_trades(
     symbol: str | None = Query(None, description="Kontrat filtresi"),
     strategy: str | None = Query(None, description="Strateji filtresi"),
+    since: str | None = Query(None, description="Başlangıç tarihi (YYYY-MM-DD)"),
     limit: int = Query(100, ge=1, le=1000, description="Maks kayıt"),
 ):
     """İşlem geçmişini filtreli olarak döndür. MT5'te değişim olduğunda anlık: önce son 3 gün sync."""
@@ -99,7 +100,7 @@ async def get_trades(
 
     rows = db.get_trades(
         symbol=symbol, strategy=strategy,
-        limit=limit,
+        since=since, limit=limit,
     )
     items = [_to_trade_item(r) for r in rows]
 

@@ -968,3 +968,11 @@ class HEngine:
             f"Hibrit pozisyon kapatıldı: ticket={hp.ticket} {hp.symbol} "
             f"neden={reason} pnl={pnl:.2f}"
         )
+
+        # ── Event bus — trade_closed bildirimi ────────────────────
+        from engine.event_bus import emit as _emit_event
+        _emit_event("trade_closed", {
+            "ticket": hp.ticket, "symbol": hp.symbol,
+            "direction": hp.direction, "pnl": pnl,
+            "exit_reason": reason, "source": "hybrid",
+        })

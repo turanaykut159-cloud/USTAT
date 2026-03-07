@@ -6,6 +6,10 @@ Her 2 saniyede bir push:
   - position: Açık pozisyonlar
   - status : Rejim / kill-switch durumu
 
+Event-driven:
+  - trade_closed   : İşlem kapandığında anında bildirim
+  - position_closed : Pozisyon kapanışı sync edildiğinde bildirim
+
 Bağlantı:
   ws://localhost:8000/ws/live
 """
@@ -29,14 +33,24 @@ router = APIRouter()
 _active_connections: list[WebSocket] = []
 
 PUSH_INTERVAL = 2.0  # saniye
+EVENT_DRAIN_INTERVAL = 1.0  # saniye — event bus kontrol sıklığı
+
+# Global event drain task referansı
+_event_drain_task: asyncio.Task | None = None
 
 
 @router.websocket("/ws/live")
 async def websocket_live(ws: WebSocket):
     """Canlı veri WebSocket endpoint'i."""
+    global _event_drain_task
+
     await ws.accept()
     _active_connections.append(ws)
     logger.info(f"WebSocket bağlantısı açıldı. Aktif: {len(_active_connections)}")
+
+    # İlk bağlantıda global event drain task'i başlat
+    if _event_drain_task is None or _event_drain_task.done():
+        _event_drain_task = asyncio.create_task(_event_drain_loop())
 
     try:
         # Arka plan push task'i
@@ -59,6 +73,27 @@ async def websocket_live(ws: WebSocket):
         if ws in _active_connections:
             _active_connections.remove(ws)
         logger.info(f"WebSocket bağlantısı kapandı. Aktif: {len(_active_connections)}")
+
+        # Son bağlantı kapandıysa drain task'i durdur
+        if not _active_connections and _event_drain_task and not _event_drain_task.done():
+            _event_drain_task.cancel()
+            _event_drain_task = None
+
+
+async def _event_drain_loop():
+    """Event bus'tan olayları drain edip tüm bağlantılara broadcast et."""
+    from engine import event_bus
+
+    while True:
+        try:
+            await asyncio.sleep(EVENT_DRAIN_INTERVAL)
+            events = event_bus.drain()
+            for ev in events:
+                await broadcast(ev)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning(f"Event drain hatası: {e}")
 
 
 async def _push_loop(ws: WebSocket):
@@ -266,7 +301,7 @@ async def broadcast(message: dict) -> None:
     if not _active_connections:
         return
 
-    text = json.dumps(message, default=str)
+    text = json.dumps([message], default=str)
     disconnected: list[WebSocket] = []
 
     for ws in _active_connections:

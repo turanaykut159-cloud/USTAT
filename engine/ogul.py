@@ -3305,6 +3305,14 @@ class Ogul:
             f"PnL={trade.pnl:.2f}"
         )
 
+        # ── Event bus — trade_closed bildirimi ────────────────────
+        from engine.event_bus import emit as _emit_event
+        _emit_event("trade_closed", {
+            "ticket": trade.ticket, "symbol": symbol,
+            "direction": trade.direction, "pnl": trade.pnl,
+            "exit_reason": exit_reason,
+        })
+
         # ── Ardışık zarar sayacı (Faz 6) ─────────────────────────
         today = datetime.now().date()
         if self._symbol_loss_date != today:

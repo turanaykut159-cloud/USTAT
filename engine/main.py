@@ -518,6 +518,10 @@ class Engine:
                     f"Kapanma sync: {len(resolved)} ticket çözüldü ({resolved}), "
                     f"DB'ye {added} yeni trade"
                 )
+                # Event bus — pozisyon kapanışı bildirimi
+                from engine.event_bus import emit as _emit_event
+                for ticket in resolved:
+                    _emit_event("position_closed", {"ticket": ticket})
 
             # Hâlâ çözülemeyenler: OUT deal bekleniyor (VİOP 21:35 uzlaşması)
             if self._pending_closure_tickets:

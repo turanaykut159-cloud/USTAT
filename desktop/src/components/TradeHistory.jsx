@@ -13,8 +13,8 @@
  * Client-side filtre: dönem, yön, sonuç — server-side: sembol
  */
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { getTrades, getTradeStats, getPerformance, approveTrade } from '../services/api';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { getTrades, getTradeStats, getPerformance, approveTrade, connectLiveWS } from '../services/api';
 
 // ── Sabitler ─────────────────────────────────────────────────────
 
@@ -171,7 +171,7 @@ export default function TradeHistory() {
     setFetchError(false);
     try {
       const [t, s, p] = await Promise.all([
-        getTrades({ limit: 1000 }),
+        getTrades({ since: '2026-02-01', limit: 1000 }),
         getTradeStats(1000),
         getPerformance(365),
       ]);
@@ -184,10 +184,24 @@ export default function TradeHistory() {
     }
   }, []);
 
+  // İlk yüklemede veri çek + WebSocket event-driven yenileme
+  const wsRef = useRef(null);
   useEffect(() => {
     fetchData();
-    const iv = setInterval(fetchData, 30_000); // 30sn auto-refresh
-    return () => clearInterval(iv);
+
+    // WebSocket bağlantısı: trade_closed/position_closed olayında yenile
+    const { ws, close } = connectLiveWS((messages) => {
+      const arr = Array.isArray(messages) ? messages : [messages];
+      for (const msg of arr) {
+        if (msg.type === 'trade_closed' || msg.type === 'position_closed') {
+          fetchData();
+          break;
+        }
+      }
+    });
+    wsRef.current = ws;
+
+    return () => close();
   }, [fetchData]);
 
   // ── Sembol listesi (unique) ──────────────────────────────────────

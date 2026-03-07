@@ -137,7 +137,19 @@ export default function Dashboard() {
   // Süre yenileme tetikleyici (30sn)
   const [, setTick] = useState(new Date());
 
-  // ── REST veri çekme (10sn) ───────────────────────────────────────
+  // ── Trade/Stats veri çekme (WS event-driven) ────────────────────
+  const fetchTradeData = useCallback(async () => {
+    const [s, p, t] = await Promise.all([
+      getTradeStats(),
+      getPerformance(30),
+      getTrades({ limit: 5 }),
+    ]);
+    setStats(s);
+    setPerf(p);
+    setRecentTrades(t.trades || []);
+  }, []);
+
+  // ── Durum/Pozisyon veri çekme (REST fallback, 30sn) ────────────
   const fetchAll = useCallback(async () => {
     const [s, p, t, st, acc, pos, hybrid] = await Promise.all([
       getTradeStats(),
@@ -161,7 +173,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchAll();
-    const iv = setInterval(fetchAll, 10000);
+    const iv = setInterval(fetchAll, 30000); // 30sn REST fallback (WS zaten anlık)
     return () => clearInterval(iv);
   }, [fetchAll]);
 
@@ -174,8 +186,8 @@ export default function Dashboard() {
   // ── WebSocket canlı veri ─────────────────────────────────────────
   useEffect(() => {
     const { close } = connectLiveWS((messages) => {
-      if (!Array.isArray(messages)) return;
-      for (const msg of messages) {
+      const arr = Array.isArray(messages) ? messages : [messages];
+      for (const msg of arr) {
         if (msg.type === 'equity') {
           setLiveEquity(msg);
         }
@@ -194,6 +206,9 @@ export default function Dashboard() {
           const tickets = new Set((msg.positions || []).map((hp) => hp.ticket));
           setHybridTickets(tickets);
         }
+        if (msg.type === 'trade_closed' || msg.type === 'position_closed') {
+          fetchTradeData();
+        }
       }
     });
 
@@ -201,7 +216,7 @@ export default function Dashboard() {
     return () => {
       if (wsRef.current) wsRef.current();
     };
-  }, []);
+  }, [fetchTradeData]);
 
   // ── İşlemi Kapat ─────────────────────────────────────────────────
   const handleClosePosition = useCallback(async (ticket) => {

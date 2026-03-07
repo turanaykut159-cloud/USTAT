@@ -647,3 +647,46 @@ Bu düzeltmeler native SLTP çalışmadığı için sorunu çözmedi ama kod kal
 - `h_engine.py`: `transfer_to_hybrid()`'deki strategy UPDATE bloğu kaldırılır
 - `database.py`: `sync_mt5_trades()`'deki hibrit kontrol blokları kaldırılır, eski UPDATE/INSERT'e dönülür
 - `TradeHistory.jsx`: `isHybrid` koşulundan `stratLower === 'hibrit'` kaldırılır
+
+---
+
+## #22 — Event-Driven İşlem Geçmişi + Tarih Filtresi (2026-03-07)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-07 |
+| **Neden** | İşlem Geçmişi sayfası 30sn'de bir 3 API çağrısı yapıyordu (trades + stats + performance). Kapanmış işlemler değişmediğinden gereksiz yüktü. Ayrıca işlem geçmişi 01.02.2026'dan başlamalıydı. Dashboard da 10sn'de bir 7 API çağrısı yapıyordu. |
+| **Kök Neden** | Polling-tabanlı mimari: veri değişip değişmediğine bakılmadan sabit aralıklarla API çağrılıyordu. WebSocket altyapısı mevcuttu ama sadece equity/position/status için kullanılıyordu. |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `engine/event_bus.py` | **YENİ** — Thread-safe event bus: `on()`, `off()`, `emit()`, `drain()` fonksiyonları. Engine thread'den emit, async WS thread'den drain. |
+| `engine/ogul.py` | `_handle_closed_trade()` sonuna `event_bus.emit("trade_closed", {...})` eklendi |
+| `engine/h_engine.py` | `_finalize_close()` sonuna `event_bus.emit("trade_closed", {..., source: "hybrid"})` eklendi |
+| `engine/main.py` | `_sync_closed_positions()`: resolved ticket'lar için `event_bus.emit("position_closed", {...})` eklendi |
+| `api/routes/live.py` | Global `_event_drain_loop` task: 1sn'de bir event bus drain → tüm WS bağlantılarına broadcast. `broadcast()` artık `[msg]` formatında gönderir (client uyumu). |
+| `api/routes/trades.py` | `get_trades()` endpoint'ine `since` query parametresi eklendi (YYYY-MM-DD) |
+| `desktop/src/components/TradeHistory.jsx` | 30sn polling kaldırıldı → WS `trade_closed`/`position_closed` event-driven. `since=2026-02-01` varsayılan filtre. `connectLiveWS` ile WS dinleme. |
+| `desktop/src/components/Dashboard.jsx` | REST polling 10sn → 30sn'ye düşürüldü. WS handler'a `trade_closed`/`position_closed` dinleme eklendi → trades/stats anında yenilenir. |
+
+### Eklenen
+- `engine/event_bus.py` — Hafif event bus modülü
+- 3 emit noktası: ogul.py, h_engine.py, main.py
+- WS event drain loop (live.py)
+- Trades API `since` parametresi
+- TradeHistory WS event-driven yenileme
+- Dashboard WS trade event dinleme
+
+### Çıkartılan
+- TradeHistory 30sn `setInterval` polling
+- Dashboard 10sn polling (30sn'ye uzatıldı)
+
+### Geri Alma Planı
+- `event_bus.py` silinir
+- `ogul.py`, `h_engine.py`, `main.py`'deki emit satırları kaldırılır
+- `live.py`'deki `_event_drain_loop` ve global task yönetimi kaldırılır, eski `_push_loop` geri konulur
+- `trades.py`'den `since` parametresi kaldırılır
+- `TradeHistory.jsx`'e `setInterval(fetchData, 30_000)` geri eklenir, WS import/handler kaldırılır
+- `Dashboard.jsx`'de polling 10sn'ye döndürülür, WS'den `trade_closed` handler kaldırılır
