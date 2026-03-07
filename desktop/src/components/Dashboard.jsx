@@ -3,18 +3,22 @@
  *
  * Layout:
  *   Üst:    4 stat kartı (Günlük İşlem, Başarı Oranı, Net K/Z, Profit Factor)
- *   Orta:   Açık Pozisyonlar tablosu (tam genişlik)
+ *   Hesap:  Bakiye, Varlık, Teminat, Serbest Teminat, Floating K/Z, Günlük K/Z
+ *   Orta:   Açık Pozisyonlar — TAM ÖZELLİKLİ (Swap, Yönetim, Süre, Rejim, Hibrit)
  *   Alt:    Son 5 işlem tablosu (tam genişlik)
  *
  * Veri kaynakları:
- *   REST:  getTradeStats, getPerformance, getTrades, getStatus, getPositions (10sn poll)
- *   WS:    connectLiveWS → equity + status + position gerçek zamanlı güncelleme
+ *   REST:  getTradeStats, getPerformance, getTrades, getStatus, getPositions,
+ *          getAccount, getHybridStatus (10sn poll)
+ *   WS:    connectLiveWS → equity + status + position + hybrid gerçek zamanlı
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   getTradeStats, getPerformance, getTrades, getStatus,
   getAccount, getPositions, closePosition, connectLiveWS,
+  getHybridStatus, checkHybridTransfer, transferToHybrid,
 } from '../services/api';
 
 // ── Yardımcılar ──────────────────────────────────────────────────
@@ -71,11 +75,40 @@ function formatPrice(val) {
   });
 }
 
+/** Açılış zamanından itibaren geçen süre */
+function elapsed(openTime) {
+  if (!openTime) return '—';
+  try {
+    const ms = Date.now() - new Date(openTime).getTime();
+    if (isNaN(ms) || ms < 0) return '—';
+    const totalMin = Math.floor(ms / 60000);
+    if (totalMin < 60) return `${totalMin}dk`;
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
+    if (h < 24) return `${h}sa ${m}dk`;
+    const d = Math.floor(h / 24);
+    return `${d}g ${h % 24}sa`;
+  } catch {
+    return '—';
+  }
+}
+
+/** Teminat kullanım oranı (%) */
+function marginUsagePct(margin, equity) {
+  if (!margin || !equity || equity <= 0) return 0;
+  return (margin / equity) * 100;
+}
+
+// Bilinen otomatik stratejiler
+const KNOWN_AUTO_STRATEGIES = ['trend_follow', 'mean_reversion', 'breakout'];
+
 // ═══════════════════════════════════════════════════════════════════
 //  DASHBOARD
 // ═══════════════════════════════════════════════════════════════════
 
 export default function Dashboard() {
+  const navigate = useNavigate();
+
   // ── State ────────────────────────────────────────────────────────
   const [stats, setStats] = useState({
     total_trades: 0, win_rate: 0, total_pnl: 0,
@@ -88,24 +121,32 @@ export default function Dashboard() {
     regime: 'TREND', regime_confidence: 0,
     engine_running: false, daily_trade_count: 0,
   });
-  const [account, setAccount] = useState({ equity: 0 });
+  const [account, setAccount] = useState({
+    balance: 0, equity: 0, margin: 0, free_margin: 0, floating_pnl: 0,
+  });
   const [livePositions, setLivePositions] = useState([]);
   const [initialLoading, setInitialLoading] = useState(true);
   const [closingTicket, setClosingTicket] = useState(null);
+  const [hybridTickets, setHybridTickets] = useState(new Set());
+  const [transferringTicket, setTransferringTicket] = useState(null);
 
   // WebSocket kaynak canlı veri
   const [liveEquity, setLiveEquity] = useState(null);
   const wsRef = useRef(null);
 
+  // Süre yenileme tetikleyici (30sn)
+  const [, setTick] = useState(new Date());
+
   // ── REST veri çekme (10sn) ───────────────────────────────────────
   const fetchAll = useCallback(async () => {
-    const [s, p, t, st, acc, pos] = await Promise.all([
+    const [s, p, t, st, acc, pos, hybrid] = await Promise.all([
       getTradeStats(),
       getPerformance(30),
       getTrades({ limit: 5 }),
       getStatus(),
       getAccount(),
       getPositions(),
+      getHybridStatus(),
     ]);
     setStats(s);
     setPerf(p);
@@ -114,6 +155,8 @@ export default function Dashboard() {
     setAccount(acc);
     setLivePositions(pos.positions || []);
     setInitialLoading(false);
+    const tickets = (hybrid.positions || []).map((hp) => hp.ticket).filter(Boolean);
+    setHybridTickets(new Set(tickets));
   }, []);
 
   useEffect(() => {
@@ -121,6 +164,12 @@ export default function Dashboard() {
     const iv = setInterval(fetchAll, 10000);
     return () => clearInterval(iv);
   }, [fetchAll]);
+
+  // ── Süre yenileme (30sn) ─────────────────────────────────────────
+  useEffect(() => {
+    const iv = setInterval(() => setTick(new Date()), 30000);
+    return () => clearInterval(iv);
+  }, []);
 
   // ── WebSocket canlı veri ─────────────────────────────────────────
   useEffect(() => {
@@ -141,6 +190,10 @@ export default function Dashboard() {
         if (msg.type === 'position') {
           setLivePositions(msg.positions || []);
         }
+        if (msg.type === 'hybrid') {
+          const tickets = new Set((msg.positions || []).map((hp) => hp.ticket));
+          setHybridTickets(tickets);
+        }
       }
     });
 
@@ -150,7 +203,7 @@ export default function Dashboard() {
     };
   }, []);
 
-  // ── İşlemi Kapat (sadece manuel, Dashboard tablosu) ─────────────────
+  // ── İşlemi Kapat ─────────────────────────────────────────────────
   const handleClosePosition = useCallback(async (ticket) => {
     if (closingTicket != null) return;
     setClosingTicket(ticket);
@@ -163,6 +216,37 @@ export default function Dashboard() {
       setClosingTicket(null);
     }
   }, [closingTicket, fetchAll]);
+
+  // ── Hibrite Devret ────────────────────────────────────────────────
+  const handleTransferToHybrid = useCallback(async (ticket) => {
+    if (transferringTicket != null) return;
+    setTransferringTicket(ticket);
+    try {
+      const check = await checkHybridTransfer(ticket);
+      if (!check.can_transfer) {
+        window.alert('Hibrite devir yapılamaz: ' + (check.reason || 'Bilinmeyen hata'));
+        return;
+      }
+      const result = await transferToHybrid(ticket);
+      if (result.success) {
+        setHybridTickets((prev) => new Set([...prev, ticket]));
+      } else {
+        window.alert('Devir hatası: ' + (result.message || 'Bilinmeyen hata'));
+      }
+    } catch (err) {
+      window.alert('Devir hatası: ' + (err?.message ?? String(err)));
+    } finally {
+      setTransferringTicket(null);
+    }
+  }, [transferringTicket]);
+
+  // ── Hesaplamalar ─────────────────────────────────────────────────
+  const regime = status.regime || 'TREND';
+  const totalFloating = (livePositions || []).reduce((s, p) => s + (p.pnl || 0), 0);
+  const totalLot = (livePositions || []).reduce((s, p) => s + (p.volume || 0), 0);
+  const totalSwap = (livePositions || []).reduce((s, p) => s + (p.swap || 0), 0);
+  const eq = liveEquity?.equity ?? account.equity;
+  const marginPct = marginUsagePct(account.margin, eq);
 
   if (initialLoading) {
     return (
@@ -219,6 +303,14 @@ export default function Dashboard() {
           value={formatMoney(liveEquity?.equity ?? account.equity)}
         />
         <AccountItem
+          label="Teminat"
+          value={formatMoney(account.margin)}
+        />
+        <AccountItem
+          label="Serbest Teminat"
+          value={formatMoney(account.free_margin)}
+        />
+        <AccountItem
           label="Floating K/Z"
           value={formatMoney(liveEquity?.floating_pnl ?? account.floating_pnl)}
           cls={pnlClass(liveEquity?.floating_pnl ?? account.floating_pnl)}
@@ -230,14 +322,21 @@ export default function Dashboard() {
         />
       </div>
 
-      {/* ═══ ORTA: Açık Pozisyonlar ═════════════════════════════════ */}
+      {/* ═══ ORTA: Açık Pozisyonlar (TAM ÖZELLİKLİ) ═══════════════ */}
       <div className="dash-positions-row">
         <div className="dash-card dash-card--full">
           <div className="dash-card-header">
             <h3>Açık Pozisyonlar</h3>
-            <span className="dash-card-badge">
-              {(livePositions || []).length} / 5
-            </span>
+            <div className="dash-card-header-right">
+              <span className="dash-card-badge">
+                {(livePositions || []).length} / 5
+              </span>
+              {account.margin > 0 && (
+                <span className={`dash-margin-badge ${marginPct > 80 ? 'danger' : marginPct > 50 ? 'warn' : ''}`}>
+                  Teminat: %{marginPct.toFixed(1)}
+                </span>
+              )}
+            </div>
           </div>
           {(livePositions || []).length === 0 ? (
             <div className="dash-positions-empty">
@@ -254,19 +353,37 @@ export default function Dashboard() {
                   <th>Anlık Fiy.</th>
                   <th>SL</th>
                   <th>TP</th>
+                  <th>Swap</th>
                   <th>K/Z</th>
                   <th>Tür</th>
+                  <th>Yönetim</th>
+                  <th>Süre</th>
+                  <th>Rejim</th>
                   <th>İşlem</th>
                 </tr>
               </thead>
               <tbody>
                 {(livePositions || []).map((pos) => {
                   const pnl = pos.pnl || 0;
-                  const isManual = (pos.strategy || '').toLowerCase() === 'manual';
-                  const turLabel = isManual ? 'Manuel' : (pos.strategy ? 'Otomatik' : '—');
+                  const rowCls = pnl > 0 ? 'op-row-profit' : pnl < 0 ? 'op-row-loss' : '';
+                  const isHybrid = hybridTickets.has(pos.ticket);
+
+                  // Tür: API'den gelen tur kullan; yoksa fallback
+                  const apiTur = (pos.tur || '').trim();
+                  let turLabel = apiTur;
+                  let turClass = 'manual';
+                  if (apiTur === 'Hibrit' || apiTur === 'Otomatik' || apiTur === 'Manuel') {
+                    turClass = apiTur === 'Hibrit' ? 'hybrid' : apiTur === 'Otomatik' ? 'auto' : 'manual';
+                  } else {
+                    const stratLower = (pos.strategy || '').toLowerCase().trim();
+                    const isAuto = KNOWN_AUTO_STRATEGIES.includes(stratLower);
+                    turLabel = isHybrid ? 'Hibrit' : isAuto ? 'Otomatik' : 'Manuel';
+                    turClass = isHybrid ? 'hybrid' : isAuto ? 'auto' : 'manual';
+                  }
+
                   return (
-                    <tr key={pos.ticket || pos.symbol}>
-                      <td className="mono">{pos.symbol}</td>
+                    <tr key={pos.ticket || pos.symbol} className={rowCls}>
+                      <td className="mono op-symbol">{pos.symbol}</td>
                       <td>
                         <span className={`dir-badge dir-badge--${(pos.direction || '').toLowerCase()}`}>
                           {pos.direction}
@@ -277,24 +394,62 @@ export default function Dashboard() {
                       <td className="mono">{formatPrice(pos.current_price)}</td>
                       <td className="mono text-dim">{formatPrice(pos.sl)}</td>
                       <td className="mono text-dim">{formatPrice(pos.tp)}</td>
-                      <td className={`mono ${pnl > 0 ? 'profit' : pnl < 0 ? 'loss' : ''}`}>
+                      <td className={`mono text-dim ${pnlClass(pos.swap || 0)}`}>
+                        {formatMoney(pos.swap || 0)}
+                      </td>
+                      <td className={`mono op-pnl-cell ${pnlClass(pnl)}`}>
                         <b>{formatMoney(pnl)}</b>
                       </td>
-                      <td>
-                        <span className={`op-tur-badge op-tur--${isManual ? 'manual' : 'auto'}`}>
+                      <td className="op-tur-cell">
+                        <span className={`op-tur-badge op-tur--${turClass}`}>
                           {turLabel}
                         </span>
                       </td>
+                      <td className="op-mgmt-cell">
+                        {pos.tp1_hit && <span className="op-mgmt-badge op-mgmt--tp1" title="TP1 yarı kapanış yapıldı">TP1</span>}
+                        {pos.breakeven_hit && <span className="op-mgmt-badge op-mgmt--be" title="Breakeven çekildi">BE</span>}
+                        {pos.cost_averaged && <span className="op-mgmt-badge op-mgmt--avg" title="Maliyetlendirme yapıldı">MA</span>}
+                        {(pos.voting_score != null && pos.voting_score > 0) && (
+                          <span className={`op-mgmt-badge op-mgmt--vote${pos.voting_score >= 3 ? '-strong' : '-weak'}`}
+                            title={`Oylama skoru: ${pos.voting_score}/4`}>
+                            {pos.voting_score}/4
+                          </span>
+                        )}
+                      </td>
+                      <td className="text-dim">{elapsed(pos.open_time)}</td>
                       <td>
-                        {isManual && (
+                        <span className={`op-regime-tag op-regime--${(regime || '').toLowerCase()}`}>
+                          {regime}
+                        </span>
+                      </td>
+                      <td className="op-action-cell">
+                        <button
+                          type="button"
+                          className="op-close-btn"
+                          onClick={() => handleClosePosition(pos.ticket)}
+                          disabled={closingTicket === pos.ticket}
+                          title="Bu pozisyonu kapat"
+                        >
+                          {closingTicket === pos.ticket ? 'Kapatılıyor...' : 'İşlemi Kapat'}
+                        </button>
+                        {isHybrid ? (
                           <button
                             type="button"
-                            className="op-close-btn"
-                            onClick={() => handleClosePosition(pos.ticket)}
-                            disabled={closingTicket === pos.ticket}
-                            title="Bu pozisyonu kapat"
+                            className="op-hybrid-link-btn"
+                            onClick={() => navigate('/hybrid')}
+                            title="Hibrit panelinde yönetiliyor — tıklayınca Hibrit İşlem Paneline gider"
                           >
-                            {closingTicket === pos.ticket ? 'Kapatılıyor...' : 'İşlemi Kapat'}
+                            Hibritte
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="op-hybrid-btn"
+                            onClick={() => handleTransferToHybrid(pos.ticket)}
+                            disabled={transferringTicket === pos.ticket}
+                            title="Robot yönetimine devret"
+                          >
+                            {transferringTicket === pos.ticket ? 'Devrediliyor...' : 'Hibrite Devret'}
                           </button>
                         )}
                       </td>
@@ -303,16 +458,17 @@ export default function Dashboard() {
                 })}
               </tbody>
               <tfoot>
-                <tr className="dash-positions-footer">
+                <tr className="op-footer-row">
                   <td colSpan={2}><b>TOPLAM</b></td>
-                  <td className="mono">
-                    <b>{(livePositions || []).reduce((s, p) => s + (p.volume || 0), 0).toFixed(2)}</b>
-                  </td>
+                  <td className="mono"><b>{totalLot.toFixed(2)}</b></td>
                   <td colSpan={4}></td>
-                  <td className={`mono ${(livePositions || []).reduce((s, p) => s + (p.pnl || 0), 0) >= 0 ? 'profit' : 'loss'}`}>
-                    <b>{formatMoney((livePositions || []).reduce((s, p) => s + (p.pnl || 0), 0))}</b>
+                  <td className="mono text-dim">
+                    {formatMoney(totalSwap)}
                   </td>
-                  <td colSpan={2}></td>
+                  <td className={`mono ${pnlClass(totalFloating)}`}>
+                    <b>{formatMoney(totalFloating)}</b>
+                  </td>
+                  <td colSpan={5}></td>
                 </tr>
               </tfoot>
             </table>
@@ -366,7 +522,7 @@ export default function Dashboard() {
 
 
 // ═══════════════════════════════════════════════════════════════════
-//  STAT CARD ALT BİLEŞENİ
+//  ALT BİLEŞENLER
 // ═══════════════════════════════════════════════════════════════════
 
 function AccountItem({ label, value, cls }) {

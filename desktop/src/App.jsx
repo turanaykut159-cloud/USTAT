@@ -12,7 +12,6 @@ import SideNav from './components/SideNav';
 import LockScreen from './components/LockScreen';
 import Dashboard from './components/Dashboard';
 import TradeHistory from './components/TradeHistory';
-import OpenPositions from './components/OpenPositions';
 import Performance from './components/Performance';
 import RiskManagement from './components/RiskManagement';
 import ManualTrade from './components/ManualTrade';
@@ -49,7 +48,6 @@ export default function App() {
               <Route path="/hybrid" element={<HybridTrade />} />
               <Route path="/auto" element={<AutoTrading />} />
               <Route path="/trades" element={<TradeHistory />} />
-              <Route path="/positions" element={<OpenPositions />} />
               <Route path="/performance" element={<Performance />} />
               <Route path="/risk" element={<RiskManagement />} />
               <Route path="/health" element={<SystemHealth />} />

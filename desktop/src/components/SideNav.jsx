@@ -16,7 +16,6 @@ const NAV_ITEMS = [
   { path: '/hybrid',      label: 'Hibrit İşlem Paneli',  icon: '🔀' },
   { path: '/auto',        label: 'Otomatik İşlem Paneli', icon: '🤖' },
   { path: '/trades',      label: 'İşlem Geçmişi',     icon: '📋' },
-  { path: '/positions',   label: 'Açık Pozisyonlar',   icon: '📈' },
   { path: '/performance', label: 'Üstat & Performans', icon: '🏆' },
   { path: '/risk',        label: 'Risk Yönetimi',      icon: '🛡️' },
   { path: '/health',      label: 'Sistem Sağlığı',     icon: '🩺' },
