@@ -531,7 +531,44 @@ Bu düzeltmeler native SLTP çalışmadığı için sorunu çözmedi ama kod kal
 
 ---
 
-## #18 — Peak Equity Doğrulama Eşiği Düzeltmesi (2026-03-07)
+## #18 — Açık Pozisyonlar Dashboard'a Birleştirilmesi (2026-03-07)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-07 |
+| **Neden** | Dashboard zaten "Açık Pozisyonlar" kartı içeriyordu. Ayrı bir "Açık Pozisyonlar" sayfası gereksiz tekrara neden oluyordu. Kullanıcı tek ekrandan tüm pozisyon yönetimini istedi. |
+| **Kök Neden** | Mimari: Aynı veri iki farklı sayfada gösteriliyordu. OpenPositions sayfasında ekstra özellikler (Swap, Yönetim, Süre, Rejim, Hibrit Devir) Dashboard'da eksikti. |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `desktop/src/components/Dashboard.jsx` | Tam özellikli pozisyon tablosu: Swap, Yönetim (TP1/BE/MA/Oylama), Süre, Rejim kolonları eklendi. Hibrit devir butonu eklendi. Tür sınıflandırması API `tur` alanı öncelikli. Hesap şeridi 6 kolona genişletildi (Teminat, Serbest Teminat eklendi). Teminat kullanım badge'i eklendi. `getHybridStatus`, `checkHybridTransfer`, `transferToHybrid` API çağrıları, `useNavigate`, `hybridTickets` state, `elapsed()`, `marginUsagePct()` eklendi. |
+| `desktop/src/components/SideNav.jsx` | `/positions` (Açık Pozisyonlar) nav öğesi kaldırıldı. |
+| `desktop/src/App.jsx` | `OpenPositions` import ve `/positions` route kaldırıldı. |
+| `desktop/src/styles/theme.css` | `.dash-account-strip` → 6 kolon. `.dash-card-header-right`, `.dash-margin-badge` stilleri eklendi. |
+
+### Eklenen
+- Dashboard'a: Swap, Yönetim, Süre, Rejim kolonları
+- Dashboard'a: "Hibrite Devret" / "Hibritte" butonları
+- Dashboard'a: Teminat kullanım yüzdesi badge
+- Hesap şeridine: Teminat, Serbest Teminat alanları
+- `elapsed()`, `marginUsagePct()` yardımcı fonksiyonlar
+- `.dash-card-header-right`, `.dash-margin-badge` CSS sınıfları
+
+### Çıkartılan
+- Sidebar'dan: "Açık Pozisyonlar" menü öğesi
+- App.jsx'ten: `/positions` route
+- `OpenPositions.jsx` dosyası artık kullanılmıyor (referans amaçlı korundu)
+
+### Geri Alma Planı
+- `SideNav.jsx`'e `/positions` nav öğesi geri eklenir
+- `App.jsx`'e `OpenPositions` import + route geri eklenir
+- `Dashboard.jsx` git history'den eski versiyona dönülür
+
+---
+
+## #19 — Peak Equity Doğrulama Eşiği Düzeltmesi (2026-03-07)
 
 | Alan | Detay |
 |------|-------|
@@ -553,3 +590,60 @@ Bu düzeltmeler native SLTP çalışmadığı için sorunu çözmedi ama kod kal
 
 ### Geri Alma Planı
 - `engine/data_pipeline.py` satır 632: koşul `stored_peak > max_eq` → `stored_peak > max_eq * 1.5` geri çevrilir
+
+---
+
+## #20 — İşlem Geçmişi Baseline Filtresini Kaldır (2026-03-07)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-07 |
+| **Neden** | `RISK_BASELINE_DATE` trades API'sinde de filtre olarak kullanılıyordu. Baseline güncellenince işlem geçmişi boş görünüyordu. Baseline sadece risk hesaplamalarını etkilemeli. |
+| **Kök Neden** | `trades.py` endpoint'leri `since=RISK_BASELINE_DATE` parametresiyle veritabanı sorgusu yapıyordu — işlem gösterimi risk tarihine bağlanmıştı. |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `api/routes/trades.py` | `get_trades()` ve `get_trade_stats()` sorgularından `since=RISK_BASELINE_DATE` kaldırıldı. `RISK_BASELINE_DATE` import'u kaldırıldı. |
+
+### Eklenen
+- (yok)
+
+### Çıkartılan
+- `trades.py`'den `RISK_BASELINE_DATE` import ve filtresi
+
+### Geri Alma Planı
+- `trades.py`'ye `from engine.baba import RISK_BASELINE_DATE` import'u geri eklenir
+- `get_trades` ve `get_trade_stats` sorgularına `since=RISK_BASELINE_DATE` parametresi geri eklenir
+
+---
+
+## #21 — Hibrit İşlem Türü Sınıflandırma (2026-03-07)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-07 |
+| **Neden** | Hibrit motora devredilen ve kapanan pozisyonlar İşlem Geçmişi'nde "Manuel" olarak görünüyordu. H-Engine `trades` tablosundaki `strategy` alanını hiç güncellemiyordu. MT5 sync tüm işlemleri "manual" olarak etiketliyordu. |
+| **Kök Neden** | 3 ayrı eksiklik: (1) `transfer_to_hybrid()` trades.strategy güncellemiyordu (2) Sync mevcut kaydı güncellerken hibrit kontrolü yoktu (3) Sync yeni kayıt eklerken hibrit kontrolü yoktu (4) UI'da `"hibrit"` strategy tanınmıyordu |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `engine/h_engine.py` | `transfer_to_hybrid()`: DB insert sonrası `trades.strategy='hibrit'` güncelleme eklendi |
+| `engine/database.py` | `sync_mt5_trades()` path 1 (mevcut kayıt): `hybrid_positions` kontrolü, eşleşirse `strategy='hibrit'` |
+| `engine/database.py` | `sync_mt5_trades()` path 3 (yeni kayıt): `hybrid_positions` kontrolü, eşleşirse `strategy='hibrit'` |
+| `desktop/src/components/TradeHistory.jsx` | `isHybrid` kontrolüne `stratLower === 'hibrit'` eklendi |
+
+### Eklenen
+- Hibrit pozisyon tespiti (3 noktada: devir, sync mevcut, sync yeni)
+- UI'da `"hibrit"` strategy tanıma
+
+### Çıkartılan
+- (yok)
+
+### Geri Alma Planı
+- `h_engine.py`: `transfer_to_hybrid()`'deki strategy UPDATE bloğu kaldırılır
+- `database.py`: `sync_mt5_trades()`'deki hibrit kontrol blokları kaldırılır, eski UPDATE/INSERT'e dönülür
+- `TradeHistory.jsx`: `isHybrid` koşulundan `stratLower === 'hibrit'` kaldırılır

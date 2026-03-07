@@ -531,10 +531,17 @@ class Database:
                     (pos_id,),
                 )
                 if existing:
+                    # Hibrit pozisyon kontrolü — strategy düzelt
+                    hp_row = self._execute(
+                        "SELECT 1 FROM hybrid_positions WHERE ticket=?",
+                        (pos_id,),
+                    ).fetchone()
+                    strategy_update = ", strategy='hibrit'" if hp_row else ""
                     # MT5 verisiyle commission/swap/pnl güncelle (eksikse veya her zaman)
                     self._execute(
-                        """UPDATE trades SET pnl=?, commission=?, swap=?,
+                        f"""UPDATE trades SET pnl=?, commission=?, swap=?,
                            exit_time=COALESCE(exit_time, ?), exit_price=COALESCE(exit_price, ?)
+                           {strategy_update}
                            WHERE id=?""",
                         (
                             t.get("pnl"), t.get("commission"), t.get("swap"),
@@ -602,7 +609,15 @@ class Database:
                     f"→ mt5_position_id={pos_id}"
                 )
             else:
-                # 3) Yeni kayıt ekle
+                # 3) Yeni kayıt ekle — hibrit pozisyon kontrolü
+                strategy = t.get("strategy", "manual")
+                if pos_id:
+                    hp_row = self._execute(
+                        "SELECT 1 FROM hybrid_positions WHERE ticket=?",
+                        (pos_id,),
+                    ).fetchone()
+                    if hp_row:
+                        strategy = "hibrit"
                 self._execute(
                     """INSERT INTO trades
                        (strategy, symbol, direction, entry_time, exit_time,
@@ -611,7 +626,7 @@ class Database:
                         mt5_position_id)
                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (
-                        t.get("strategy", "manual"),
+                        strategy,
                         t["symbol"], t["direction"],
                         t.get("entry_time"), t.get("exit_time"),
                         t.get("entry_price"), t.get("exit_price"),
