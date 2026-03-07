@@ -17,6 +17,7 @@ import Performance from './components/Performance';
 import RiskManagement from './components/RiskManagement';
 import ManualTrade from './components/ManualTrade';
 import HybridTrade from './components/HybridTrade';
+import AutoTrading from './components/AutoTrading';
 import SystemHealth from './components/SystemHealth';
 import Settings from './components/Settings';
 
@@ -46,6 +47,7 @@ export default function App() {
               <Route path="/" element={<Dashboard />} />
               <Route path="/manual" element={<ManualTrade />} />
               <Route path="/hybrid" element={<HybridTrade />} />
+              <Route path="/auto" element={<AutoTrading />} />
               <Route path="/trades" element={<TradeHistory />} />
               <Route path="/positions" element={<OpenPositions />} />
               <Route path="/performance" element={<Performance />} />

@@ -440,3 +440,66 @@ Bu düzeltmeler native SLTP çalışmadığı için sorunu çözmedi ama kod kal
 - `health.py` silinemese bile `HealthCollector` sadece `record_*` çağrılmazsa boş deque tutar
 - `_health = None` default olduğu için MT5Bridge standalone kullanımda sorun çıkmaz
 - Desktop sayfası kaldırmak için SideNav + App Route + SystemHealth.jsx silinmesi yeterli
+
+---
+
+## #15 — REGIME_STRATEGIES Risk Otoritesi Taşınması (2026-03-07)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-07 |
+| **Neden** | `REGIME_STRATEGIES` (hangi rejimde hangi stratejiler çalışır) bir risk kararıdır ama OĞUL'da (`ogul.py`) tanımlıydı. OĞUL kendi risk kararını veriyordu — BABA otoritesini zayıflatıyordu. Ayrıca `BABA.risk_multiplier=0.25` ile OĞUL'un `strategies=[]` kararı çelişiyordu. |
+| **Kök Neden** | Mimari: risk kararları iki farklı yerde veriliyordu (BABA + OĞUL). Tek otorite prensibi ihlali. |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `engine/models/regime.py` | `StrategyType` import eklendi. `REGIME_STRATEGIES` dict burada tanımlandı (`RISK_MULTIPLIERS` yanına). `Regime` dataclass'ına `allowed_strategies: list[StrategyType]` alanı eklendi. `__post_init__` rejim tipine göre otomatik dolduruyor. |
+| `engine/ogul.py` | Lokal `REGIME_STRATEGIES` dict silindi. `process_signals()` artık `regime.allowed_strategies` okuyor. |
+
+### Eklenen
+- `allowed_strategies` alanı (`Regime` dataclass — `regime.py`)
+- `REGIME_STRATEGIES` dict (`regime.py` — `RISK_MULTIPLIERS` pattern'i ile)
+
+### Çıkartılan
+- `REGIME_STRATEGIES` lokal tanımı (`ogul.py` satır 90-95)
+
+### Geri Alma Planı
+- `regime.py`'den `REGIME_STRATEGIES` dict + `allowed_strategies` field + `__post_init__` satırları silinir
+- `ogul.py`'ye eski `REGIME_STRATEGIES` dict geri eklenir
+- `process_signals()`'da `regime.allowed_strategies` → `REGIME_STRATEGIES.get(regime.regime_type, [])` geri değiştirilir
+
+---
+
+## #16 — Dashboard Düzenleme + Otomatik İşlem Paneli (2026-03-07)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-07 |
+| **Neden** | Dashboard'daki "Aktif Rejim + Top 5" bölümü Performans sayfasıyla örtüşüyordu. 3 işlem modu (Manuel, Hibrit, Otomatik) varken otomatik modun ayrı paneli yoktu. Dashboard operasyonel duruma odaklanmalı. |
+| **Kök Neden** | Mimari: Dashboard overview + analiz karışmıştı. Otomatik işlem izleme arayüzü eksikti. |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `desktop/src/components/Dashboard.jsx` | "Aktif Rejim + Top 5" sağ card kaldırıldı. "Son İşlemler" tam genişliğe yayıldı. `getTop5()` fetch, `top5` state, `REGIME_META` kaldırıldı. |
+| `desktop/src/components/AutoTrading.jsx` | YENİ — Otomatik İşlem Paneli sayfası. 4 stat kart (Durum, Aktif Rejim, Lot Çarpanı, Oto İşlem) + Top 5 Kontrat + Otomatik Pozisyonlar + Son Otomatik İşlemler. |
+| `desktop/src/components/SideNav.jsx` | NAV_ITEMS'a `/auto` (Otomatik İşlem Paneli) eklendi — Hibrit'in altına. |
+| `desktop/src/App.jsx` | `AutoTrading` import + `/auto` route eklendi. |
+| `desktop/src/styles/theme.css` | `.dash-bottom-row` → tek kolon. `.auto-page`, `.auto-stats-row`, `.auto-main-row`, `.auto-card`, `.auto-table` stilleri eklendi. |
+
+### Eklenen
+- `AutoTrading.jsx` — Otomatik İşlem Paneli (yeni sayfa)
+- `/auto` route ve navigasyon menü öğesi
+- `.auto-*` CSS sınıfları
+
+### Çıkartılan
+- Dashboard'dan: Aktif Rejim badge, Top 5 kontrat listesi, `REGIME_META` sabit, `getTop5()` API çağrısı
+
+### Geri Alma Planı
+- `AutoTrading.jsx` silinir
+- `App.jsx` ve `SideNav.jsx`'den `/auto` route/nav öğesi kaldırılır
+- `Dashboard.jsx`'e Aktif Rejim + Top 5 JSX geri eklenir (git history'den)
+- `.dash-bottom-row` → `grid-template-columns: 1fr 1fr` geri çevrilir

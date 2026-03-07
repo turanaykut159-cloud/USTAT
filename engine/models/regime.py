@@ -8,6 +8,10 @@
 
 Risk çarpanları:
     TREND=1.0, RANGE=0.7, VOLATILE=0.25, OLAY=0.0
+
+Rejim → aktif strateji eşleme:
+    TREND=[TREND_FOLLOW], RANGE=[MEAN_REVERSION, BREAKOUT],
+    VOLATILE=[], OLAY=[]
 """
 
 from __future__ import annotations
@@ -15,6 +19,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
+
+from engine.models.signal import StrategyType
 
 
 class RegimeType(Enum):
@@ -33,6 +39,14 @@ RISK_MULTIPLIERS: dict[RegimeType, float] = {
     RegimeType.OLAY:     0.0,
 }
 
+# Rejim → izin verilen stratejiler (risk kararı — BABA otoritesi)
+REGIME_STRATEGIES: dict[RegimeType, list[StrategyType]] = {
+    RegimeType.TREND:    [StrategyType.TREND_FOLLOW],
+    RegimeType.RANGE:    [StrategyType.MEAN_REVERSION, StrategyType.BREAKOUT],
+    RegimeType.VOLATILE: [],    # tüm sinyaller durur
+    RegimeType.OLAY:     [],    # sistem pause
+}
+
 
 @dataclass
 class Regime:
@@ -44,10 +58,14 @@ class Regime:
     atr_ratio: float = 0.0
     bb_width_ratio: float = 0.0
     details: dict[str, Any] = field(default_factory=dict)
+    allowed_strategies: list[StrategyType] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.risk_multiplier = RISK_MULTIPLIERS.get(
             self.regime_type, 1.0
+        )
+        self.allowed_strategies = list(
+            REGIME_STRATEGIES.get(self.regime_type, [])
         )
 
 

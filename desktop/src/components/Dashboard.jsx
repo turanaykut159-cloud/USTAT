@@ -4,17 +4,17 @@
  * Layout:
  *   Üst:    4 stat kartı (Günlük İşlem, Başarı Oranı, Net K/Z, Profit Factor)
  *   Orta:   Açık Pozisyonlar tablosu (tam genişlik)
- *   Alt:    Sol — Son 5 işlem tablosu, Sağ — Aktif rejim + Top 5 kontrat listesi
+ *   Alt:    Son 5 işlem tablosu (tam genişlik)
  *
  * Veri kaynakları:
- *   REST:  getTradeStats, getPerformance, getTrades, getTop5, getStatus, getPositions (10sn poll)
+ *   REST:  getTradeStats, getPerformance, getTrades, getStatus, getPositions (10sn poll)
  *   WS:    connectLiveWS → equity + status + position gerçek zamanlı güncelleme
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  getTradeStats, getPerformance, getTrades, getTop5, getStatus,
-  getAccount, getPositions, closePosition, connectLiveWS, reactivateSymbols,
+  getTradeStats, getPerformance, getTrades, getStatus,
+  getAccount, getPositions, closePosition, connectLiveWS,
 } from '../services/api';
 
 // ── Yardımcılar ──────────────────────────────────────────────────
@@ -62,14 +62,6 @@ function shortTime(ts) {
   }
 }
 
-// ── Rejim renk eşlemesi ──────────────────────────────────────────
-const REGIME_META = {
-  TREND:    { color: 'var(--profit)',  bg: 'rgba(63,185,80,0.1)',  label: 'Trend'    },
-  RANGE:    { color: 'var(--accent)',  bg: 'rgba(88,166,255,0.1)', label: 'Range'    },
-  VOLATILE: { color: 'var(--warning)', bg: 'rgba(210,153,34,0.1)', label: 'Volatile' },
-  OLAY:     { color: 'var(--loss)',    bg: 'rgba(248,81,73,0.1)',  label: 'Olay'     },
-};
-
 /** Fiyat formatla (2-5 ondalık) */
 function formatPrice(val) {
   if (val == null || isNaN(val) || val === 0) return '—';
@@ -92,7 +84,6 @@ export default function Dashboard() {
     profit_factor: 0, equity_curve: [],
   });
   const [recentTrades, setRecentTrades] = useState([]);
-  const [top5, setTop5] = useState({ contracts: [] });
   const [status, setStatus] = useState({
     regime: 'TREND', regime_confidence: 0,
     engine_running: false, daily_trade_count: 0,
@@ -108,11 +99,10 @@ export default function Dashboard() {
 
   // ── REST veri çekme (10sn) ───────────────────────────────────────
   const fetchAll = useCallback(async () => {
-    const [s, p, t, t5, st, acc, pos] = await Promise.all([
+    const [s, p, t, st, acc, pos] = await Promise.all([
       getTradeStats(),
       getPerformance(30),
       getTrades({ limit: 5 }),
-      getTop5(),
       getStatus(),
       getAccount(),
       getPositions(),
@@ -120,7 +110,6 @@ export default function Dashboard() {
     setStats(s);
     setPerf(p);
     setRecentTrades(t.trades || []);
-    setTop5(t5);
     setStatus(st);
     setAccount(acc);
     setLivePositions(pos.positions || []);
@@ -174,12 +163,6 @@ export default function Dashboard() {
       setClosingTicket(null);
     }
   }, [closingTicket, fetchAll]);
-
-  // ── Hesaplamalar ─────────────────────────────────────────────────
-
-  // Rejim bilgisi
-  const regime = status.regime || 'TREND';
-  const regimeMeta = REGIME_META[regime] || REGIME_META.TREND;
 
   if (initialLoading) {
     return (
@@ -337,10 +320,8 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ═══ ALT: Son İşlemler + Rejim & Top 5 ════════════════════ */}
+      {/* ═══ ALT: Son İşlemler (tam genişlik) ══════════════════════ */}
       <div className="dash-bottom-row">
-
-        {/* ── Sol: Son 5 İşlem ──────────────────────────────────── */}
         <div className="dash-card">
           <h3>Son İşlemler</h3>
           {recentTrades.length > 0 ? (
@@ -377,89 +358,6 @@ export default function Dashboard() {
           ) : (
             <div className="dash-empty-msg">Henüz işlem yok</div>
           )}
-        </div>
-
-        {/* ── Sağ: Aktif Rejim + Top 5 ──────────────────────────── */}
-        <div className="dash-card">
-          {/* Rejim göstergesi */}
-          <div className="dash-regime">
-            <h3>Aktif Rejim</h3>
-            <div
-              className="regime-badge"
-              style={{ background: regimeMeta.bg, color: regimeMeta.color }}
-            >
-              <span className="regime-dot" style={{ background: regimeMeta.color }} />
-              {regimeMeta.label}
-              {status.regime_confidence > 0 && (
-                <span className="regime-conf">
-                  {(status.regime_confidence * 100).toFixed(0)}%
-                </span>
-              )}
-            </div>
-          </div>
-
-          {/* Top 5 kontrat listesi */}
-          <div className="dash-top5">
-            <div className="dash-top5-header">
-              <h3>Top 5 Kontrat</h3>
-              {top5.last_refresh && (
-                <span className="top5-refresh-time">
-                  {shortTime(top5.last_refresh)}
-                </span>
-              )}
-            </div>
-
-            {/* Kontrat durumu */}
-            {(() => {
-              const deactCount = (status.deactivated_symbols || []).length;
-              const activeCount = 15 - deactCount;
-              return (
-                <div className={`top5-status-bar ${deactCount > 0 ? 'top5-status-warn' : 'top5-status-ok'}`}>
-                  <span>{activeCount}/15 aktif</span>
-                  {deactCount > 0 && (
-                    <button
-                      className="top5-reactivate-btn"
-                      onClick={async () => {
-                        const res = await reactivateSymbols();
-                        if (res.success) fetchAll();
-                      }}
-                    >
-                      Aktif Et
-                    </button>
-                  )}
-                </div>
-              );
-            })()}
-
-            {(top5.contracts || []).length > 0 ? (
-              <ul className="top5-list">
-                {top5.contracts.map((c, i) => {
-                  const dir = c.signal_direction || 'NOTR';
-                  const dirCls = dir === 'BUY' ? 'top5-dir-buy'
-                    : dir === 'SELL' ? 'top5-dir-sell'
-                    : 'top5-dir-notr';
-                  return (
-                    <li key={c.symbol} className="top5-item">
-                      <span className="top5-rank">#{c.rank || i + 1}</span>
-                      <span className="top5-symbol">{c.symbol}</span>
-                      <span className={`top5-direction ${dirCls}`}>{dir}</span>
-                      <span className="top5-score">{c.score?.toFixed(1) ?? '—'}</span>
-                      <div className="top5-bar-bg">
-                        <div
-                          className="top5-bar-fill"
-                          style={{
-                            width: `${Math.min((c.score / (top5.contracts[0]?.score || 1)) * 100, 100)}%`,
-                          }}
-                        />
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            ) : (
-              <div className="dash-empty-msg">Top 5 verisi yok</div>
-            )}
-          </div>
         </div>
       </div>
     </div>

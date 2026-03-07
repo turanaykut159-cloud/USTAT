@@ -86,14 +86,6 @@ MIN_BARS_M15:    int = 60           # M15 için min bar
 MIN_BARS_H1:     int = 30           # H1 onay için min bar
 CONTRACT_SIZE:   float = 100.0      # VİOP çarpanı (varsayılan)
 
-# ── Rejim → aktif strateji eşleme ─────────────────────────────────
-REGIME_STRATEGIES: dict[RegimeType, list[StrategyType]] = {
-    RegimeType.TREND:    [StrategyType.TREND_FOLLOW],
-    RegimeType.RANGE:    [StrategyType.MEAN_REVERSION, StrategyType.BREAKOUT],
-    RegimeType.VOLATILE: [],    # tüm sinyaller durur
-    RegimeType.OLAY:     [],    # sistem pause
-}
-
 # ── State Machine ────────────────────────────────────────────────
 ORDER_TIMEOUT_SEC: int       = 5       # limit emir timeout (saniye)
 MAX_SLIPPAGE_ATR_MULT: float = 0.5     # max slippage = 0.5 × ATR
@@ -419,7 +411,7 @@ class Ogul:
             return
 
         # 7. Rejim kontrolü — aktif stratejiler
-        strategies = REGIME_STRATEGIES.get(regime.regime_type, [])
+        strategies = regime.allowed_strategies
         if not strategies:
             logger.debug(
                 f"Rejim {regime.regime_type.value}: tüm sinyaller deaktif"

@@ -1467,10 +1467,10 @@ h2 {
   margin-right: 8px;
 }
 
-/* ── Bottom Row (İşlemler + Rejim/Top5) ──────────────────────── */
+/* ── Bottom Row (Son İşlemler — tam genişlik) ────────────────── */
 .dash-bottom-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 12px;
 }
 
@@ -1701,6 +1701,140 @@ h2 {
 }
 .top5-reactivate-btn:hover {
   opacity: 0.85;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   OTOMATİK İŞLEM PANELİ
+   ═══════════════════════════════════════════════════════════════════ */
+
+.auto-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.auto-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.auto-loading {
+  color: var(--text-secondary);
+  text-align: center;
+  padding: 40px 0;
+}
+
+/* ── Stat Kartları (4 kolon) ──────────────────────────────────── */
+.auto-stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.auto-stat-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.auto-stat-label {
+  font-size: 10px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.auto-stat-value {
+  font-size: 22px;
+  font-weight: 700;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 4px;
+}
+
+.auto-stat-sub {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* ── Ana İçerik (2 kolon: Top5 + Pozisyonlar) ────────────────── */
+.auto-main-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.auto-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.auto-card h3 {
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.auto-empty-msg {
+  color: var(--text-secondary);
+  font-size: 13px;
+  opacity: 0.5;
+  padding: 20px 0;
+  text-align: center;
+}
+
+/* ── Alt: Son Otomatik İşlemler (tam genişlik) ────────────────── */
+.auto-trades-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+/* ── Otomatik İşlem Tablosu ──────────────────────────────────── */
+.auto-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.auto-table th {
+  font-size: 10px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  text-align: left;
+}
+
+.auto-table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid rgba(48, 54, 61, 0.5);
+}
+
+.auto-table tr:last-child td {
+  border-bottom: none;
+}
+
+.auto-table .mono {
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+
+.auto-table .text-dim {
+  color: var(--text-secondary);
 }
 
 /* ═══════════════════════════════════════════════════════════════════
