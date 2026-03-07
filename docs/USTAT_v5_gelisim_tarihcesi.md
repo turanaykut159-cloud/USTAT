@@ -690,3 +690,27 @@ Bu düzeltmeler native SLTP çalışmadığı için sorunu çözmedi ama kod kal
 - `trades.py`'den `since` parametresi kaldırılır
 - `TradeHistory.jsx`'e `setInterval(fetchData, 30_000)` geri eklenir, WS import/handler kaldırılır
 - `Dashboard.jsx`'de polling 10sn'ye döndürülür, WS'den `trade_closed` handler kaldırılır
+
+---
+
+## #23 — Dashboard İstatistikleri 01.02.2026 Tarih Filtresi (2026-03-07)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-07 |
+| **Neden** | Dashboard NET KÂR/ZARAR ve diğer istatistikler tüm kapanmış işlemleri hesaba katıyordu; kullanıcı 01.02.2026 itibariyle hesaplama istiyor |
+| **Kök Neden** | `/api/trades/stats` endpoint'i `db.get_trades()` çağrısında `since` parametresi kullanmıyordu; tüm geçmiş dahil ediliyordu |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `api/routes/trades.py` | `get_trade_stats()` endpoint'ine `since` query parametresi eklendi (varsayılan: `"2026-02-01"`) |
+| `api/routes/trades.py` | `db.get_trades(limit=limit)` → `db.get_trades(since=since, limit=limit)` |
+
+### Eklenen
+- `/trades/stats` endpoint'inde `since` parametresi — Dashboard istatistikleri artık 01.02.2026 sonrasını hesaplıyor
+
+### Davranış Değişikliği
+- Önceki: Tüm kapanmış işlemlerin PnL toplamı (eski -482K zararlı işlemler dahil)
+- Yeni: 01.02.2026 ve sonrasındaki işlemler dahil; eski işlemler istatistik dışı
