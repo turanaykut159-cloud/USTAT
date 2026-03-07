@@ -4,24 +4,23 @@
  * Bölümler:
  *   1. MT5 Bağlantı Bilgileri (sunucu, hesap, şifre maskeli)
  *   2. "Farklı hesap ile giriş" butonu
- *   3. Risk Parametreleri (salt okunur — güvenlik)
- *   4. Tema Ayarı (şimdilik sadece koyu tema)
- *   5. Bildirim Tercihleri
- *   6. Sistem Log Görüntüleme
- *   7. Versiyon Bilgisi
+ *   3. Tema Ayarı (şimdilik sadece koyu tema)
+ *   4. Bildirim Tercihleri
+ *   5. Sistem Log Görüntüleme
+ *   6. Versiyon Bilgisi
  *
- * Veri: getAccount, getRisk, getStatus, getEvents
+ * Risk Parametreleri → Risk Yönetimi sayfasında gösteriliyor (mükerrer kaldırıldı).
+ *
+ * Veri: getAccount, getStatus, getEvents
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { getAccount, getRisk, getStatus, getEvents } from '../services/api';
+import { getAccount, getStatus, getEvents } from '../services/api';
 
 // ── Sabitler ──────────────────────────────────────────────────────
 
-const VERSION = '5.1.0';
-const BUILD_DATE = '2026-03-04';
-
-const SEVERITY_ORDER = { CRITICAL: 0, WARNING: 1, INFO: 2 };
+const VERSION = '5.1';
+const BUILD_DATE = '2026-03-08';
 
 const DEFAULT_PREFS = {
   soundEnabled: true,
@@ -38,11 +37,6 @@ function maskLogin(login) {
   const s = String(login);
   if (s.length <= 4) return '****';
   return s.slice(0, 2) + '*'.repeat(s.length - 4) + s.slice(-2);
-}
-
-function pctLabel(val) {
-  if (val == null) return '—';
-  return `%${(val * 100).toFixed(1)}`;
 }
 
 function formatTS(ts) {
@@ -73,7 +67,6 @@ function sevCls(sev) {
 
 export default function Settings() {
   const [account, setAccount] = useState(null);
-  const [risk, setRisk] = useState(null);
   const [status, setStatusData] = useState(null);
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -114,14 +107,12 @@ export default function Settings() {
 
   const fetchData = useCallback(async () => {
     setLoading(true);
-    const [acc, rsk, sts, evt] = await Promise.all([
+    const [acc, sts, evt] = await Promise.all([
       getAccount(),
-      getRisk(),
       getStatus(),
       getEvents({ limit: logLimit }),
     ]);
     setAccount(acc);
-    setRisk(rsk);
     setStatusData(sts);
     setEvents(evt.events || []);
     setLoading(false);
@@ -207,33 +198,6 @@ export default function Settings() {
             }}>
               Farklı Hesap ile Giriş
             </button>
-          </section>
-
-          {/* ── RİSK PARAMETRELERİ ───────────────────────────────── */}
-          <section className="st-section">
-            <div className="st-section-header">
-              <h3>Risk Parametreleri</h3>
-              <span className="st-readonly-badge">Salt Okunur</span>
-            </div>
-            <p className="st-section-note">
-              Güvenlik nedeniyle risk parametreleri arayüzden değiştirilemez.
-              Değişiklik için <code>engine/config.py</code> düzenleyin.
-            </p>
-
-            <div className="st-field-group">
-              <FieldRow label="Günlük Maks Kayıp" value={pctLabel(risk?.max_daily_loss)} />
-              <FieldRow label="Haftalık Maks Kayıp" value={pctLabel(risk?.max_weekly_loss)} />
-              <FieldRow label="Aylık Maks Kayıp" value={pctLabel(risk?.max_monthly_loss)} />
-              <FieldRow label="Hard Drawdown" value={pctLabel(risk?.hard_drawdown)} cls="loss" />
-              <FieldRow label="Maks Floating Kayıp" value={pctLabel(risk?.max_floating_loss)} />
-              <div className="st-field-sep" />
-              <FieldRow label="Günlük Maks İşlem" value={risk?.max_daily_trades ?? '—'} />
-              <FieldRow label="Ard. Kayıp Limiti" value={risk?.consecutive_loss_limit ?? '—'} />
-              <FieldRow label="Maks Açık Pozisyon" value={risk?.max_open_positions ?? '—'} />
-              <div className="st-field-sep" />
-              <FieldRow label="Lot Çarpanı" value={risk?.lot_multiplier != null ? `×${risk.lot_multiplier.toFixed(2)}` : '—'} />
-              <FieldRow label="Risk Çarpanı (Rejim)" value={risk?.risk_multiplier != null ? `×${risk.risk_multiplier.toFixed(2)}` : '—'} />
-            </div>
           </section>
 
         </div>

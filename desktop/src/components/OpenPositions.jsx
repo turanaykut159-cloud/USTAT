@@ -10,50 +10,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getPositions, getAccount, getStatus, getHybridStatus, connectLiveWS, closePosition, checkHybridTransfer, transferToHybrid } from '../services/api';
+import { formatMoney, formatPrice, pnlClass, elapsed } from '../utils/formatters';
 
 // ── Yardımcılar ──────────────────────────────────────────────────
-
-function formatMoney(val) {
-  if (val == null || isNaN(val)) return '—';
-  const abs = Math.abs(val);
-  const formatted = abs.toLocaleString('tr-TR', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-  return val < 0 ? `-${formatted}` : formatted;
-}
-
-function formatPrice(val) {
-  if (val == null || isNaN(val) || val === 0) return '—';
-  return val.toLocaleString('tr-TR', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 5,
-  });
-}
-
-function pnlClass(val) {
-  if (val > 0) return 'profit';
-  if (val < 0) return 'loss';
-  return '';
-}
-
-/** Açılış zamanından itibaren süre */
-function elapsed(openTime) {
-  if (!openTime) return '—';
-  try {
-    const ms = Date.now() - new Date(openTime).getTime();
-    if (isNaN(ms) || ms < 0) return '—';
-    const totalMin = Math.floor(ms / 60000);
-    if (totalMin < 60) return `${totalMin}dk`;
-    const h = Math.floor(totalMin / 60);
-    const m = totalMin % 60;
-    if (h < 24) return `${h}sa ${m}dk`;
-    const d = Math.floor(h / 24);
-    return `${d}g ${h % 24}sa`;
-  } catch {
-    return '—';
-  }
-}
 
 /** Teminat kullanım oranı (%) */
 function marginUsagePct(margin, equity) {

@@ -13,26 +13,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { checkManualTrade, executeManualTrade, getTrades } from '../services/api';
-
-// ── Yardımcı fonksiyonlar ───────────────────────────────────────
-
-function formatMoney(val) {
-  if (val == null || isNaN(val)) return '\u2014';
-  const abs = Math.abs(val);
-  const formatted = abs.toLocaleString('tr-TR', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-  return val < 0 ? `-${formatted}` : formatted;
-}
-
-function formatPrice(val) {
-  if (val == null || isNaN(val) || val === 0) return '\u2014';
-  return val.toLocaleString('tr-TR', {
-    minimumFractionDigits: 4,
-    maximumFractionDigits: 4,
-  });
-}
+import { formatMoney, formatPrice } from '../utils/formatters';
 
 // ── 15 VİOP Kontratı ────────────────────────────────────────────
 
@@ -197,10 +178,10 @@ export default function ManualTrade() {
             <div className="mt-form-group">
               <label>Fiyat Bilgisi</label>
               <div className="mt-price-info">
-                {direction === 'BUY' ? 'Ask' : 'Bid'}: {formatPrice(checkResult.current_price)}
+                {direction === 'BUY' ? 'Ask' : 'Bid'}: {formatPrice(checkResult.current_price, 4, 4)}
               </div>
               <div className="mt-price-info">
-                ATR(14): {formatPrice(checkResult.atr_value)}
+                ATR(14): {formatPrice(checkResult.atr_value, 4, 4)}
               </div>
               {checkResult.atr_value > 0 && checkResult.current_price > 0 && (
                 <>
@@ -208,14 +189,16 @@ export default function ManualTrade() {
                     SL: {formatPrice(
                       direction === 'BUY'
                         ? checkResult.current_price - checkResult.atr_value * 2
-                        : checkResult.current_price + checkResult.atr_value * 2
+                        : checkResult.current_price + checkResult.atr_value * 2,
+                      4, 4
                     )} (2xATR)
                   </div>
                   <div className="mt-price-info">
                     TP: {formatPrice(
                       direction === 'BUY'
                         ? checkResult.current_price + checkResult.atr_value * 3
-                        : checkResult.current_price - checkResult.atr_value * 3
+                        : checkResult.current_price - checkResult.atr_value * 3,
+                      4, 4
                     )} (3xATR)
                   </div>
                 </>
@@ -258,7 +241,7 @@ export default function ManualTrade() {
           {execResult && (
             <div className={`mt-result ${execResult.success ? 'success' : 'error'}`}>
               {execResult.success
-                ? `Emir gönderildi! ${direction} ${execResult.lot} lot @ ${formatPrice(execResult.entry_price)}`
+                ? `Emir gönderildi! ${direction} ${execResult.lot} lot @ ${formatPrice(execResult.entry_price, 4, 4)}`
                 : `Hata: ${execResult.message}`}
             </div>
           )}
@@ -357,8 +340,8 @@ export default function ManualTrade() {
                     {t.direction}
                   </td>
                   <td style={{ textAlign: 'right', padding: '6px 8px' }}>{t.lot}</td>
-                  <td style={{ textAlign: 'right', padding: '6px 8px' }}>{formatPrice(t.entry_price)}</td>
-                  <td style={{ textAlign: 'right', padding: '6px 8px' }}>{formatPrice(t.exit_price)}</td>
+                  <td style={{ textAlign: 'right', padding: '6px 8px' }}>{formatPrice(t.entry_price, 4, 4)}</td>
+                  <td style={{ textAlign: 'right', padding: '6px 8px' }}>{formatPrice(t.exit_price, 4, 4)}</td>
                   <td style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 600, color: (t.pnl || 0) >= 0 ? '#4CAF50' : '#F44336' }}>
                     {t.pnl != null ? formatMoney(t.pnl) : '\u2014'}
                   </td>

@@ -11,22 +11,13 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { getRisk } from '../services/api';
+import { formatMoney } from '../utils/formatters';
 
 // ── Yardımcılar ──────────────────────────────────────────────────
 
 function pct(val) {
   if (val == null || isNaN(val)) return '—';
   return `%${(val * 100).toFixed(2)}`;
-}
-
-function formatMoney(val) {
-  if (val == null || isNaN(val)) return '—';
-  const abs = Math.abs(val);
-  const formatted = abs.toLocaleString('tr-TR', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-  return val < 0 ? `-${formatted}` : formatted;
 }
 
 // ── Progress Bar bileşeni ────────────────────────────────────────
@@ -42,7 +33,7 @@ function RiskBar({ label, current, limit, unit = '%', danger = false }) {
   else if (isHigh) barClass = 'risk-bar-fill--warning';
 
   const currentDisplay = unit === '%' ? `%${(Math.abs(current) * 100).toFixed(2)}` : formatMoney(current);
-  const limitDisplay = unit === '%' ? `%${(limit * 100).toFixed(0)}` : formatMoney(limit);
+  const limitDisplay = unit === '%' ? `%${(limit * 100).toFixed(1)}` : formatMoney(limit);
 
   return (
     <div className="risk-bar-row">

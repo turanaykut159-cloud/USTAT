@@ -14,7 +14,8 @@
  */
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { getTrades, getTradeStats, getPerformance, approveTrade, connectLiveWS } from '../services/api';
+import { getTrades, getTradeStats, getPerformance, approveTrade, connectLiveWS, STATS_BASELINE } from '../services/api';
+import { formatMoney, formatPrice, pnlClass } from '../utils/formatters';
 
 // ── Sabitler ─────────────────────────────────────────────────────
 
@@ -42,24 +43,6 @@ const RESULT_OPTIONS = [
 
 // ── Yardımcılar ──────────────────────────────────────────────────
 
-function formatMoney(val) {
-  if (val == null || isNaN(val)) return '—';
-  const abs = Math.abs(val);
-  const formatted = abs.toLocaleString('tr-TR', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-  return val < 0 ? `-${formatted}` : formatted;
-}
-
-function formatPrice(val) {
-  if (val == null || isNaN(val)) return '—';
-  return val.toLocaleString('tr-TR', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 5,
-  });
-}
-
 function formatPct(val) {
   if (val == null || isNaN(val)) return '—';
   return `%${val.toFixed(1)}`;
@@ -68,12 +51,6 @@ function formatPct(val) {
 function formatPF(val) {
   if (val == null || isNaN(val) || val === 0) return '—';
   return val.toFixed(2);
-}
-
-function pnlClass(val) {
-  if (val > 0) return 'profit';
-  if (val < 0) return 'loss';
-  return '';
 }
 
 function formatDateTime(ts) {
@@ -171,7 +148,7 @@ export default function TradeHistory() {
     setFetchError(false);
     try {
       const [t, s, p] = await Promise.all([
-        getTrades({ since: '2026-02-01', limit: 1000 }),
+        getTrades({ since: STATS_BASELINE, limit: 1000 }),
         getTradeStats(1000),
         getPerformance(365),
       ]);

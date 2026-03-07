@@ -11,11 +11,9 @@ from collections import defaultdict
 
 from fastapi import APIRouter, Query
 
+from api.constants import STATS_BASELINE
 from api.deps import get_db, get_engine
 from api.schemas import EquityPoint, PerformanceResponse
-
-# Dashboard istatistikleriyle tutarlı başlangıç tarihi
-_STATS_BASELINE = "2026-02-01"
 
 router = APIRouter()
 
@@ -36,7 +34,7 @@ async def get_performance(
         return PerformanceResponse()
 
     # ── İşlemler (baseline sonrası) ────────────────────────────────
-    trades = db.get_trades(since=_STATS_BASELINE, limit=5000)
+    trades = db.get_trades(since=STATS_BASELINE, limit=5000)
     if not trades:
         return PerformanceResponse()
 
@@ -81,7 +79,7 @@ async def get_performance(
     # ── Sharpe Ratio (yüzde getiri bazlı, Madde 2.2) ─────────────
     sharpe_ratio = 0.0
     daily_snapshots = db.get_daily_end_snapshots(
-        since=f"{_STATS_BASELINE}T00:00:00", limit=365,
+        since=f"{STATS_BASELINE}T00:00:00", limit=365,
     )
     if daily_snapshots:
         daily_returns: list[float] = []

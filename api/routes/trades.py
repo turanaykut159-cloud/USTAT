@@ -12,6 +12,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Query
 
+from api.constants import STATS_BASELINE
 from api.deps import get_db, get_engine
 from api.schemas import (
     ApproveRequest,
@@ -113,7 +114,7 @@ async def get_trades(
 
 @router.get("/trades/stats", response_model=TradeStatsResponse)
 async def get_trade_stats(
-    since: str | None = Query("2026-02-01", description="Başlangıç tarihi (YYYY-MM-DD)"),
+    since: str | None = Query(STATS_BASELINE, description="Başlangıç tarihi (YYYY-MM-DD)"),
     limit: int = Query(500, ge=1, le=5000, description="Analiz edilecek maks kayıt"),
 ):
     """İşlem istatistiklerini hesapla.

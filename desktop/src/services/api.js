@@ -12,6 +12,9 @@ import axios from 'axios';
 const API_BASE = 'http://localhost:8000/api';
 const WS_BASE = 'ws://localhost:8000';
 
+/** İstatistik hesaplamalarının başlangıç tarihi (backend _STATS_BASELINE ile eşleşmeli). */
+export const STATS_BASELINE = '2026-02-01';
+
 const client = axios.create({
   baseURL: API_BASE,
   timeout: 5000,
@@ -91,9 +94,9 @@ export async function getTrades(params = {}) {
   }
 }
 
-export async function getTradeStats(limit = 500) {
+export async function getTradeStats(limit = 500, since = STATS_BASELINE) {
   try {
-    const { data } = await client.get('/trades/stats', { params: { limit } });
+    const { data } = await client.get('/trades/stats', { params: { limit, since } });
     return data;
   } catch (err) {
     console.error('[ÜSTAT API] getTradeStats:', err?.message ?? err);

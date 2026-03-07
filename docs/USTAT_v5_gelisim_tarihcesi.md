@@ -879,3 +879,45 @@ Bu düzeltmeler native SLTP çalışmadığı için sorunu çözmedi ama kod kal
 
 ### Çıkartılan
 - Hardcoded `"USDTRY"` sembol adı (dinamik çözümleme ile değiştirildi)
+
+---
+
+## #29 — Kod Merkezileştirme + Ekran İnceleme Düzeltmeleri (2026-03-08)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-08 |
+| **Neden** | Ekran-ekran canlı inceleme sırasında tespit edilen sorunlar: mükerrer formatMoney/formatPrice/pnlClass/elapsed fonksiyonları (8 bileşende tekrar), mükerrer Risk Parametreleri bölümü, stale VERSION/BUILD_DATE, hardcoded baseline tarihleri, eksik `since` parametresi |
+| **Kapsam** | Frontend yardımcı merkezileştirme, backend sabit merkezileştirme, 13 dosya değişikliği (43 ekleme, 283 silme) |
+
+### Değişiklikler
+
+| Dosya | Değişiklik |
+|-------|-----------|
+| `desktop/src/utils/formatters.js` | **YENİ** — `formatMoney`, `formatPrice`, `pnlClass`, `elapsed` merkezi yardımcılar |
+| `desktop/src/components/Dashboard.jsx` | Yerel formatMoney/formatPrice/pnlClass/elapsed kaldırıldı → import |
+| `desktop/src/components/AutoTrading.jsx` | Yerel formatMoney/formatPrice/pnlClass kaldırıldı → import |
+| `desktop/src/components/TopBar.jsx` | Yerel formatMoney kaldırıldı → import |
+| `desktop/src/components/HybridTrade.jsx` | Yerel formatMoney/formatPrice/pnlClass/elapsed kaldırıldı → import |
+| `desktop/src/components/ManualTrade.jsx` | Yerel formatMoney/formatPrice kaldırıldı → import (`formatPrice(val, 4, 4)` VİOP hassasiyeti korundu) |
+| `desktop/src/components/OpenPositions.jsx` | Yerel formatMoney/formatPrice/pnlClass/elapsed kaldırıldı → import |
+| `desktop/src/components/RiskManagement.jsx` | Yerel formatMoney kaldırıldı → import; `.toFixed(0)` → `.toFixed(1)` düzeltmesi |
+| `desktop/src/components/TradeHistory.jsx` | Yerel formatMoney/formatPrice/pnlClass kaldırıldı → import |
+| `desktop/src/components/Settings.jsx` | Risk Parametreleri bölümü kaldırıldı (mükerrer); VERSION `5.1.0`→`5.1`; BUILD_DATE güncellendi; SEVERITY_ORDER dead code kaldırıldı |
+| `desktop/src/components/Performance.jsx` | `getTrades` çağrısına `since: STATS_BASELINE` eklendi |
+| `desktop/src/services/api.js` | `STATS_BASELINE = '2026-02-01'` sabiti; `getTradeStats` fonksiyonuna `since` parametresi |
+| `api/constants.py` | **YENİ** — `STATS_BASELINE = "2026-02-01"` backend sabiti |
+| `api/routes/performance.py` | Yerel `_STATS_BASELINE` → `api.constants.STATS_BASELINE` import |
+| `api/routes/trades.py` | Hardcoded `"2026-02-01"` → `STATS_BASELINE` import |
+
+### Eklenen
+- `desktop/src/utils/formatters.js` — 4 merkezi yardımcı fonksiyon
+- `api/constants.py` — Backend sabit dosyası
+- `STATS_BASELINE` sabiti (frontend + backend)
+- `getTradeStats` fonksiyonuna explicit `since` parametresi
+
+### Çıkartılan
+- 8 bileşendeki ~120 satır tekrarlanan yardımcı fonksiyon
+- Settings.jsx Risk Parametreleri bölümü (Risk Yönetimi sayfasıyla mükerrerdi)
+- Settings.jsx SEVERITY_ORDER dead code
+- 4 adet hardcoded `"2026-02-01"` string (frontend + backend)

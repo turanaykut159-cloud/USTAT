@@ -35,7 +35,7 @@ import {
   LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
 } from 'recharts';
-import { getPerformance, getTradeStats, getTrades, getUstatBrain } from '../services/api';
+import { getPerformance, getTradeStats, getTrades, getUstatBrain, STATS_BASELINE } from '../services/api';
 
 // ── Yardımcılar ──────────────────────────────────────────────────
 
@@ -150,7 +150,7 @@ export default function Performance() {
     const [p, s, t] = await Promise.all([
       getPerformance(days),
       getTradeStats(1000),
-      getTrades({ limit: 1000 }),
+      getTrades({ since: STATS_BASELINE, limit: 1000 }),
     ]);
     setPerf(p);
     setStats(s);

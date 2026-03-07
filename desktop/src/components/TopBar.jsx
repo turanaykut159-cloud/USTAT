@@ -7,6 +7,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { getStatus, getAccount, acknowledgeKillSwitch } from '../services/api';
+import { formatMoney } from '../utils/formatters';
 
 // ── Faz etiketleri ──────────────────────────────────────────────
 const PHASE_LABELS = {
@@ -16,17 +17,6 @@ const PHASE_LABELS = {
   error:   'HATA',
   idle:    'BEKLEMEDE',
 };
-
-// ── Para formatı ────────────────────────────────────────────────
-function formatMoney(val) {
-  if (val == null || isNaN(val)) return '—';
-  const abs = Math.abs(val);
-  const formatted = abs.toLocaleString('tr-TR', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-  return val < 0 ? `-${formatted}` : formatted;
-}
 
 export default function TopBar() {
   // ── State ──────────────────────────────────────────────────────

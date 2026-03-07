@@ -15,26 +15,9 @@ import {
   getStatus, getTop5, getPositions, getTrades, reactivateSymbols,
   getOgulActivity,
 } from '../services/api';
+import { formatMoney, formatPrice, pnlClass } from '../utils/formatters';
 
 // ── Yardımcılar ──────────────────────────────────────────────────
-
-function formatMoney(val) {
-  if (val == null || isNaN(val)) return '—';
-  const abs = Math.abs(val);
-  const formatted = abs.toLocaleString('tr-TR', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-  return val < 0 ? `-${formatted}` : formatted;
-}
-
-function formatPrice(val) {
-  if (val == null || isNaN(val) || val === 0) return '—';
-  return val.toLocaleString('tr-TR', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 5,
-  });
-}
 
 function shortTime(ts) {
   if (!ts) return '';
@@ -47,12 +30,6 @@ function shortTime(ts) {
   } catch {
     return '';
   }
-}
-
-function pnlClass(val) {
-  if (val > 0) return 'profit';
-  if (val < 0) return 'loss';
-  return '';
 }
 
 // ── Rejim renk eşlemesi ──────────────────────────────────────────
