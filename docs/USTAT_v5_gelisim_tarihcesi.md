@@ -503,3 +503,28 @@ Bu düzeltmeler native SLTP çalışmadığı için sorunu çözmedi ama kod kal
 - `App.jsx` ve `SideNav.jsx`'den `/auto` route/nav öğesi kaldırılır
 - `Dashboard.jsx`'e Aktif Rejim + Top 5 JSX geri eklenir (git history'den)
 - `.dash-bottom-row` → `grid-template-columns: 1fr 1fr` geri çevrilir
+
+---
+
+## #17 — Risk Baseline Tarih Güncelleme (2026-03-07)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-07 |
+| **Neden** | Eski baseline (2026-02-23) test/geliştirme döneminden kalma verileri içeriyordu. Aylık kayıp %13.39 göstererek L2 kill-switch tetiklenmişti. Temiz risk takibi için baseline sıfırlandı. |
+| **Kök Neden** | RISK_BASELINE_DATE eski test dönemine ayarlıydı, üretim dönemi risk verileri eskilerle karışıyordu. |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `engine/baba.py` | `RISK_BASELINE_DATE` → `"2026-02-23"` → `"2026-03-07"` |
+
+### Eklenen
+- (yok)
+
+### Çıkartılan
+- (yok)
+
+### Geri Alma Planı
+- `engine/baba.py` satır 126: `RISK_BASELINE_DATE` → `"2026-02-23"` geri çevrilir

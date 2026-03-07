@@ -123,7 +123,7 @@ MAX_INDEX_WEIGHT_SCORE:     float = 0.25
 # Bu tarihten önceki risk snapshot ve trade verileri risk limitlerini
 # tetiklemez. Eski test/geliştirme dönemi verileri devre dışı kalır.
 # Değiştirmek için bu sabiti güncelleyin.
-RISK_BASELINE_DATE: str = "2026-02-23"
+RISK_BASELINE_DATE: str = "2026-03-07"
 
 # ── Kill-switch seviyeleri ───────────────────────────────────────────
 KILL_SWITCH_NONE: int = 0
