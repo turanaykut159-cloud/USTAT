@@ -440,3 +440,55 @@ Bu düzeltmeler native SLTP çalışmadığı için sorunu çözmedi ama kod kal
 - `health.py` silinemese bile `HealthCollector` sadece `record_*` çağrılmazsa boş deque tutar
 - `_health = None` default olduğu için MT5Bridge standalone kullanımda sorun çıkmaz
 - Desktop sayfası kaldırmak için SideNav + App Route + SystemHealth.jsx silinmesi yeterli
+
+---
+
+## #13 — Bağımsız Manuel İşlem Motoru (ManuelMotor) (2026-03-07)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-07 |
+| **Neden** | Manuel işlemler OĞUL'un `active_trades`'ine girip otomatik yönetim alıyordu (trailing stop, TP1, breakeven, rejim kapanışı). Kullanıcı pozisyon üzerinde kontrol kaybediyordu. |
+| **Kök Neden** | Manuel ve otomatik işlemler aynı `active_trades` dict'inde yönetiliyordu. `_manage_active_trades()` strateji ayrımı yapmıyordu. |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `engine/manuel_motor.py` | **YENİ** — Bağımsız ManuelMotor sınıfı (~530 satır): check, open, sync, risk score |
+| `engine/main.py` | ManuelMotor oluşturma, cross-motor referanslar, cycle'a sync ekleme, restore ekleme |
+| `engine/ogul.py` | `check_manual_trade()` + `open_manual_trade()` silindi (~350 satır), ManuelMotor netting check eklendi, restore'da `strategy="manual"` filtresi |
+| `engine/health.py` | `CycleTimings.manuel_sync_ms` alanı eklendi |
+| `api/deps.py` | `get_manuel_motor()` eklendi |
+| `api/schemas.py` | `ManualRiskScoresResponse`, `PositionItem.risk_score` alanları eklendi |
+| `api/routes/manual_trade.py` | `get_ogul()` → `get_manuel_motor()`, yeni `GET /manual-trade/risk-scores` endpoint |
+| `api/routes/positions.py` | Strategy lookup ManuelMotor + OĞUL, risk_score zenginleştirmesi |
+| `desktop/src/services/api.js` | `getManualRiskScores()` fonksiyonu eklendi |
+| `desktop/src/components/OpenPositions.jsx` | "Risk" sütunu (yeşil/sarı/kırmızı badge + skor) |
+| `desktop/src/components/ManualTrade.jsx` | Açık pozisyon risk göstergesi paneli (4 boyut + overall) |
+
+### Eklenen
+- `engine/manuel_motor.py` — ManuelMotor sınıfı (bağımsız active_trades, risk score hesaplama)
+- `GET /api/manual-trade/risk-scores` endpoint
+- Risk göstergesi: SL/ATR, rejim, K/Z, sistem riski → yeşil/sarı/kırmızı + 0-100 skor
+- Cross-motor netting: OĞUL ↔ ManuelMotor ↔ H-Engine çift yönlü kontrol
+- OpenPositions tablosuna "Risk" sütunu
+
+### Çıkartılan
+- `Ogul.check_manual_trade()` (~145 satır) → ManuelMotor'a taşındı
+- `Ogul.open_manual_trade()` (~200 satır) → ManuelMotor'a taşındı
+- Manuel işlemlerin OĞUL tarafından yönetilmesi (trailing stop, TP1, breakeven, rejim kapanışı)
+
+### Mimari Kararlar
+- VOLATILE/OLAY rejiminde manuel pozisyonlar kapanmıyor → risk göstergesi kırmızı, karar kullanıcıda
+- BABA L3 kill-switch hâlâ çalışıyor (MT5'ten direkt kapattığı için ayrı motor fark etmiyor)
+- ManuelMotor kendi `sync_positions()` ile SL/TP hit ve L3 kapanmayı tespit ediyor
+- OĞUL `restore_active_trades()` artık `strategy="manual"` olanları atlıyor
+- ManuelMotor ayrı restore ile sadece kendi işlemlerini geri yüklüyor
+
+### Geri Alma Planı
+- `engine/manuel_motor.py` silinir
+- `engine/main.py` ManuelMotor referansları kaldırılır
+- `engine/ogul.py` eski `check_manual_trade()` + `open_manual_trade()` git'ten geri alınır
+- `api/routes/manual_trade.py` eski `get_ogul()` kullanımına döner
+- Frontend risk göstergesi kaldırılır (cosmetic)

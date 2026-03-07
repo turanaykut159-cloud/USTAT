@@ -1,8 +1,9 @@
 /**
- * ÜSTAT v5.1 — Manuel İşlem Paneli.
+ * ÜSTAT v14.0 — Manuel İşlem Paneli (ManuelMotor).
  *
  * Kullanıcı sembol + yön + lot seçerek manuel işlem açar.
- * BABA risk kontrolü yapılır, OĞUL pozisyonu yönetir.
+ * BABA risk kontrolü yapılır, kullanıcı pozisyonu yönetir.
+ * OĞUL müdahale etmez, sadece risk göstergesi sağlar.
  *
  * Akış:
  *   1. Sembol + Yön seç → "Kontrol Et"
@@ -12,7 +13,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { checkManualTrade, executeManualTrade, getTrades } from '../services/api';
+import { checkManualTrade, executeManualTrade, getTrades, getManualRiskScores } from '../services/api';
 
 // ── Yardımcı fonksiyonlar ───────────────────────────────────────
 
@@ -64,17 +65,27 @@ export default function ManualTrade() {
   // ── Son manuel işlemler ──────────────────────────────────────
   const [recentTrades, setRecentTrades] = useState([]);
 
+  // ── Açık manuel pozisyon risk skorları ──────────────────────
+  const [riskScores, setRiskScores] = useState({});
+
   // Son manuel işlemleri çek
   const fetchRecentTrades = useCallback(async () => {
     const res = await getTrades({ strategy: 'manual', limit: 10 });
     setRecentTrades(res.trades || []);
   }, []);
 
+  // Risk skorlarını çek
+  const fetchRiskScores = useCallback(async () => {
+    const res = await getManualRiskScores();
+    setRiskScores(res.scores || {});
+  }, []);
+
   useEffect(() => {
     fetchRecentTrades();
-    const iv = setInterval(fetchRecentTrades, 10000);
+    fetchRiskScores();
+    const iv = setInterval(() => { fetchRecentTrades(); fetchRiskScores(); }, 10000);
     return () => clearInterval(iv);
-  }, [fetchRecentTrades]);
+  }, [fetchRecentTrades, fetchRiskScores]);
 
   // ── Kontrol Et ───────────────────────────────────────────────
   const handleCheck = useCallback(async () => {
@@ -325,6 +336,50 @@ export default function ManualTrade() {
           )}
         </div>
       </div>
+
+      {/* ── AÇIK MANUEL POZİSYON RİSK GÖSTERGELERİ ──────────────── */}
+      {Object.keys(riskScores).length > 0 && (
+        <div className="mt-risk-monitor">
+          <h3>Açık Manuel Pozisyonlar — Risk Göstergesi</h3>
+          <table>
+            <thead>
+              <tr>
+                <th style={{ textAlign: 'left' }}>Sembol</th>
+                <th>SL Risk</th>
+                <th>Rejim</th>
+                <th>K/Z</th>
+                <th>Sistem</th>
+                <th>Genel</th>
+                <th style={{ textAlign: 'right' }}>Skor</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(riskScores).map(([sym, rs]) => {
+                const labelMap = { green: 'DUSUK', yellow: 'ORTA', red: 'YUKSEK' };
+                const badge = (level) => (
+                  <span className={`mt-risk-dim mt-risk-dim--${level}`}>
+                    {labelMap[level] || level}
+                  </span>
+                );
+                const colorMap = { green: 'var(--success, #3fb950)', yellow: 'var(--warning, #d29922)', red: 'var(--danger, #f85149)' };
+                return (
+                  <tr key={sym}>
+                    <td style={{ fontWeight: 600 }}>{sym}</td>
+                    <td style={{ textAlign: 'center' }}>{badge(rs.sl_risk)}</td>
+                    <td style={{ textAlign: 'center' }}>{badge(rs.regime_risk)}</td>
+                    <td style={{ textAlign: 'center' }}>{badge(rs.pnl_risk)}</td>
+                    <td style={{ textAlign: 'center' }}>{badge(rs.system_risk)}</td>
+                    <td style={{ textAlign: 'center' }}>{badge(rs.overall)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: colorMap[rs.overall] || '#888' }}>
+                      {rs.score}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* ── SON MANUEL İŞLEMLER ──────────────────────────────────── */}
       <div className="mt-history">

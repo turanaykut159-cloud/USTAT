@@ -238,6 +238,16 @@ export async function executeManualTrade(symbol, direction, lot) {
   }
 }
 
+export async function getManualRiskScores() {
+  try {
+    const { data } = await client.get('/manual-trade/risk-scores');
+    return data;
+  } catch (err) {
+    console.error('[ÜSTAT API] getManualRiskScores:', err?.message ?? err);
+    return { scores: {} };
+  }
+}
+
 // ── ÜSTAT Beyin (v13.0) ──────────────────────────────────────
 
 export async function getUstatBrain(days = 90) {

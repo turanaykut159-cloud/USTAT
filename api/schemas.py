@@ -90,6 +90,8 @@ class PositionItem(BaseModel):
     cost_averaged: bool = False   # maliyetlendirme yapıldı mı
     peak_profit: float = 0.0     # ulaşılan en yüksek kâr (puan)
     voting_score: int = 0        # anlık 4-gösterge oylama skoru (0-4)
+    # ── Manuel pozisyon risk göstergesi ─────────────────────────
+    risk_score: dict = {}        # {sl_risk, regime_risk, pnl_risk, system_risk, overall, score}
 
 
 class PositionsResponse(BaseModel):
@@ -430,6 +432,11 @@ class ManualTradeExecuteResponse(BaseModel):
     sl: float = 0.0
     tp: float = 0.0
     lot: float = 0.0
+
+
+class ManualRiskScoresResponse(BaseModel):
+    """GET /api/manual-trade/risk-scores — Manuel pozisyon risk göstergeleri."""
+    scores: dict = {}
 
 
 # ═══════════════════════════════════════════════════════════════════

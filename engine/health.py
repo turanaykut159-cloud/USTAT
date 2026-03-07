@@ -36,6 +36,7 @@ class CycleTimings:
     top5_ms: float = 0.0
     ogul_signals_ms: float = 0.0
     h_engine_ms: float = 0.0
+    manuel_sync_ms: float = 0.0
     ustat_brain_ms: float = 0.0
     log_summary_ms: float = 0.0
     overrun: bool = False

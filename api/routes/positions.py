@@ -1,6 +1,6 @@
 """GET /api/positions — Açık pozisyonlar.
 
-MT5'ten canlı pozisyon listesi. Strateji bilgisi OĞUL active_trades ile zenginleştirilir.
+MT5'ten canlı pozisyon listesi. Strateji bilgisi OĞUL + ManuelMotor active_trades ile zenginleştirilir.
 POST /api/positions/close — Tek pozisyonu kapat (ticket ile).
 """
 
@@ -10,7 +10,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, HTTPException
 
-from api.deps import get_mt5, get_ogul, get_h_engine, get_engine
+from api.deps import get_mt5, get_ogul, get_h_engine, get_engine, get_manuel_motor
 from api.schemas import (
     ClosePositionRequest,
     ClosePositionResponse,
@@ -26,33 +26,43 @@ router = APIRouter()
 _TYPE_MAP = {0: "BUY", 1: "SELL", "BUY": "BUY", "SELL": "SELL"}
 
 
-def _strategy_for_position(ticket: int, symbol: str, ogul) -> str:
-    """Pozisyonun stratejisini OĞUL active_trades üzerinden bul (manual / trend_follow / vb.)."""
-    if not ogul or not getattr(ogul, "active_trades", None):
-        return "bilinmiyor"
-    for _sym, trade in ogul.active_trades.items():
-        if getattr(trade, "ticket", 0) == ticket and _sym == symbol:
-            return getattr(trade, "strategy", "") or "bilinmiyor"
+def _strategy_for_position(ticket: int, symbol: str, ogul, manuel_motor) -> str:
+    """Pozisyonun stratejisini OĞUL + ManuelMotor active_trades üzerinden bul."""
+    # Önce ManuelMotor kontrol (manuel pozisyonlar)
+    if manuel_motor and getattr(manuel_motor, "active_trades", None):
+        for _sym, trade in manuel_motor.active_trades.items():
+            if getattr(trade, "ticket", 0) == ticket and _sym == symbol:
+                return "manual"
+    # Sonra OĞUL kontrol (otomatik pozisyonlar)
+    if ogul and getattr(ogul, "active_trades", None):
+        for _sym, trade in ogul.active_trades.items():
+            if getattr(trade, "ticket", 0) == ticket and _sym == symbol:
+                return getattr(trade, "strategy", "") or "bilinmiyor"
     return "bilinmiyor"
 
 
-def _universal_fields(ticket: int, symbol: str, ogul) -> dict:
-    """OĞUL active_trades'den evrensel yönetim alanlarını oku."""
+def _universal_fields(ticket: int, symbol: str, ogul, manuel_motor) -> dict:
+    """Evrensel yönetim alanlarını oku (manuel pozisyonlar için default)."""
     defaults = {
         "tp1_hit": False, "breakeven_hit": False, "cost_averaged": False,
         "peak_profit": 0.0, "voting_score": 0,
     }
-    if not ogul or not getattr(ogul, "active_trades", None):
-        return defaults
-    for _sym, trade in ogul.active_trades.items():
-        if getattr(trade, "ticket", 0) == ticket and _sym == symbol:
-            return {
-                "tp1_hit": getattr(trade, "tp1_hit", False),
-                "breakeven_hit": getattr(trade, "breakeven_hit", False),
-                "cost_averaged": getattr(trade, "cost_averaged", False),
-                "peak_profit": getattr(trade, "peak_profit", 0.0),
-                "voting_score": getattr(trade, "voting_score", 0),
-            }
+    # Manuel pozisyonlar: evrensel yönetim alanları yok (kullanıcı kontrollü)
+    if manuel_motor and getattr(manuel_motor, "active_trades", None):
+        for _sym, trade in manuel_motor.active_trades.items():
+            if getattr(trade, "ticket", 0) == ticket and _sym == symbol:
+                return defaults
+    # OĞUL pozisyonları: evrensel yönetim alanları var
+    if ogul and getattr(ogul, "active_trades", None):
+        for _sym, trade in ogul.active_trades.items():
+            if getattr(trade, "ticket", 0) == ticket and _sym == symbol:
+                return {
+                    "tp1_hit": getattr(trade, "tp1_hit", False),
+                    "breakeven_hit": getattr(trade, "breakeven_hit", False),
+                    "cost_averaged": getattr(trade, "cost_averaged", False),
+                    "peak_profit": getattr(trade, "peak_profit", 0.0),
+                    "voting_score": getattr(trade, "voting_score", 0),
+                }
     return defaults
 
 
@@ -72,10 +82,11 @@ def _tur_for_position(ticket: int, strategy: str, hybrid_tickets: set) -> str:
 
 @router.get("/positions", response_model=PositionsResponse)
 async def get_positions():
-    """Açık pozisyonları döndür (strateji + tür ile)."""
+    """Açık pozisyonları döndür (strateji + tür + risk göstergesi ile)."""
     mt5 = get_mt5()
     ogul = get_ogul()
     h_engine = get_h_engine()
+    mm = get_manuel_motor()
 
     if not mt5 or not mt5.is_connected:
         return PositionsResponse()
@@ -87,6 +98,14 @@ async def get_positions():
     hybrid_tickets: set = set()
     if h_engine and getattr(h_engine, "hybrid_positions", None):
         hybrid_tickets = set(h_engine.hybrid_positions.keys())
+
+    # Manuel pozisyon risk skorları
+    risk_scores: dict = {}
+    if mm:
+        try:
+            risk_scores = mm.get_all_risk_scores()
+        except Exception:
+            pass
 
     items: list[PositionItem] = []
     for p in raw:
@@ -107,9 +126,12 @@ async def get_positions():
         swap = p.get("swap", 0.0)
         ticket = p.get("ticket", 0)
         symbol = p.get("symbol", "")
-        strategy = _strategy_for_position(ticket, symbol, ogul)
+        strategy = _strategy_for_position(ticket, symbol, ogul, mm)
         tur = _tur_for_position(ticket, strategy, hybrid_tickets)
-        ufields = _universal_fields(ticket, symbol, ogul)
+        ufields = _universal_fields(ticket, symbol, ogul, mm)
+
+        # Risk skoru: sadece Manuel pozisyonlar için
+        risk_score = risk_scores.get(symbol, {}) if tur == "Manuel" else {}
 
         items.append(PositionItem(
             ticket=ticket,
@@ -125,6 +147,7 @@ async def get_positions():
             open_time=open_time,
             strategy=strategy,
             tur=tur,
+            risk_score=risk_score,
             **ufields,
         ))
 
