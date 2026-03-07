@@ -119,11 +119,9 @@ MAX_SAME_DIRECTION:         int   = 3
 MAX_SAME_SECTOR_DIRECTION:  int   = 2
 MAX_INDEX_WEIGHT_SCORE:     float = 0.25
 
-# ── Risk hesaplama başlangıç tarihi ────────────────────────────────
-# Bu tarihten önceki risk snapshot ve trade verileri risk limitlerini
-# tetiklemez. Eski test/geliştirme dönemi verileri devre dışı kalır.
-# Değiştirmek için bu sabiti güncelleyin.
-RISK_BASELINE_DATE: str = "2026-03-07"
+# ── Risk hesaplama başlangıç tarihi (varsayılan) ──────────────────
+# Config'den okunur (risk.baseline_date). Bu sabit yalnızca fallback.
+_DEFAULT_RISK_BASELINE_DATE: str = "2026-03-07"
 
 # ── Kill-switch seviyeleri ───────────────────────────────────────────
 KILL_SWITCH_NONE: int = 0
@@ -132,7 +130,7 @@ KILL_SWITCH_L2:   int = 2   # sistem pause
 KILL_SWITCH_L3:   int = 3   # tam kapanış
 
 # ── Fake sinyal analiz sabitleri ───────────────────────────────────
-FAKE_SCORE_THRESHOLD:  int   = 3       # toplam >= 3 → pozisyon kapat
+FAKE_SCORE_THRESHOLD:  int   = 5       # toplam >= 5 → pozisyon kapat (3→5 rapor önerisi)
 FAKE_VOLUME_RATIO_MIN: float = 0.7     # hacim / 20-bar ort. < 0.7 → FAKE
 FAKE_VOLUME_LOOKBACK:  int   = 20      # hacim ortalaması bar sayısı
 FAKE_SPREAD_MULT: dict[str, float] = {"A": 2.5, "B": 3.5, "C": 5.0}
@@ -140,7 +138,7 @@ FAKE_MTF_EMA_PERIOD:   int   = 9       # multi-TF EMA periyodu
 FAKE_MTF_AGREEMENT_MIN: int  = 2       # en az 2/3 TF uyumu gerekli
 
 # ── Spread / USDTRY geçmiş buffer uzunluğu ──────────────────────────
-SPREAD_HISTORY_LEN: int = 30            # son 30 veri noktası (Madde 3.3)
+# SPREAD_HISTORY_LEN artık __init__'te dinamik hesaplanıyor (FAZ 2.4)
 FAKE_RSI_OVERBOUGHT:   float = 80.0
 FAKE_RSI_OVERSOLD:     float = 20.0
 FAKE_RSI_PERIOD:       int   = 14
@@ -262,7 +260,15 @@ class Baba:
         self.current_regime: Regime = Regime(regime_type=RegimeType.TREND)
         self.active_warnings: list[EarlyWarning] = []
 
-        # Spread ring buffer — sembol başına son 30 okuma (≈ 5 dk)
+        # Baseline date — config'den oku (FAZ 2.3)
+        self._risk_baseline_date: str = self._config.get(
+            "risk.baseline_date", _DEFAULT_RISK_BASELINE_DATE
+        )
+
+        # Spread ring buffer — cycle_interval'a göre dinamik boyut (FAZ 2.4)
+        _cycle_interval = self._config.get("engine.cycle_interval", 10)
+        self._spread_history_len: int = max(10, int(300 / _cycle_interval))
+
         self._spread_history: dict[str, list[float]] = {
             s: [] for s in WATCHED_SYMBOLS
         }
@@ -369,11 +375,15 @@ class Baba:
         bb_rats: list[float] = []
         details_per: dict[str, Any] = {}
 
+        # FAZ 2.1: Likidite sınıfına göre oy ağırlığı
+        _LIQ_VOTE_WEIGHT = {"A": 3, "B": 2, "C": 1}
+
         for symbol in WATCHED_SYMBOLS:
             result = self._classify_symbol(symbol)
             if result is None:
                 continue
-            votes[result["regime"]] += 1
+            liq = self._get_liquidity_class(symbol)
+            votes[result["regime"]] += _LIQ_VOTE_WEIGHT.get(liq, 1)
             details_per[symbol] = result
             if result.get("adx") is not None:
                 adx_vals.append(result["adx"])
@@ -922,6 +932,9 @@ class Baba:
 
     def _reset_daily(self, today: date) -> None:
         """Günlük sayaçları sıfırla."""
+        # FAZ 2.2: Snapshot ÖNCE al, SONRA reset yap (senkron sıralama)
+        snap = self._db.get_latest_risk_snapshot()
+
         self._risk_state["daily_reset_date"] = today
         self._risk_state["daily_trade_count"] = 0
         self._risk_state["daily_reset_equity"] = None   # önceki günü temizle
@@ -933,9 +946,7 @@ class Baba:
         ):
             self._clear_kill_switch("Günlük sıfırlama — L2 kaldırıldı")
 
-        # Fix 1: Reset anında equity'yi kaydet — yeni günün PnL bazı
-        # Bu sayede check_drawdown_limits() eski günün kaybını görmez
-        snap = self._db.get_latest_risk_snapshot()
+        # Snapshot'tan yeni günün equity bazını ayarla
         if snap:
             self._risk_state["daily_reset_equity"] = snap.get("equity", 0.0)
             logger.info(
@@ -1151,7 +1162,7 @@ class Baba:
         # Baseline: eski veriler risk hesabını etkilemesin
         since_str = max(
             f"{monday.isoformat()}T00:00:00",
-            f"{RISK_BASELINE_DATE}T00:00:00",
+            f"{self._risk_baseline_date}T00:00:00",
         )
         snapshots = self._db.get_risk_snapshots(
             since=since_str, limit=500,
@@ -1204,7 +1215,7 @@ class Baba:
         # Baseline: eski veriler risk hesabını etkilemesin
         since_str = max(
             f"{month_start.isoformat()}T00:00:00",
-            f"{RISK_BASELINE_DATE}T00:00:00",
+            f"{self._risk_baseline_date}T00:00:00",
         )
         snapshots = self._db.get_risk_snapshots(
             since=since_str, limit=1000,
@@ -1285,12 +1296,9 @@ class Baba:
             return False
 
         if floating_pnl < 0:
-            # Madde 1.3: Balance bazlı hesaplama (equity zaten floating'den etkilenmiş)
-            # MT5: equity = balance + floating_pnl → balance = equity - floating_pnl
-            balance = equity - floating_pnl
-            if balance <= 0:
-                return False
-            floating_loss_pct = abs(floating_pnl) / balance
+            # Standart finans formülü: floating loss / equity
+            # (Rapor AÇIK #2 düzeltmesi — eski formül balance bazlıydı)
+            floating_loss_pct = abs(floating_pnl) / equity
             if floating_loss_pct >= risk_params.max_floating_loss:
                 logger.warning(
                     f"FLOATING LOSS ENGELİ: %{floating_loss_pct*100:.2f} "
@@ -1306,8 +1314,8 @@ class Baba:
         Bu, cooldown → tekrar aynı trade'leri sayma → tekrar cooldown
         sonsuz döngüsünü önler.
         """
-        # Cooldown sonrası veya RISK_BASELINE_DATE sonrası (hangisi yeniyse)
-        since = self._risk_state.get("last_cooldown_end") or RISK_BASELINE_DATE
+        # Cooldown sonrası veya baseline sonrası (hangisi yeniyse)
+        since = self._risk_state.get("last_cooldown_end") or f"{self._risk_baseline_date}T00:00:00"
         trades = self._db.get_trades(limit=10, since=since)
         closed = [
             t for t in trades
@@ -1644,7 +1652,10 @@ class Baba:
         return symbol in self._killed_symbols
 
     def _close_all_positions(self, reason: str) -> list[int]:
-        """Tüm açık pozisyonları kapat (L3 için).
+        """Akıllı pozisyon kapatma (L3 için).
+
+        Rapor AÇIK #6 düzeltmesi: Önce zarardaki pozisyonları kapatır,
+        ardından drawdown hâlâ eşik üstündeyse kârdakileri de kapatır.
 
         Args:
             reason: Kapanış nedeni.
@@ -1662,40 +1673,45 @@ class Baba:
         except Exception as exc:
             logger.error(f"get_positions hatası (close_all): {exc}")
             return failed_tickets
+
+        # Pozisyonları kâr/zarar durumuna göre ayır
+        losing = [p for p in positions if p.get("profit", 0.0) < 0]
+        winning = [p for p in positions if p.get("profit", 0.0) >= 0]
+
+        logger.info(
+            f"L3 akıllı kapatma: {len(losing)} zararda, "
+            f"{len(winning)} kârda ({reason})"
+        )
+
         CLOSE_MAX_RETRIES = 3
         closed_count = 0
-        for pos in positions:
-            ticket = pos.get("ticket")
-            if ticket:
-                closed = False
-                for attempt in range(1, CLOSE_MAX_RETRIES + 1):
-                    try:
-                        result = self._mt5.close_position(ticket)
-                    except Exception as exc:
-                        logger.error(
-                            f"close_position hatası ticket={ticket} "
-                            f"(deneme {attempt}/{CLOSE_MAX_RETRIES}): {exc}"
-                        )
-                        result = None
-                    if result:
-                        closed_count += 1
-                        closed = True
-                        logger.info(
-                            f"Pozisyon kapatıldı: {ticket} ({reason}) "
-                            f"deneme {attempt}/{CLOSE_MAX_RETRIES}"
-                        )
-                        break
-                    else:
-                        logger.warning(
-                            f"Kapanış denemesi {attempt}/{CLOSE_MAX_RETRIES} "
-                            f"başarısız: ticket={ticket}"
-                        )
-                if not closed:
-                    failed_tickets.append(ticket)
-                    logger.error(
-                        f"Pozisyon {CLOSE_MAX_RETRIES} denemede kapatılamadı: "
-                        f"ticket={ticket}"
-                    )
+
+        # 1) Önce zarardakileri kapat
+        for pos in losing:
+            closed, failed = self._try_close_position(
+                pos, reason, CLOSE_MAX_RETRIES
+            )
+            closed_count += closed
+            failed_tickets.extend(failed)
+
+        # 2) Zarardakiler kapandıktan sonra drawdown hâlâ eşik üstündeyse
+        #    kârdakileri de kapat
+        if winning and self._still_above_hard_drawdown():
+            logger.warning(
+                f"Zarardakiler kapatıldı ama drawdown hâlâ eşik üstünde "
+                f"— {len(winning)} kârdaki pozisyon da kapatılıyor"
+            )
+            for pos in winning:
+                closed, failed = self._try_close_position(
+                    pos, reason, CLOSE_MAX_RETRIES
+                )
+                closed_count += closed
+                failed_tickets.extend(failed)
+        elif winning:
+            logger.info(
+                f"Zarardakiler kapatıldı, drawdown eşik altına düştü "
+                f"— {len(winning)} kârdaki pozisyon korundu"
+            )
 
         if closed_count > 0:
             self._db.insert_event(
@@ -1712,6 +1728,57 @@ class Baba:
                 action="positions_close_failed",
             )
         return failed_tickets
+
+    def _try_close_position(
+        self, pos: dict, reason: str, max_retries: int
+    ) -> tuple[int, list[int]]:
+        """Tek pozisyonu kapatmayı dene.
+
+        Returns:
+            (kapatılan_sayı, başarısız_ticket_listesi)
+        """
+        ticket = pos.get("ticket")
+        if not ticket:
+            return 0, []
+        for attempt in range(1, max_retries + 1):
+            try:
+                result = self._mt5.close_position(ticket)
+            except Exception as exc:
+                logger.error(
+                    f"close_position hatası ticket={ticket} "
+                    f"(deneme {attempt}/{max_retries}): {exc}"
+                )
+                result = None
+            if result:
+                logger.info(
+                    f"Pozisyon kapatıldı: {ticket} ({reason}) "
+                    f"deneme {attempt}/{max_retries}"
+                )
+                return 1, []
+            logger.warning(
+                f"Kapanış denemesi {attempt}/{max_retries} "
+                f"başarısız: ticket={ticket}"
+            )
+        logger.error(
+            f"Pozisyon {max_retries} denemede kapatılamadı: ticket={ticket}"
+        )
+        return 0, [ticket]
+
+    def _still_above_hard_drawdown(self) -> bool:
+        """Zarardaki pozisyonlar kapatıldıktan sonra drawdown kontrolü."""
+        try:
+            snap = self._db.get_latest_risk_snapshot()
+            if not snap:
+                return True  # Veri yoksa güvenli tarafta kal
+            equity = snap.get("equity", 0.0)
+            peak = self._risk_state.get("peak_equity", equity)
+            if peak <= 0:
+                return True
+            dd = (peak - equity) / peak
+            hard_limit = self._risk_state.get("hard_drawdown", 0.15)
+            return dd >= hard_limit
+        except Exception:
+            return True  # Hata durumunda güvenli tarafta kal
 
     def _evaluate_kill_switch_triggers(self) -> None:
         """Erken uyarılardan L1 tetikleyicilerini değerlendir."""
@@ -2165,8 +2232,8 @@ class Baba:
                 continue
             buf = self._spread_history[symbol]
             buf.append(tick.spread)
-            if len(buf) > SPREAD_HISTORY_LEN:
-                self._spread_history[symbol] = buf[-SPREAD_HISTORY_LEN:]
+            if len(buf) > self._spread_history_len:
+                self._spread_history[symbol] = buf[-self._spread_history_len:]
 
     def _update_usdtry_history(self) -> None:
         """USD/TRY fiyat geçmişini MT5'ten güncelle."""
@@ -2179,8 +2246,8 @@ class Baba:
             return
         if tick is not None:
             self._usdtry_history.append(tick.bid)
-            if len(self._usdtry_history) > SPREAD_HISTORY_LEN:
-                self._usdtry_history = self._usdtry_history[-SPREAD_HISTORY_LEN:]
+            if len(self._usdtry_history) > self._spread_history_len:
+                self._usdtry_history = self._usdtry_history[-self._spread_history_len:]
 
     def _usdtry_5m_move_pct(self) -> float:
         """USD/TRY son ~5dk hareket yüzdesi."""

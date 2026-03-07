@@ -233,9 +233,41 @@ def start_vite():
     return True
 
 
+def build_frontend():
+    """Vite production build olustur (FAZ 2.11)."""
+    log("[BUILD] Vite production build baslatiliyor...")
+    npm_cmd = os.path.join(DESKTOP_DIR, "node_modules", ".bin", "vite.cmd")
+    if not os.path.exists(npm_cmd):
+        # Fallback: npx
+        npm_cmd = "npx"
+        args = [npm_cmd, "vite", "build"]
+    else:
+        args = [npm_cmd, "build"]
+
+    try:
+        result = subprocess.run(
+            args,
+            cwd=DESKTOP_DIR,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            creationflags=CREATE_NO_WINDOW,
+        )
+        if result.returncode == 0:
+            log("  Build basarili")
+            return True
+        else:
+            log(f"  Build hatasi: {result.stderr[:200]}")
+            return False
+    except Exception as e:
+        log(f"  Build exception: {e}")
+        return False
+
+
 def start_electron():
     """Electron uygulamasini baslat."""
-    log("[3/3] Electron baslatiliyor...")
+    is_prod = "--prod" in sys.argv
+    log(f"[3/3] Electron baslatiliyor... (mod={'production' if is_prod else 'development'})")
     electron_exe = os.path.join(
         DESKTOP_DIR, "node_modules", "electron", "dist", "electron.exe"
     )
@@ -247,7 +279,7 @@ def start_electron():
     log(f"  CWD: {DESKTOP_DIR}")
 
     env = os.environ.copy()
-    env["NODE_ENV"] = "development"
+    env["NODE_ENV"] = "production" if is_prod else "development"
 
     # DETACHED_PROCESS: Electron'u gizli Python'dan bagimsiz calistir.
     # Boylece Python'un konsol durumunu (SW_HIDE) miras ALMAZ,
@@ -259,7 +291,7 @@ def start_electron():
         env=env,
         creationflags=DETACHED,
     )
-    log("  Electron baslatildi (DETACHED_PROCESS)")
+    log(f"  Electron baslatildi (DETACHED_PROCESS, NODE_ENV={env['NODE_ENV']})")
     return True
 
 
@@ -268,7 +300,8 @@ def main():
     with open(LOG_FILE, "w", encoding="utf-8") as f:
         f.write("")
 
-    log("=== USTAT v5.0 Baslatici ===")
+    is_prod = "--prod" in sys.argv
+    log(f"=== USTAT v5.2 Baslatici {'(PRODUCTION)' if is_prod else '(DEVELOPMENT)'} ===")
     log(f"Python: {sys.executable}")
 
     # 0. Hizli temizlik (minimum bekleme)
@@ -277,8 +310,14 @@ def main():
     # 1. API
     start_api()
 
-    # 2. Vite (bekleme YAPMAZ — Electron splash ekrani gosterir, Vite'i kendisi bekler)
-    start_vite()
+    if is_prod:
+        # 2. Production: Vite build yap (dist/ olustur)
+        if not build_frontend():
+            log("HATA: Frontend build basarisiz, development modda devam ediliyor")
+            start_vite()
+    else:
+        # 2. Vite (bekleme YAPMAZ — Electron splash ekrani gosterir, Vite'i kendisi bekler)
+        start_vite()
 
     # 3. Electron HEMEN baslat (splash screen gosterir, Vite hazir olunca uygulamayi yukler)
     start_electron()

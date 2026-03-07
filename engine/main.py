@@ -27,7 +27,7 @@ import signal
 import sys
 import time as _time
 import traceback
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 from engine.baba import Baba, validate_expiry_dates
 from engine.config import Config
@@ -90,7 +90,20 @@ class Engine:
         self.pipeline = pipeline or DataPipeline(self.mt5, self.db, self.config)
         self.ustat = ustat or Ustat(self.config, self.db)
         self.baba = baba or Baba(self.config, self.db, mt5=self.mt5)
-        self.risk_params = RiskParams()
+        self.risk_params = RiskParams(
+            max_daily_loss=self.config.get("risk.max_daily_loss_pct", 0.018),
+            max_total_drawdown=self.config.get("risk.max_total_drawdown_pct", 0.10),
+            hard_drawdown=self.config.get("risk.hard_drawdown_pct", 0.15),
+            risk_per_trade=self.config.get("risk.risk_per_trade_pct", 0.01),
+            max_open_positions=self.config.get("risk.max_open_positions", 5),
+            max_correlated_positions=self.config.get("risk.max_correlated_positions", 3),
+            max_weekly_loss=self.config.get("risk.max_weekly_loss_pct", 0.04),
+            max_monthly_loss=self.config.get("risk.max_monthly_loss_pct", 0.07),
+            max_floating_loss=self.config.get("risk.max_floating_loss_pct", 0.015),
+            max_daily_trades=self.config.get("risk.max_daily_trades", 5),
+            consecutive_loss_limit=self.config.get("risk.consecutive_loss_limit", 3),
+            cooldown_hours=self.config.get("risk.cooldown_hours", 4),
+        )
         self.ogul = ogul or Ogul(
             self.config, self.mt5, self.db,
             baba=self.baba, risk_params=self.risk_params,
@@ -132,6 +145,7 @@ class Engine:
         self._shutdown_requested: bool = False
         self._prev_mt5_tickets: set[int] = set()  # pozisyon kapanma tespiti için
         self._pending_closure_tickets: set[int] = set()  # VİOP uzlaşma bekleyen kapanmalar
+        self._last_cleanup_date: date | None = None  # FAZ 2.8: son temizlik tarihi
 
     # ═════════════════════════════════════════════════════════════════
     #  BAŞLATMA / DURDURMA
@@ -165,6 +179,11 @@ class Engine:
         else:
             logger.info("VİOP vade tarihleri doğrulandı — tümü iş günü.")
 
+        # 0.8. Veritabanı yedekleme (her başlatmada)
+        backup_path = self.db.backup()
+        if backup_path:
+            logger.info(f"DB yedek alındı: {backup_path}")
+
         # 1. MT5 bağlantısı
         if not self._connect_mt5():
             logger.critical("MT5 bağlantısı kurulamadı — engine başlatılamıyor.")
@@ -186,11 +205,14 @@ class Engine:
         self._running = True
         self._main_loop()
 
-    def stop(self, reason: str = "kullanıcı isteği") -> None:
+    def stop(self, reason: str = "kullanıcı isteği", close_positions: bool = False) -> None:
         """Engine'i durdur — graceful shutdown.
 
         Args:
             reason: Durdurma nedeni (log için).
+            close_positions: True ise MT5'teki tüm açık pozisyonlar
+                             kapatılır (BABA mekanizması ile 3 retry).
+                             False (varsayılan) ise pozisyonlar açık kalır.
         """
         if not self._running:
             return
@@ -199,20 +221,40 @@ class Engine:
         self._running = False
         self._shutdown_requested = True
 
-        # Açık pozisyonlar hakkında uyarı
+        # Açık pozisyonları kapat (istenirse)
         active = len(self.ogul.active_trades)
-        if active > 0:
-            logger.warning(
-                f"DİKKAT: {active} aktif işlem var — "
-                f"pozisyonlar MT5'te açık kalacak!"
-            )
-
         hybrid_count = len(self.h_engine.hybrid_positions)
-        if hybrid_count > 0:
-            logger.warning(
-                f"DİKKAT: {hybrid_count} hibrit pozisyon var — "
-                f"pozisyonlar MT5'te açık kalacak!"
+
+        if close_positions and (active > 0 or hybrid_count > 0):
+            logger.info(
+                f"Pozisyonlar kapatılıyor: {active} aktif + {hybrid_count} hibrit"
             )
+            try:
+                failed = self.baba._close_all_positions("ENGINE_STOP")
+                if failed:
+                    logger.error(
+                        f"Kapatılamayan pozisyonlar (ticket): {failed}"
+                    )
+                    self._log_event_safe(
+                        "ENGINE_STOP",
+                        f"Kapatılamayan pozisyonlar: {failed}",
+                        "ERROR",
+                    )
+                else:
+                    logger.info("Tüm pozisyonlar başarıyla kapatıldı.")
+            except Exception as exc:
+                logger.error(f"Pozisyon kapatma hatası: {exc}")
+        else:
+            if active > 0:
+                logger.warning(
+                    f"DİKKAT: {active} aktif işlem var — "
+                    f"pozisyonlar MT5'te açık kalacak!"
+                )
+            if hybrid_count > 0:
+                logger.warning(
+                    f"DİKKAT: {hybrid_count} hibrit pozisyon var — "
+                    f"pozisyonlar MT5'te açık kalacak!"
+                )
 
         # MT5 bağlantısını kapat
         try:
@@ -220,13 +262,15 @@ class Engine:
         except Exception as exc:
             logger.error(f"MT5 disconnect hatası: {exc}")
 
+        # Event'i DB kapanmadan ÖNCE yaz (kapalı DB'ye yazılamaz)
+        self._log_event_safe("ENGINE_STOP", f"Engine durduruldu: {reason}", "INFO")
+
         # DB'yi kapat
         try:
             self.db.close()
         except Exception as exc:
             logger.error(f"DB close hatası: {exc}")
 
-        self._log_event_safe("ENGINE_STOP", f"Engine durduruldu: {reason}", "INFO")
         logger.info("ÜSTAT Engine durduruldu.")
 
     # ═════════════════════════════════════════════════════════════════
@@ -417,6 +461,9 @@ class Engine:
         except Exception as exc:
             logger.error(f"ÜSTAT brain cycle hatası: {exc}")
         t9 = _pc()
+
+        # ── 7.5. Günlük DB temizliği (FAZ 2.8) ─────────────────
+        self._run_daily_cleanup()
 
         # ── 8. Cycle Loglama ──────────────────────────────────────
         self._log_cycle_summary(regime, risk_verdict, top5)
@@ -720,6 +767,37 @@ class Engine:
                 f"Aktif: {active_count} | "
                 f"Deaktif: {deactivated}"
             )
+
+    # ── FAZ 2.8: Günlük DB temizliği ─────────────────────────────────
+
+    def _run_daily_cleanup(self) -> None:
+        """Eski DB kayıtlarını günde 1 kez temizle."""
+        today = date.today()
+        if self._last_cleanup_date == today:
+            return
+        self._last_cleanup_date = today
+
+        now = datetime.now()
+        bars_cutoff = (now - timedelta(days=30)).isoformat()
+        events_cutoff = (now - timedelta(days=60)).isoformat()
+        snaps_cutoff = (now - timedelta(days=90)).isoformat()
+
+        try:
+            from engine.symbols import WATCHED_SYMBOLS
+            bars_del = 0
+            for sym in WATCHED_SYMBOLS:
+                for tf in ("M15", "H1"):
+                    bars_del += self.db.delete_bars(sym, tf, bars_cutoff)
+            events_del = self.db.delete_events(events_cutoff)
+            snaps_del = self.db.delete_risk_snapshots(snaps_cutoff)
+
+            if bars_del or events_del or snaps_del:
+                logger.info(
+                    f"DB temizlik: bars={bars_del}, events={events_del}, "
+                    f"snapshots={snaps_del}"
+                )
+        except Exception as exc:
+            logger.error(f"DB temizlik hatası: {exc}")
 
     def _log_event(
         self,

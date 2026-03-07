@@ -24,6 +24,7 @@ import {
   connectLiveWS,
 } from '../services/api';
 import { formatMoney, formatPrice, pnlClass, elapsed } from '../utils/formatters';
+import ConfirmModal from './ConfirmModal';
 
 // ── Yardımcı fonksiyonlar ───────────────────────────────────────
 
@@ -61,6 +62,7 @@ export default function HybridTrade() {
   const [hybridEvents, setHybridEvents] = useState([]);
   const [removingTicket, setRemovingTicket] = useState(null);
   const [tick, setTick] = useState(new Date()); // süre güncelleme
+  const [errorModal, setErrorModal] = useState(null); // { title, message }
 
   const wsRef = useRef(null);
 
@@ -162,7 +164,7 @@ export default function HybridTrade() {
       await fetchOpenPositions();
       await fetchEvents();
     } catch (err) {
-      window.alert('Çıkarma hatası: ' + (err?.message ?? String(err)));
+      setErrorModal({ title: 'Çıkarma Hatası', message: err?.message ?? String(err) });
     } finally {
       setRemovingTicket(null);
     }
@@ -512,6 +514,16 @@ export default function HybridTrade() {
           </table>
         )}
       </div>
+
+      {/* Hata Modalı */}
+      <ConfirmModal
+        open={errorModal != null}
+        title={errorModal?.title || 'Hata'}
+        message={errorModal?.message || ''}
+        variant="danger"
+        confirmLabel="Tamam"
+        onConfirm={() => setErrorModal(null)}
+      />
     </div>
   );
 }

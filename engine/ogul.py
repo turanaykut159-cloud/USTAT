@@ -56,7 +56,9 @@ logger = get_logger(__name__)
 # ── Trend Follow ──────────────────────────────────────────────────
 TF_EMA_FAST:          int   = 20
 TF_EMA_SLOW:          int   = 50
-TF_ADX_THRESHOLD:     float = 25.0
+TF_ADX_THRESHOLD:     float = 25.0   # eski eşik (referans)
+TF_ADX_HARD:          float = 28.0   # FAZ 2.6: kesin trend
+TF_ADX_SOFT:          float = 22.0   # FAZ 2.6: kesin range
 TF_MACD_CONFIRM_BARS: int   = 2     # histogram 2 bar aynı işaret
 TF_SL_ATR_MULT:       float = 1.5   # entry ± 1.5×ATR (fallback)
 TF_TP_ATR_MULT:       float = 2.0   # 2×ATR
@@ -66,7 +68,9 @@ TF_TRAILING_ATR_MULT: float = 1.5   # trailing stop 1.5×ATR
 MR_RSI_PERIOD:    int   = 14
 MR_RSI_OVERSOLD:  float = 20.0
 MR_RSI_OVERBOUGHT: float = 80.0
-MR_ADX_THRESHOLD: float = 25.0      # ADX < 25 gerekli (Fix 3: ölü bölge kapatıldı)
+MR_ADX_THRESHOLD: float = 25.0      # eski eşik (referans)
+MR_ADX_HARD:      float = 28.0      # FAZ 2.6: kesin trend (MR engel)
+MR_ADX_SOFT:      float = 22.0      # FAZ 2.6: kesin range (MR serbest)
 MR_BB_PERIOD:     int   = 20
 MR_BB_STD:        float = 2.0
 MR_SL_ATR_MULT:   float = 1.0       # BB bant ± 1 ATR
@@ -672,11 +676,11 @@ class Ogul:
 
             if strategy == StrategyType.TREND_FOLLOW:
                 signal = self._check_trend_follow(
-                    symbol, close, high, low, volume,
+                    symbol, close, high, low, volume, regime,
                 )
             elif strategy == StrategyType.MEAN_REVERSION:
                 signal = self._check_mean_reversion(
-                    symbol, close, high, low, volume,
+                    symbol, close, high, low, volume, regime,
                 )
             elif strategy == StrategyType.BREAKOUT:
                 signal = self._check_breakout(
@@ -729,11 +733,12 @@ class Ogul:
         high: np.ndarray,
         low: np.ndarray,
         volume: np.ndarray,
+        regime: "Regime | None" = None,
     ) -> Signal | None:
         """Trend follow sinyali kontrolü.
 
-        Long: EMA(20) > EMA(50) + ADX > 25 + MACD histogram 2 bar pozitif
-        Short: EMA(20) < EMA(50) + ADX > 25 + MACD histogram 2 bar negatif
+        Long: EMA(20) > EMA(50) + ADX > 22-28 (hysteresis) + MACD histogram 2 bar pozitif
+        Short: EMA(20) < EMA(50) + ADX > 22-28 (hysteresis) + MACD histogram 2 bar negatif
         """
         # İndikatörler
         ema_fast = ema(close, TF_EMA_FAST)
@@ -758,9 +763,16 @@ class Ogul:
         if len(hist_vals) < TF_MACD_CONFIRM_BARS:
             return None
 
-        # ADX eşik
-        if adx_val <= TF_ADX_THRESHOLD:
+        # ADX eşik — FAZ 2.6 hysteresis
+        # ADX <= 22: kesin range → TF engel
+        # ADX >= 28: kesin trend → TF serbest
+        # 22 < ADX < 28: geçiş bölgesi → rejim TREND ise devam et
+        if adx_val <= TF_ADX_SOFT:
             return None
+        if adx_val < TF_ADX_HARD:
+            # Geçiş bölgesi: yalnızca rejim TREND ise izin ver
+            if regime is None or regime.regime_type != RegimeType.TREND:
+                return None
 
         # Yön belirleme
         direction: SignalType | None = None
@@ -826,11 +838,12 @@ class Ogul:
         high: np.ndarray,
         low: np.ndarray,
         volume: np.ndarray,
+        regime: "Regime | None" = None,
     ) -> Signal | None:
         """Mean reversion sinyali kontrolü.
 
-        Long: RSI(14) < 20 + BB alt bant teması + ADX < 20 + W%R < -80
-        Short: RSI(14) > 80 + BB üst bant teması + ADX < 20 + W%R > -20
+        Long: RSI(14) < 20 + BB alt bant teması + ADX < 22-28 (hysteresis) + W%R < -80
+        Short: RSI(14) > 80 + BB üst bant teması + ADX < 22-28 (hysteresis) + W%R > -20
         C3: Williams %R çift onay eklendi.
         """
         # İndikatörler
@@ -856,9 +869,16 @@ class Ogul:
         if atr_val <= 0:
             return None
 
-        # ADX eşik — range piyasası gerekli
-        if adx_val >= MR_ADX_THRESHOLD:
+        # ADX eşik — FAZ 2.6 hysteresis
+        # ADX >= 28: kesin trend → MR engel
+        # ADX <= 22: kesin range → MR serbest
+        # 22 < ADX < 28: geçiş bölgesi → rejim RANGE ise devam et
+        if adx_val >= MR_ADX_HARD:
             return None
+        if adx_val > MR_ADX_SOFT:
+            # Geçiş bölgesi: yalnızca rejim RANGE ise izin ver
+            if regime is None or regime.regime_type != RegimeType.RANGE:
+                return None
 
         last_close = float(close[-1])
         direction: SignalType | None = None
@@ -3554,8 +3574,8 @@ class Ogul:
             and (t.get("regime") == regime_name or t.get("regime") is None)
         ]
 
-        if not recent or len(recent) < 3:
-            return 50.0
+        if not recent or len(recent) < 10:
+            return 30.0  # FAZ 2.7: yetersiz veri penaltısı (3→10 min, 50→30 default)
 
         wins = sum(1 for t in recent if t["pnl"] > 0)
         total = len(recent)

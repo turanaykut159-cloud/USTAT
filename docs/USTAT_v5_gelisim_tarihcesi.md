@@ -983,3 +983,45 @@ Bu düzeltmeler native SLTP çalışmadığı için sorunu çözmedi ama kod kal
 ### Çıkartılan
 - `Ogul.check_manual_trade()` (~145 satır) → ManuelMotor'a taşındı
 - `Ogul.open_manual_trade()` (~200 satır) → ManuelMotor'a taşındı
+
+---
+
+## #32 — 50 Kişilik Uzman Ekip Raporu Uygulaması (2026-03-08)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-08 |
+| **Neden** | 50 kişilik uzman ekip USTAT v5.2'yi 8 departmanda analiz etti. 28 tespitten 23 tam doğru, 3 kısmen doğru, 2 yanlış. Doğrulanmış 25 tespit 2 fazda uygulandı. |
+| **Kapsam** | FAZ 1: 6 kritik düzeltme. FAZ 2: 11 güçlendirme. Toplam 17 iş kalemi. |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `config/default.json` | `hard_drawdown_pct` 0.12→0.15, eksik risk parametreleri eklendi (7 yeni alan) |
+| `engine/main.py` | `RiskParams` config'den yüklenir (boş init yerine), DB backup çağrısı, günlük DB temizlik zamanlayıcısı |
+| `engine/baba.py` | Floating loss formülü düzeltildi (`|pnl|/equity`), fake sinyal eşiği 3→5, L3 akıllı kapatma (zarardakiler önce), baseline date config'den okunuyor, ring buffer dinamik boyut, günlük reset senkron snapshot, rejim oylamasında likidite ağırlığı |
+| `engine/ogul.py` | ADX hysteresis geçiş bölgesi (22-28), Top 5 tarihsel skor minimum eşik 3→10 |
+| `engine/database.py` | `backup()` metodu (otomatik yedekleme, son 5 tut) |
+| `desktop/src/components/OpenPositions.jsx` | 4× `window.alert()` → ConfirmModal |
+| `desktop/src/components/HybridTrade.jsx` | 1× `window.alert()` → ConfirmModal |
+| `desktop/src/components/ErrorBoundary.jsx` | Yeni: React Error Boundary bileşeni |
+| `desktop/src/App.jsx` | ErrorBoundary ile Routes sarmalandı |
+| `desktop/src/components/TradeHistory.jsx` | Client-side sayfalama (50/sayfa) |
+| `desktop/src/styles/theme.css` | Sayfalama stilleri |
+| `start_ustat.py` | `--prod` flag desteği, production build fonksiyonu |
+
+### Eklenen
+- `ErrorBoundary.jsx` — React hata sınırı bileşeni
+- `database.py:backup()` — otomatik DB yedekleme
+- `main.py:_run_daily_cleanup()` — günlük eski veri temizliği
+- `baba.py:_try_close_position()` — tek pozisyon kapatma yardımcısı
+- `baba.py:_still_above_hard_drawdown()` — drawdown kontrol yardımcısı
+- ADX hysteresis sabitleri: `TF_ADX_HARD/SOFT`, `MR_ADX_HARD/SOFT`
+- TradeHistory sayfalama UI + CSS
+- `start_ustat.py:build_frontend()` — Vite production build
+
+### Çıkartılan
+- `RISK_BASELINE_DATE` sabit → `_risk_baseline_date` instance değişkeni (config'den)
+- `SPREAD_HISTORY_LEN` sabit → `_spread_history_len` dinamik (cycle_interval'a göre)
+- 5× `window.alert()` çağrısı → ConfirmModal

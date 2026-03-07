@@ -19,6 +19,7 @@ import HybridTrade from './components/HybridTrade';
 import AutoTrading from './components/AutoTrading';
 import SystemHealth from './components/SystemHealth';
 import Settings from './components/Settings';
+import ErrorBoundary from './components/ErrorBoundary';
 
 export default function App() {
   const [isLocked, setIsLocked] = useState(true);
@@ -42,17 +43,19 @@ export default function App() {
         <div className="app-body">
           <SideNav />
           <main className="app-content">
-            <Routes>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/manual" element={<ManualTrade />} />
-              <Route path="/hybrid" element={<HybridTrade />} />
-              <Route path="/auto" element={<AutoTrading />} />
-              <Route path="/trades" element={<TradeHistory />} />
-              <Route path="/performance" element={<Performance />} />
-              <Route path="/risk" element={<RiskManagement />} />
-              <Route path="/health" element={<SystemHealth />} />
-              <Route path="/settings" element={<Settings />} />
-            </Routes>
+            <ErrorBoundary>
+              <Routes>
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/manual" element={<ManualTrade />} />
+                <Route path="/hybrid" element={<HybridTrade />} />
+                <Route path="/auto" element={<AutoTrading />} />
+                <Route path="/trades" element={<TradeHistory />} />
+                <Route path="/performance" element={<Performance />} />
+                <Route path="/risk" element={<RiskManagement />} />
+                <Route path="/health" element={<SystemHealth />} />
+                <Route path="/settings" element={<Settings />} />
+              </Routes>
+            </ErrorBoundary>
           </main>
         </div>
       </div>
