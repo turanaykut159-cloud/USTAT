@@ -590,3 +590,29 @@ Bu düzeltmeler native SLTP çalışmadığı için sorunu çözmedi ama kod kal
 
 ### Geri Alma Planı
 - `engine/data_pipeline.py` satır 632: koşul `stored_peak > max_eq` → `stored_peak > max_eq * 1.5` geri çevrilir
+
+---
+
+## #20 — İşlem Geçmişi Baseline Filtresini Kaldır (2026-03-07)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-07 |
+| **Neden** | `RISK_BASELINE_DATE` trades API'sinde de filtre olarak kullanılıyordu. Baseline güncellenince işlem geçmişi boş görünüyordu. Baseline sadece risk hesaplamalarını etkilemeli. |
+| **Kök Neden** | `trades.py` endpoint'leri `since=RISK_BASELINE_DATE` parametresiyle veritabanı sorgusu yapıyordu — işlem gösterimi risk tarihine bağlanmıştı. |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `api/routes/trades.py` | `get_trades()` ve `get_trade_stats()` sorgularından `since=RISK_BASELINE_DATE` kaldırıldı. `RISK_BASELINE_DATE` import'u kaldırıldı. |
+
+### Eklenen
+- (yok)
+
+### Çıkartılan
+- `trades.py`'den `RISK_BASELINE_DATE` import ve filtresi
+
+### Geri Alma Planı
+- `trades.py`'ye `from engine.baba import RISK_BASELINE_DATE` import'u geri eklenir
+- `get_trades` ve `get_trade_stats` sorgularına `since=RISK_BASELINE_DATE` parametresi geri eklenir
