@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.1 — Hibrit İşlem Paneli.
+ * ÜSTAT v5.2 — Hibrit İşlem Paneli.
  *
  * İnsan işlemi açar, robot yönetir ve kapatır.
  * Açık pozisyonlardan seçerek hibrite devredilir.

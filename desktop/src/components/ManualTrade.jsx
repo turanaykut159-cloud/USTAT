@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.1 — Manuel İşlem Paneli.
+ * ÜSTAT v5.2 — Manuel İşlem Paneli.
  *
  * Kullanıcı sembol + yön + lot seçerek manuel işlem açar.
  * BABA risk kontrolü yapılır, OĞUL pozisyonu yönetir.

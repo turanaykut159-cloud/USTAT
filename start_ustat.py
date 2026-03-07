@@ -1,5 +1,5 @@
 """
-USTAT v5.1 - Baslatici
+USTAT v5.2 - Baslatici
 
 API + Vite + Electron baslatir.
 Her adimi PORT KONTROLU ile dogrulayarak ilerler.

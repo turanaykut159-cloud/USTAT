@@ -1,5 +1,5 @@
 {
-  "version": "5.1.0",
+  "version": "5.2.0",
   "engine": {
     "cycle_interval": 10,
     "data_lookback_bars": 500,

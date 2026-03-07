@@ -1,4 +1,4 @@
-# ÜSTAT v5.1 — Gelişim Tarihçesi
+# ÜSTAT v5.2 — Gelişim Tarihçesi
 
 ---
 
@@ -921,3 +921,29 @@ Bu düzeltmeler native SLTP çalışmadığı için sorunu çözmedi ama kod kal
 - Settings.jsx Risk Parametreleri bölümü (Risk Yönetimi sayfasıyla mükerrerdi)
 - Settings.jsx SEVERITY_ORDER dead code
 - 4 adet hardcoded `"2026-02-01"` string (frontend + backend)
+
+---
+
+## #30 — Versiyon Yükseltme: v5.1 → v5.2 (2026-03-08)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-08 |
+| **Neden** | v5.1 commit'inden (52299aa, 2026-03-05) bu yana kümülatif değişiklik %41,2 (14.817 satır / 36.000 baz). %10 eşiği aşıldı — versiyon yükseltme zorunlu. |
+| **Kapsam** | 30 dosyada versiyon referansı güncelleme (sabitler, UI, JSDoc, başlatıcılar, paket meta) |
+
+### Değişiklikler
+
+| Kategori | Dosya Sayısı | Açıklama |
+|----------|-------------|----------|
+| Aktif sabitler | 5 | `package.json`, `Settings.jsx`, `api/server.py`, `engine/__init__.py` — VERSION/API_VERSION |
+| Kullanıcı-görünür UI | 5 | `main.js` (APP_TITLE + Splash), `index.html`, `LockScreen.jsx`, `TopBar.jsx` |
+| Başlatıcılar | 3 | `start_ustat.py`, `.bat`, `.vbs` |
+| JSDoc/Docstring | 17 | Tüm React bileşenleri + services + utils + theme.css |
+| Gelişim tarihçesi | 1 | Başlık v5.1 → v5.2 |
+
+### Eklenen
+- v5.2 versiyon numarası (tüm referans noktaları)
+
+### Çıkartılan
+- v5.1 versiyon numarası (tarihsel referanslar docs/ içinde korundu)

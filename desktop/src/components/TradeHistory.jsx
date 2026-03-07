@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.1 — İşlem Geçmişi ekranı.
+ * ÜSTAT v5.2 — İşlem Geçmişi ekranı.
  *
  * Layout:
  *   1. Filtre çubuğu: Dönem, Sembol, Yön, Sonuç

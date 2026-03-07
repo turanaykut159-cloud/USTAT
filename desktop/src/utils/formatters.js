@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.1 — Ortak formatlama yardımcıları.
+ * ÜSTAT v5.2 — Ortak formatlama yardımcıları.
  *
  * Tüm bileşenlerde tekrarlanan formatMoney, formatPrice, pnlClass, elapsed
  * fonksiyonları burada merkezileştirilmiştir.

@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.1 — Açık Pozisyonlar ekranı.
+ * ÜSTAT v5.2 — Açık Pozisyonlar ekranı.
  *
  * Tablo:  Sembol, Yön, Lot, Giriş Fiy., Anlık Fiy., SL, TP,
  *         Floating K/Z, Süre, Rejim

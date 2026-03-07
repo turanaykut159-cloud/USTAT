@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 
 class StatusResponse(BaseModel):
     """GET /api/status — Sistem durumu."""
-    version: str = "5.1.0"
+    version: str = "5.2.0"
     engine_running: bool = False
     mt5_connected: bool = False
     regime: str = "TREND"          # TREND / RANGE / VOLATILE / OLAY

@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.1 — Sistem Sağlığı sayfası.
+ * ÜSTAT v5.2 — Sistem Sağlığı sayfası.
  *
  * 6 bölüm:
  *   1. Motor Döngü Performansı   — adım breakdown, trend grafik, ort/max

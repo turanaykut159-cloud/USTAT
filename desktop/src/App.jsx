@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.1 Desktop — Ana uygulama bileşeni.
+ * ÜSTAT v5.2 Desktop — Ana uygulama bileşeni.
  *
  * HashRouter kullanılır (Electron file:// protokolü uyumu).
  * React Router v6 ile 5 sayfa yönlendirme.
