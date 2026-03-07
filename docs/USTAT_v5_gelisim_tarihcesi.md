@@ -714,3 +714,28 @@ Bu düzeltmeler native SLTP çalışmadığı için sorunu çözmedi ama kod kal
 ### Davranış Değişikliği
 - Önceki: Tüm kapanmış işlemlerin PnL toplamı (eski -482K zararlı işlemler dahil)
 - Yeni: 01.02.2026 ve sonrasındaki işlemler dahil; eski işlemler istatistik dışı
+
+---
+
+## #24 — Profit Factor Baseline Tutarsızlığı Düzeltmesi (2026-03-07)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-07 |
+| **Neden** | Dashboard'da Profit Factor "—" (çizgi) gösteriyordu |
+| **Kök Neden** | `performance.py` endpoint'i `RISK_BASELINE_DATE = "2026-03-07"` (bugün) kullanıyordu; bugün kapanmış işlem yok → gross_loss=0 → profit_factor=0 → "—" gösterimi. `/trades/stats` ise `"2026-02-01"` kullanıyordu — tutarsızlık. |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `api/routes/performance.py` | `RISK_BASELINE_DATE` import'u kaldırıldı → `_STATS_BASELINE = "2026-02-01"` sabit tanımlandı |
+| `api/routes/performance.py` | `db.get_trades(since=RISK_BASELINE_DATE)` → `db.get_trades(since=_STATS_BASELINE)` |
+| `api/routes/performance.py` | `get_daily_end_snapshots(since=RISK_BASELINE_DATE)` → `since=_STATS_BASELINE` |
+
+### Eklenen
+- `_STATS_BASELINE` sabiti — `/trades/stats` ve `/performance` endpoint'leri artık aynı baseline kullanıyor
+
+### Davranış Değişikliği
+- Önceki: Profit Factor bugünün tarihinden hesaplanıyor → veri yok → "—"
+- Yeni: 01.02.2026 sonrası tüm işlemlerden hesaplanıyor → 0.77 (doğru değer)
