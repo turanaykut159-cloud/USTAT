@@ -1,9 +1,12 @@
 """GET /api/risk — Risk snapshot.
 
 Drawdown, limitler, rejim, kill-switch, sayaçlar.
+daily_drawdown_pct ve weekly_drawdown_pct anlık hesaplanır (DB şemasına dokunulmaz).
 """
 
 from __future__ import annotations
+
+from datetime import date, timedelta
 
 from fastapi import APIRouter
 
@@ -30,6 +33,32 @@ async def get_risk():
             resp.daily_pnl = snap.get("daily_pnl", 0.0)
             resp.floating_pnl = snap.get("floating_pnl", 0.0)
             resp.total_drawdown_pct = snap.get("drawdown", 0.0)
+            equity = snap.get("equity", 0.0) or 0.0
+
+            # daily_drawdown_pct: gün başı equity bazlı (Madde 1.2)
+            daily_pnl = snap.get("daily_pnl", 0.0)
+            day_start_equity = equity - daily_pnl
+            if daily_pnl < 0 and day_start_equity > 0:
+                resp.daily_drawdown_pct = abs(daily_pnl) / day_start_equity
+            else:
+                resp.daily_drawdown_pct = 0.0
+
+            # weekly_drawdown_pct: hafta başı equity'den anlık hesapla
+            today = date.today()
+            monday = today - timedelta(days=today.weekday())
+            week_start_iso = f"{monday.isoformat()}T00:00:00"
+            snapshots = db.get_risk_snapshots(since=week_start_iso, limit=500)
+            if snapshots and equity > 0:
+                week_start_equity = snapshots[-1].get("equity", 0.0) or 0.0
+                if week_start_equity > 0 and equity < week_start_equity:
+                    resp.weekly_drawdown_pct = (week_start_equity - equity) / week_start_equity
+                else:
+                    resp.weekly_drawdown_pct = 0.0
+            else:
+                resp.weekly_drawdown_pct = 0.0
+
+            resp.equity = equity
+            resp.balance = snap.get("balance", 0.0) or 0.0
 
     # ── Baba'dan canlı risk bilgisi ──────────────────────────────
     if baba:

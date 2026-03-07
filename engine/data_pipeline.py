@@ -61,6 +61,11 @@ EXPECTED_INTERVALS: dict[str, int] = {
 ZSCORE_THRESHOLD: float = 5.0
 MAX_CONSECUTIVE_MISSING: int = 3
 
+# Deaktivasyon kontrolü sadece bu timeframe'lerde çalışır.
+# M1/M5 çok granüler — VİOP'ta gün içi likidite boşlukları (4+ dk)
+# normal olmasına rağmen 3+ missing bar eşiğini aşıp sahte deaktivasyon tetikler.
+DEACTIVATION_TIMEFRAMES: frozenset[str] = frozenset({"M15", "H1"})
+
 
 # ── Yardımcı veri sınıfı ────────────────────────────────────────────
 @dataclass
@@ -95,6 +100,28 @@ class DataPipeline:
 
         # Son tick verileri (pipeline dışından okunabilir)
         self.latest_ticks: dict[str, TickSnapshot] = {}
+
+        # MT5 cache — WebSocket buradan okur, MT5'e doğrudan gitmez (Madde 2.4)
+        self.latest_account: Any | None = None   # AccountInfo nesnesi
+        self.latest_positions: list[dict] = []   # Pozisyon dict listesi
+        self._cache_time: datetime | None = None  # Son cache güncelleme zamanı
+
+        # Peak equity baseline doğrulaması
+        self._validate_peak_equity()
+
+    def is_cache_stale(self, max_age_seconds: float = 15.0) -> bool:
+        """Cache'in yaşını kontrol et.
+
+        Args:
+            max_age_seconds: Kabul edilebilir maksimum yaş (saniye).
+
+        Returns:
+            True → cache eski veya yok, False → taze.
+        """
+        if self._cache_time is None:
+            return True
+        age = (datetime.now() - self._cache_time).total_seconds()
+        return age > max_age_seconds
 
     # ── public: ana cycle ────────────────────────────────────────────
     def run_cycle(self) -> None:
@@ -229,9 +256,13 @@ class DataPipeline:
         df = self._filter_outliers(df, symbol, timeframe)
 
         # ── 4. Ardışık eksik bar kontrolü ────────────────────────────
-        is_healthy = self._check_consecutive_missing(
-            df, symbol, timeframe, original_len
-        )
+        # M1/M5 atlanır: VİOP'ta gün içi likidite boşlukları normal
+        if timeframe in DEACTIVATION_TIMEFRAMES:
+            is_healthy = self._check_consecutive_missing(
+                df, symbol, timeframe, original_len
+            )
+        else:
+            is_healthy = True
 
         cleaned = original_len - len(df)
         if cleaned > 0:
@@ -340,6 +371,31 @@ class DataPipeline:
 
         return df
 
+    @staticmethod
+    def _is_market_hours_gap(t1: pd.Timestamp, t2: pd.Timestamp) -> bool:
+        """İki bar arasındaki boşluk piyasa kapalı saatlerine mi denk geliyor?
+
+        VİOP piyasa saatleri: Hafta içi ~09:30-18:15.
+        Gece kapanış→açılış ve hafta sonu boşlukları normal kabul edilir.
+
+        Args:
+            t1: Önceki barın zamanı.
+            t2: Sonraki barın zamanı.
+
+        Returns:
+            True ise gap piyasa kapalı dönemine denk geliyor (normal).
+        """
+        # Hafta sonu geçişi: Cuma → Pazartesi
+        if t1.weekday() == 4 and t2.weekday() == 0:  # Fri→Mon
+            return True
+        # Farklı günler arası (gece kapanışı): aynı hafta içi
+        if t1.date() != t2.date():
+            return True
+        # Aynı gün ama gece seansı arası (18:15 → ertesi gün)
+        if t1.hour >= 18 or t2.hour < 9:
+            return True
+        return False
+
     def _check_consecutive_missing(
         self,
         df: pd.DataFrame,
@@ -350,6 +406,7 @@ class DataPipeline:
         """Ardışık eksik bar kontrolü.
 
         3+ ardışık beklenen bar eksikse kontratı deaktif eder.
+        Piyasa kapalı saatlerindeki (gece, hafta sonu) boşluklar sayılmaz.
 
         Args:
             df: Temizlenmiş DataFrame.
@@ -364,11 +421,20 @@ class DataPipeline:
             return True
 
         expected_sec = EXPECTED_INTERVALS.get(timeframe, 60)
-        diffs = df["time"].diff().dt.total_seconds().iloc[1:]
+        times = df["time"]
+        diffs = times.diff().dt.total_seconds().iloc[1:]
 
         # Ardışık eksik bar sayısı = (gerçek aralık / beklenen) - 1
         missing_counts = (diffs / expected_sec).round().astype(int) - 1
         missing_counts = missing_counts.clip(lower=0)
+
+        # Piyasa kapalı saatlerindeki boşlukları sıfırla
+        for idx in missing_counts.index:
+            if missing_counts[idx] >= MAX_CONSECUTIVE_MISSING:
+                t1 = times.iloc[idx - 1] if idx > 0 else times.iloc[0]
+                t2 = times.iloc[idx] if idx < len(times) else times.iloc[-1]
+                if self._is_market_hours_gap(t1, t2):
+                    missing_counts.at[idx] = 0
 
         max_consecutive = int(missing_counts.max()) if len(missing_counts) > 0 else 0
 
@@ -463,8 +529,16 @@ class DataPipeline:
             # Açık pozisyonlar
             positions = self._mt5.get_positions()
 
-            # Floating PnL = pozisyonların toplam profit'i
-            floating_pnl = sum(p.get("profit", 0.0) for p in positions)
+            # Cache güncelle — WebSocket buradan okur (Madde 2.4)
+            self.latest_account = account
+            self.latest_positions = positions
+            self._cache_time = datetime.now()
+
+            # Floating PnL = pozisyonların toplam profit + swap
+            # MT5: equity = balance + profit + swap, dolayısıyla her ikisi de dahil
+            floating_pnl = sum(
+                p.get("profit", 0.0) + p.get("swap", 0.0) for p in positions
+            )
 
             # Günlük PnL — gün başı equity'den fark
             daily_pnl = self._calculate_daily_pnl(account.equity)
@@ -483,6 +557,7 @@ class DataPipeline:
 
             snapshot: dict[str, Any] = {
                 "equity": account.equity,
+                "balance": account.balance,
                 "floating_pnl": floating_pnl,
                 "daily_pnl": daily_pnl,
                 "positions_json": positions,
@@ -526,10 +601,46 @@ class DataPipeline:
         start_equity = first.get("equity", current_equity)
         return round(current_equity - start_equity, 2)
 
-    def _calculate_drawdown(self, current_equity: float) -> float:
-        """Drawdown hesapla (peak equity'ye göre).
+    def _validate_peak_equity(self) -> None:
+        """Peak equity'yi RISK_BASELINE_DATE'e göre doğrula.
 
-        Son 500 risk snapshot'tan peak equity bulunur.
+        Eski test/geliştirme verilerinden kalan şişirilmiş peak_equity
+        değerini tespit eder ve baseline sonrası gerçek max equity ile
+        değiştirir. Engine başlangıcında bir kez çalışır.
+        """
+        from engine.baba import RISK_BASELINE_DATE
+
+        stored = self._db.get_state("peak_equity")
+        if not stored:
+            return
+
+        stored_peak = float(stored)
+
+        # Baseline sonrası gerçek max equity'yi bul
+        snapshots = self._db.get_risk_snapshots(
+            since=f"{RISK_BASELINE_DATE}T00:00:00", limit=50000,
+        )
+        if not snapshots:
+            return
+
+        max_eq = max(
+            (s.get("equity", 0.0) for s in snapshots),
+            default=0.0,
+        )
+
+        # Stored peak, gerçek max'ın 1.5 katından büyükse → stale
+        if max_eq > 0 and stored_peak > max_eq * 1.5:
+            self._db.set_state("peak_equity", str(max_eq))
+            logger.warning(
+                f"Peak equity sıfırlandı: {stored_peak:.2f} → {max_eq:.2f} "
+                f"(RISK_BASELINE_DATE={RISK_BASELINE_DATE} ile uyumsuz)"
+            )
+
+    def _calculate_drawdown(self, current_equity: float) -> float:
+        """Drawdown hesapla (kalıcı peak equity'ye göre).
+
+        Peak equity DB'de kalıcı saklanır (Madde 1.4).
+        İlk çalıştırmada DB'de peak yoksa mevcut equity kullanılır.
 
         Args:
             current_equity: Mevcut equity.
@@ -537,13 +648,17 @@ class DataPipeline:
         Returns:
             Drawdown oranı (0.0–1.0 arası). 0.05 = %5 drawdown.
         """
-        snapshots = self._db.get_risk_snapshots(limit=500)
+        # DB'den kalıcı peak oku
+        stored = self._db.get_state("peak_equity")
+        stored_peak = float(stored) if stored else 0.0
 
-        if not snapshots:
-            return 0.0
+        # Mevcut equity ile karşılaştır
+        peak = max(stored_peak, current_equity)
 
-        peak = max(s.get("equity", 0.0) for s in snapshots)
-        peak = max(peak, current_equity)
+        # Yeni peak ise DB'ye kaydet
+        if peak > stored_peak:
+            self._db.set_state("peak_equity", str(peak))
+            logger.debug(f"Peak equity güncellendi: {stored_peak:.2f} → {peak:.2f}")
 
         if peak <= 0:
             return 0.0

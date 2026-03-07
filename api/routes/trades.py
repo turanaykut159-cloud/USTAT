@@ -13,6 +13,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, Query
 
 from api.deps import get_db, get_engine
+from engine.baba import RISK_BASELINE_DATE
 from api.schemas import (
     ApproveRequest,
     ApproveResponse,
@@ -86,12 +87,21 @@ async def get_trades(
     strategy: str | None = Query(None, description="Strateji filtresi"),
     limit: int = Query(100, ge=1, le=1000, description="Maks kayıt"),
 ):
-    """İşlem geçmişini filtreli olarak döndür."""
+    """İşlem geçmişini filtreli olarak döndür. MT5'te değişim olduğunda anlık: önce son 3 gün sync."""
+    engine = get_engine()
+    if engine and getattr(engine.mt5, "_connected", False):
+        try:
+            engine.sync_mt5_history_recent(3)
+        except Exception:
+            pass
     db = get_db()
     if not db:
         return TradesResponse()
 
-    rows = db.get_trades(symbol=symbol, strategy=strategy, limit=limit)
+    rows = db.get_trades(
+        symbol=symbol, strategy=strategy,
+        since=RISK_BASELINE_DATE, limit=limit,
+    )
     items = [_to_trade_item(r) for r in rows]
 
     return TradesResponse(count=len(items), trades=items)
@@ -109,12 +119,19 @@ async def get_trade_stats(
 
     En kârlı, en zararlı, en uzun, en kısa işlemler.
     Strateji ve sembol bazlı kırılımlar.
+    MT5'te değişim olduğunda anlık: önce son 3 gün sync.
     """
+    engine = get_engine()
+    if engine and getattr(engine.mt5, "_connected", False):
+        try:
+            engine.sync_mt5_history_recent(3)
+        except Exception:
+            pass
     db = get_db()
     if not db:
         return TradeStatsResponse()
 
-    rows = db.get_trades(limit=limit)
+    rows = db.get_trades(since=RISK_BASELINE_DATE, limit=limit)
     if not rows:
         return TradeStatsResponse()
 
@@ -262,11 +279,16 @@ async def sync_mt5_trades(days: int = Query(90, ge=1, le=365)):
         raise HTTPException(503, "MT5 bağlantısı yok")
 
     trades = engine.mt5.get_history_for_sync(days=days)
-    added = engine.db.sync_mt5_trades(trades)
+    synced = engine.db.sync_mt5_trades(trades)
+    deduped = engine.db.deduplicate_trades()
 
     return {
         "success": True,
         "total_found": len(trades),
-        "newly_added": added,
-        "message": f"{added} yeni trade eklendi ({len(trades)} toplam)",
+        "newly_added": synced,
+        "duplicates_removed": deduped,
+        "message": (
+            f"{synced} trade senkronize edildi, "
+            f"{deduped} çift kayıt temizlendi ({len(trades)} toplam)"
+        ),
     }

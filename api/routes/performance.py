@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
-from datetime import datetime
 
 from fastapi import APIRouter, Query
 
-from api.deps import get_db
+from api.deps import get_db, get_engine
+from engine.baba import RISK_BASELINE_DATE
 from api.schemas import EquityPoint, PerformanceResponse
 
 router = APIRouter()
@@ -22,13 +22,19 @@ router = APIRouter()
 async def get_performance(
     days: int = Query(30, ge=1, le=365, description="Performans penceresi (gün)"),
 ):
-    """Performans metriklerini hesapla."""
+    """Performans metriklerini hesapla. MT5'te değişim olduğunda anlık: önce son 3 gün sync."""
+    engine = get_engine()
+    if engine and getattr(engine.mt5, "_connected", False):
+        try:
+            engine.sync_mt5_history_recent(3)
+        except Exception:
+            pass
     db = get_db()
     if not db:
         return PerformanceResponse()
 
-    # ── İşlemler ──────────────────────────────────────────────────
-    trades = db.get_trades(limit=5000)
+    # ── İşlemler (baseline sonrası) ────────────────────────────────
+    trades = db.get_trades(since=RISK_BASELINE_DATE, limit=5000)
     if not trades:
         return PerformanceResponse()
 
@@ -70,29 +76,39 @@ async def get_performance(
     best_day = max(daily_pnls) if daily_pnls else 0.0
     worst_day = min(daily_pnls) if daily_pnls else 0.0
 
-    # ── Sharpe Ratio (basitleştirilmiş, günlük) ──────────────────
+    # ── Sharpe Ratio (yüzde getiri bazlı, Madde 2.2) ─────────────
     sharpe_ratio = 0.0
-    if len(daily_pnls) >= 5:
-        mean_daily = sum(daily_pnls) / len(daily_pnls)
-        variance = sum((d - mean_daily) ** 2 for d in daily_pnls) / len(daily_pnls)
-        std_daily = math.sqrt(variance) if variance > 0 else 0.0
-        if std_daily > 0:
-            sharpe_ratio = (mean_daily / std_daily) * math.sqrt(252)
+    daily_snapshots = db.get_daily_end_snapshots(
+        since=f"{RISK_BASELINE_DATE}T00:00:00", limit=365,
+    )
+    if daily_snapshots:
+        daily_returns: list[float] = []
+        for snap in daily_snapshots:
+            eq = snap.get("equity", 0.0)
+            dp = snap.get("daily_pnl", 0.0)
+            day_start_eq = eq - dp  # Madde 1.2 formülü ile tutarlı
+            if day_start_eq > 0:
+                daily_returns.append(dp / day_start_eq)
 
-    # ── Max Drawdown (equity eğrisinden) ─────────────────────────
+        if len(daily_returns) >= 5:
+            mean_return = sum(daily_returns) / len(daily_returns)
+            variance = sum((r - mean_return) ** 2 for r in daily_returns) / len(daily_returns)
+            std_return = math.sqrt(variance) if variance > 0 else 0.0
+            if std_return > 0:
+                sharpe_ratio = (mean_return / std_return) * math.sqrt(252)
+
+    # ── Max Drawdown + Equity Eğrisi (günlük snapshot, Madde 2.3) ──
     max_drawdown_pct = 0.0
     equity_curve: list[EquityPoint] = []
 
-    snapshots = db.get_risk_snapshots(limit=500)
-    if snapshots:
-        # Kronolojik sırada
-        snapshots.sort(key=lambda s: s.get("timestamp", ""))
-
+    # daily_snapshots zaten Sharpe için çekildi (ASC sıralı, gün başına 1)
+    if daily_snapshots:
         peak_equity = 0.0
-        for s in snapshots:
+        for s in daily_snapshots:
             eq = s.get("equity", 0.0)
             dp = s.get("daily_pnl", 0.0)
             ts = s.get("timestamp", "")
+            bal = s.get("balance", 0.0)
 
             if eq > peak_equity:
                 peak_equity = eq
@@ -105,6 +121,7 @@ async def get_performance(
                 timestamp=ts,
                 equity=eq,
                 daily_pnl=dp,
+                balance=bal,
             ))
 
     max_drawdown_pct *= 100  # yüzde olarak

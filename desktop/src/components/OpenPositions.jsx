@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.0 — Açık Pozisyonlar ekranı.
+ * ÜSTAT v5.1 — Açık Pozisyonlar ekranı.
  *
  * Tablo:  Sembol, Yön, Lot, Giriş Fiy., Anlık Fiy., SL, TP,
  *         Floating K/Z, Süre, Rejim
@@ -8,7 +8,8 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { getPositions, getAccount, getStatus, connectLiveWS } from '../services/api';
+import { useNavigate } from 'react-router-dom';
+import { getPositions, getAccount, getStatus, getHybridStatus, connectLiveWS, closePosition, checkHybridTransfer, transferToHybrid } from '../services/api';
 
 // ── Yardımcılar ──────────────────────────────────────────────────
 
@@ -46,9 +47,9 @@ function elapsed(openTime) {
     if (totalMin < 60) return `${totalMin}dk`;
     const h = Math.floor(totalMin / 60);
     const m = totalMin % 60;
-    if (h < 24) return `${h}s ${m}dk`;
+    if (h < 24) return `${h}sa ${m}dk`;
     const d = Math.floor(h / 24);
-    return `${d}g ${h % 24}s`;
+    return `${d}g ${h % 24}sa`;
   } catch {
     return '—';
   }
@@ -66,6 +67,8 @@ function marginUsagePct(margin, equity) {
 // ═══════════════════════════════════════════════════════════════════
 
 export default function OpenPositions() {
+  const navigate = useNavigate();
+
   // ── State ────────────────────────────────────────────────────────
   const [positions, setPositions] = useState([]);
   const [account, setAccount] = useState({
@@ -73,18 +76,26 @@ export default function OpenPositions() {
   });
   const [regime, setRegime] = useState('TREND');
   const [tick, setTick] = useState(new Date()); // süre güncelleme tetikleyici
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [closingTicket, setClosingTicket] = useState(null); // kapatılan pozisyon ticket (loading)
+  const [hybridTickets, setHybridTickets] = useState(new Set()); // hibrit yönetimindeki ticket'lar
+  const [transferringTicket, setTransferringTicket] = useState(null); // devir işlemi yapılan ticket
   const wsRef = useRef(null);
 
   // ── REST fallback (5sn) ──────────────────────────────────────────
   const fetchData = useCallback(async () => {
-    const [p, a, s] = await Promise.all([
+    const [p, a, s, hybrid] = await Promise.all([
       getPositions(),
       getAccount(),
       getStatus(),
+      getHybridStatus(),
     ]);
     setPositions(p.positions || []);
     setAccount(a);
     setRegime(s.regime || 'TREND');
+    setInitialLoading(false);
+    const tickets = (hybrid.positions || []).map((pos) => pos.ticket).filter(Boolean);
+    setHybridTickets(new Set(tickets));
   }, []);
 
   useEffect(() => {
@@ -112,6 +123,10 @@ export default function OpenPositions() {
         if (msg.type === 'status') {
           setRegime(msg.regime || 'TREND');
         }
+        if (msg.type === 'hybrid') {
+          const tickets = new Set((msg.positions || []).map((p) => p.ticket));
+          setHybridTickets(tickets);
+        }
       }
     });
     wsRef.current = close;
@@ -124,10 +139,55 @@ export default function OpenPositions() {
     return () => clearInterval(iv);
   }, []);
 
+  // ── İşlemi Kapat (sadece manuel) ──────────────────────────────────
+  const handleClosePosition = useCallback(async (ticket) => {
+    if (closingTicket != null) return;
+    setClosingTicket(ticket);
+    try {
+      await closePosition(ticket);
+      await fetchData();
+    } catch (err) {
+      window.alert('Kapatma hatası: ' + (err?.message ?? String(err)));
+    } finally {
+      setClosingTicket(null);
+    }
+  }, [closingTicket, fetchData]);
+
+  // ── Hibrite Devret ──────────────────────────────────────────────────
+  const handleTransferToHybrid = useCallback(async (ticket) => {
+    if (transferringTicket != null) return;
+    setTransferringTicket(ticket);
+    try {
+      const check = await checkHybridTransfer(ticket);
+      if (!check.can_transfer) {
+        window.alert('Hibrite devir yapılamaz: ' + (check.reason || 'Bilinmeyen hata'));
+        return;
+      }
+      const result = await transferToHybrid(ticket);
+      if (result.success) {
+        setHybridTickets((prev) => new Set([...prev, ticket]));
+      } else {
+        window.alert('Devir hatası: ' + (result.message || 'Bilinmeyen hata'));
+      }
+    } catch (err) {
+      window.alert('Devir hatası: ' + (err?.message ?? String(err)));
+    } finally {
+      setTransferringTicket(null);
+    }
+  }, [transferringTicket]);
+
   // ── Hesaplamalar ─────────────────────────────────────────────────
   const totalFloating = positions.reduce((s, p) => s + (p.pnl || 0), 0);
   const totalLot = positions.reduce((s, p) => s + (p.volume || 0), 0);
   const marginPct = marginUsagePct(account.margin, account.equity);
+
+  if (initialLoading) {
+    return (
+      <div className="open-positions">
+        <p className="op-loading">Yükleniyor...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="open-positions">
@@ -183,15 +243,34 @@ export default function OpenPositions() {
                 <th>Anlık Fiy.</th>
                 <th>SL</th>
                 <th>TP</th>
+                <th>Swap</th>
                 <th>Floating K/Z</th>
+                <th>Tür</th>
+                <th>Risk</th>
+                <th>Yönetim</th>
                 <th>Süre</th>
                 <th>Rejim</th>
+                <th>İşlem</th>
               </tr>
             </thead>
             <tbody>
               {positions.map((pos) => {
                 const pnl = pos.pnl || 0;
                 const rowCls = pnl > 0 ? 'op-row-profit' : pnl < 0 ? 'op-row-loss' : '';
+                const isHybrid = hybridTickets.has(pos.ticket);
+                // Tür: API'den gelen tur kullan (backend tek kaynak); yoksa fallback
+                const apiTur = (pos.tur || '').trim();
+                let turLabel = apiTur;
+                let turClass = 'manual';
+                if (apiTur === 'Hibrit' || apiTur === 'Otomatik' || apiTur === 'Manuel') {
+                  turClass = apiTur === 'Hibrit' ? 'hybrid' : apiTur === 'Otomatik' ? 'auto' : 'manual';
+                } else {
+                  const stratLower = (pos.strategy || '').toLowerCase().trim();
+                  const knownAutoStrategies = ['trend_follow', 'mean_reversion', 'breakout'];
+                  const isAuto = knownAutoStrategies.includes(stratLower);
+                  turLabel = isHybrid ? 'Hibrit' : isAuto ? 'Otomatik' : 'Manuel';
+                  turClass = isHybrid ? 'hybrid' : isAuto ? 'auto' : 'manual';
+                }
                 return (
                   <tr key={pos.ticket} className={rowCls}>
                     <td className="mono op-symbol">{pos.symbol}</td>
@@ -205,14 +284,77 @@ export default function OpenPositions() {
                     <td className="mono">{formatPrice(pos.current_price)}</td>
                     <td className="mono text-dim">{formatPrice(pos.sl)}</td>
                     <td className="mono text-dim">{formatPrice(pos.tp)}</td>
+                    <td className={`mono text-dim ${pnlClass(pos.swap || 0)}`}>
+                      {formatMoney(pos.swap || 0)}
+                    </td>
                     <td className={`mono op-pnl-cell ${pnlClass(pnl)}`}>
                       <b>{formatMoney(pnl)}</b>
+                    </td>
+                    <td className="op-tur-cell">
+                      <span className={`op-tur-badge op-tur--${turClass}`}>
+                        {turLabel}
+                      </span>
+                    </td>
+                    <td className="op-risk-cell">
+                      {turLabel === 'Manuel' && pos.risk_score?.overall ? (
+                        <span
+                          className={`op-risk-badge op-risk--${pos.risk_score.overall}`}
+                          title={`SL: ${pos.risk_score.sl_risk} | Rejim: ${pos.risk_score.regime_risk} | K/Z: ${pos.risk_score.pnl_risk} | Sistem: ${pos.risk_score.system_risk}`}
+                        >
+                          {pos.risk_score.overall === 'green' ? 'DUSUK' : pos.risk_score.overall === 'yellow' ? 'ORTA' : 'YUKSEK'}
+                          <span className="op-risk-score">{pos.risk_score.score}</span>
+                        </span>
+                      ) : (
+                        <span className="text-dim">—</span>
+                      )}
+                    </td>
+                    <td className="op-mgmt-cell">
+                      {pos.tp1_hit && <span className="op-mgmt-badge op-mgmt--tp1" title="TP1 yarı kapanış yapıldı">TP1</span>}
+                      {pos.breakeven_hit && <span className="op-mgmt-badge op-mgmt--be" title="Breakeven çekildi">BE</span>}
+                      {pos.cost_averaged && <span className="op-mgmt-badge op-mgmt--avg" title="Maliyetlendirme yapıldı">MA</span>}
+                      {(pos.voting_score != null && pos.voting_score > 0) && (
+                        <span className={`op-mgmt-badge op-mgmt--vote${pos.voting_score >= 3 ? '-strong' : '-weak'}`}
+                          title={`Oylama skoru: ${pos.voting_score}/4`}>
+                          {pos.voting_score}/4
+                        </span>
+                      )}
                     </td>
                     <td className="text-dim">{elapsed(pos.open_time)}</td>
                     <td>
                       <span className={`op-regime-tag op-regime--${(regime || '').toLowerCase()}`}>
                         {regime}
                       </span>
+                    </td>
+                    <td className="op-action-cell">
+                      <button
+                        type="button"
+                        className="op-close-btn"
+                        onClick={() => handleClosePosition(pos.ticket)}
+                        disabled={closingTicket === pos.ticket}
+                        title="Bu pozisyonu kapat"
+                      >
+                        {closingTicket === pos.ticket ? 'Kapatılıyor...' : 'İşlemi Kapat'}
+                      </button>
+                      {isHybrid ? (
+                        <button
+                          type="button"
+                          className="op-hybrid-link-btn"
+                          onClick={() => navigate('/hybrid')}
+                          title="Hibrit panelinde yönetiliyor — tıklayınca Hibrit İşlem Paneline gider"
+                        >
+                          Hibritte
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="op-hybrid-btn"
+                          onClick={() => handleTransferToHybrid(pos.ticket)}
+                          disabled={transferringTicket === pos.ticket}
+                          title="Robot yönetimine devret"
+                        >
+                          {transferringTicket === pos.ticket ? 'Devrediliyor...' : '🔀 Hibrite Devret'}
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );
@@ -225,10 +367,13 @@ export default function OpenPositions() {
                 <td colSpan={2}><b>TOPLAM</b></td>
                 <td className="mono"><b>{totalLot.toFixed(2)}</b></td>
                 <td colSpan={4}></td>
+                <td className="mono text-dim">
+                  {formatMoney(positions.reduce((s, p) => s + (p.swap || 0), 0))}
+                </td>
                 <td className={`mono ${pnlClass(totalFloating)}`}>
                   <b>{formatMoney(totalFloating)}</b>
                 </td>
-                <td colSpan={2}></td>
+                <td colSpan={6}></td>
               </tr>
             </tfoot>
           </table>

@@ -1,18 +1,39 @@
-/* ÜSTAT v5.0 — Koyu Tema */
+/* ÜSTAT v5.1 — Tema Değişkenleri */
 
+/* ── Koyu Tema (varsayılan) ──────────────────────────────────── */
 :root {
   --bg-primary: #0d1117;
   --bg-secondary: #161b22;
+  --bg-tertiary: #21262d;
   --bg-card: #1c2128;
   --bg-hover: #21262d;
   --border: #30363d;
   --text-primary: #e6edf3;
   --text-secondary: #8b949e;
+  --text-dim: #6e7681;
   --accent: #58a6ff;
   --accent-dim: rgba(88, 166, 255, 0.15);
   --profit: #3fb950;
   --loss: #f85149;
   --warning: #d29922;
+}
+
+/* ── Açık Tema ───────────────────────────────────────────────── */
+:root[data-theme="light"] {
+  --bg-primary: #f6f8fa;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #e8ebed;
+  --bg-card: #ffffff;
+  --bg-hover: #eaeef2;
+  --border: #d0d7de;
+  --text-primary: #1f2328;
+  --text-secondary: #656d76;
+  --text-dim: #8c959f;
+  --accent: #0969da;
+  --accent-dim: rgba(9, 105, 218, 0.12);
+  --profit: #1a7f37;
+  --loss: #cf222e;
+  --warning: #9a6700;
 }
 
 * {
@@ -24,6 +45,11 @@
 html, body {
   background-color: var(--bg-primary);
   color-scheme: dark;
+}
+
+:root[data-theme="light"],
+:root[data-theme="light"] body {
+  color-scheme: light;
 }
 
 body {
@@ -353,12 +379,353 @@ body {
   text-overflow: ellipsis;
 }
 
-/* ── Kill-Switch Button ──────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════
+   RISK YÖNETİMİ SAYFASI
+   ═══════════════════════════════════════════════════════════════ */
+
+.risk-page {
+  padding: 16px 20px;
+}
+
+.risk-page h2 {
+  margin: 0 0 16px;
+  font-size: 18px;
+}
+
+.risk-page h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.risk-loading {
+  color: var(--text-secondary);
+  margin-top: 8px;
+}
+
+.dash-loading-wrap {
+  padding: 40px 20px;
+  text-align: center;
+}
+.dash-loading {
+  color: var(--text-secondary);
+}
+
+.tb-loading {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-left: 8px;
+}
+
+.op-loading {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+/* ── Durum banner ────────────────────────────────────────────── */
+.risk-status-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.risk-status-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.risk-status--ok { border-left: 3px solid var(--profit); }
+.risk-status--blocked { border-left: 3px solid var(--loss); }
+.risk-status--ks-0 { border-left: 3px solid var(--profit); }
+.risk-status--ks-1 { border-left: 3px solid var(--warning); }
+.risk-status--ks-2 { border-left: 3px solid var(--loss); }
+.risk-status--ks-3 { border-left: 3px solid var(--loss); }
+
+.risk-status-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.risk-status-value {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.risk-status-value.ks-ok { color: var(--profit); }
+.risk-status-value.ks-warn { color: var(--warning); }
+.risk-status-value.ks-error { color: var(--loss); }
+.risk-status-value.ks-critical { color: var(--loss); }
+
+.risk-status-value.regime-trend { color: var(--profit); }
+.risk-status-value.regime-range { color: var(--accent); }
+.risk-status-value.regime-volatile { color: var(--warning); }
+.risk-status-value.regime-olay { color: var(--loss); }
+
+.risk-status-reason {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* ── Risk section ────────────────────────────────────────────── */
+.risk-section {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  margin-bottom: 14px;
+}
+
+/* ── Progress bar ────────────────────────────────────────────── */
+.risk-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.risk-bar-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.risk-bar-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+}
+
+.risk-bar-values {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.risk-bar-sep {
+  opacity: 0.4;
+  margin: 0 2px;
+}
+
+.risk-bar-track {
+  height: 6px;
+  background: rgba(139, 148, 158, 0.12);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.risk-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+.risk-bar-fill--ok { background: var(--profit); }
+.risk-bar-fill--warning { background: var(--warning); }
+.risk-bar-fill--critical { background: var(--loss); }
+
+/* ── Sayaçlar ────────────────────────────────────────────────── */
+.risk-counters {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.risk-counter-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.risk-counter-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.risk-counter-value {
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.risk-counter-value.profit { color: var(--profit); }
+.risk-counter-value.loss { color: var(--loss); }
+
+.risk-counter-limit {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+
+/* ── Side nav alt: Güvenli Kapat + Kill-Switch ────────────────── */
 .side-nav-bottom {
   padding: 12px;
   border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
+.safe-quit-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.safe-quit-btn:hover {
+  background: var(--bg-tertiary);
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+.safe-quit-btn:active {
+  transform: scale(0.98);
+}
+
+.safe-quit-icon {
+  font-size: 14px;
+}
+
+.safe-quit-label {
+  white-space: nowrap;
+}
+
+/* ── ConfirmModal (Güvenli Kapat / uyarı ekranları) ───────────── */
+.confirm-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+  animation: confirm-modal-fade-in 0.2s ease-out;
+}
+
+@keyframes confirm-modal-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.confirm-modal-card {
+  min-width: 360px;
+  max-width: 440px;
+  padding: 24px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+  animation: confirm-modal-slide-in 0.25s ease-out;
+}
+
+@keyframes confirm-modal-slide-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.confirm-modal-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 14px 0;
+  letter-spacing: 0.3px;
+}
+
+.confirm-modal-message {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  margin: 0 0 22px 0;
+  white-space: pre-line;
+}
+
+.confirm-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.confirm-modal-btn {
+  padding: 10px 20px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  border: 1px solid transparent;
+}
+
+.confirm-modal-btn-cancel {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-color: var(--border);
+}
+
+.confirm-modal-btn-cancel:hover {
+  background: var(--bg-hover);
+  border-color: var(--text-dim);
+}
+
+.confirm-modal-btn-confirm {
+  color: #fff;
+}
+
+.confirm-modal-btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.confirm-modal-btn--primary:hover {
+  filter: brightness(1.1);
+}
+
+.confirm-modal-btn--warning {
+  background: #c17a1a;
+  border-color: #c17a1a;
+}
+
+.confirm-modal-btn--warning:hover {
+  filter: brightness(1.12);
+}
+
+.confirm-modal-btn--danger {
+  background: #da3633;
+  border-color: #da3633;
+}
+
+.confirm-modal-btn--danger:hover {
+  filter: brightness(1.1);
+}
+
+/* ── Kill-Switch Button ──────────────────────────────────────── */
 .kill-switch-btn {
   width: 100%;
   display: flex;
@@ -986,88 +1353,118 @@ h2 {
   letter-spacing: 0.2px;
 }
 
-/* ── Charts Row (2 adet, yan yana) ───────────────────────────── */
-.dash-charts-row {
+/* ── Dashboard Hesap Durumu Şeridi ─────────────────────────── */
+.dash-account-strip {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
-
-.dash-chart-card {
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 14px 16px 8px;
-  display: flex;
-  flex-direction: column;
+  padding: 10px 16px;
 }
 
-.dash-chart-header {
+.dash-account-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dash-account-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.dash-account-value {
+  font-size: 15px;
+  font-weight: 600;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+}
+
+.dash-account-suffix {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-dim);
+  margin-left: 2px;
+}
+
+/* ── Charts Row (2 adet, yan yana) ───────────────────────────── */
+/* ── Dashboard Açık Pozisyonlar ──────────────────────────── */
+.dash-positions-row {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.dash-card--full {
+  flex: 1;
+  min-width: 0;
+}
+
+.dash-card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: 12px;
 }
 
-.dash-chart-header h3 {
-  color: var(--text-secondary);
-  font-size: 12px;
+.dash-card-header h3 {
+  margin: 0;
+}
+
+.dash-card-badge {
+  background: var(--surface-2, #30363d);
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 13px;
+  color: var(--text-secondary, #8b949e);
+}
+
+.dash-positions-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.dash-positions-table th {
+  text-align: left;
+  padding: 8px 10px;
+  color: var(--text-secondary, #8b949e);
+  font-weight: 600;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  font-weight: 600;
+  border-bottom: 1px solid var(--border, #30363d);
 }
 
-.dash-chart-value {
-  font-size: 15px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  font-family: 'Cascadia Code', 'Fira Code', monospace;
+.dash-positions-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-dim, #21262d);
 }
 
-.dash-chart-value small {
-  font-size: 11px;
-  color: var(--text-secondary);
-  font-weight: 400;
+.dash-positions-table tbody tr:hover {
+  background: var(--surface-hover, rgba(88, 166, 255, 0.04));
 }
 
-.dash-chart-body {
-  flex: 1;
-  min-height: 220px;
+.dash-positions-footer td {
+  padding: 10px 10px;
+  border-top: 2px solid var(--border, #30363d);
+  border-bottom: none;
 }
 
-.dash-chart-empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  min-height: 220px;
-  color: var(--text-secondary);
-  font-size: 13px;
-  opacity: 0.5;
+.dash-positions-empty {
+  text-align: center;
+  padding: 40px 0;
+  color: var(--text-secondary, #8b949e);
+  font-size: 14px;
 }
 
-/* ── Chart Tooltip ───────────────────────────────────────────── */
-.chart-tooltip {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 8px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  font-size: 12px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-}
-
-.chart-tooltip-date {
-  color: var(--text-secondary);
-  font-size: 11px;
-  font-weight: 500;
-  margin-bottom: 2px;
-}
-
-.chart-tooltip b {
-  font-family: 'Cascadia Code', 'Fira Code', monospace;
+.dash-positions-empty span {
+  font-size: 24px;
+  margin-right: 8px;
 }
 
 /* ── Bottom Row (İşlemler + Rejim/Top5) ──────────────────────── */
@@ -1206,7 +1603,7 @@ h2 {
 
 .top5-item {
   display: grid;
-  grid-template-columns: 28px 1fr 44px 80px;
+  grid-template-columns: 28px 1fr 46px 44px 80px;
   align-items: center;
   gap: 8px;
   padding: 6px 0;
@@ -1228,6 +1625,17 @@ h2 {
   text-overflow: ellipsis;
 }
 
+.top5-direction {
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  letter-spacing: 0.3px;
+}
+.top5-dir-buy  { color: #4CAF50; }
+.top5-dir-sell { color: #f44336; }
+.top5-dir-notr { color: #888; }
+
 .top5-score {
   font-size: 12px;
   color: var(--text-secondary);
@@ -1247,6 +1655,52 @@ h2 {
   background: var(--accent);
   border-radius: 2px;
   transition: width 0.3s ease;
+}
+
+.dash-top5-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.dash-top5-header h3 { margin: 0; }
+.top5-refresh-time {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.top5-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.top5-status-ok {
+  background: rgba(76,175,80,0.10);
+  border: 1px solid #4CAF50;
+  color: #4CAF50;
+}
+.top5-status-warn {
+  background: rgba(210,153,34,0.12);
+  border: 1px solid var(--warning);
+  color: var(--warning);
+}
+.top5-reactivate-btn {
+  background: var(--warning);
+  color: #000;
+  border: none;
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.top5-reactivate-btn:hover {
+  opacity: 0.85;
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -1411,6 +1865,32 @@ h2 {
   font-size: 13px;
 }
 
+.th-loading.th-error-msg {
+  flex-direction: column;
+  gap: 12px;
+  text-align: center;
+}
+
+.th-error-hint {
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+.th-retry-btn {
+  margin-top: 8px;
+  padding: 8px 20px;
+  background: var(--accent);
+  color: var(--bg-primary);
+  border: none;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.th-retry-btn:hover {
+  opacity: 0.9;
+}
+
 .th-table {
   width: 100%;
   border-collapse: collapse;
@@ -1496,6 +1976,34 @@ h2 {
 .th-approve-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* İşlem Geçmişi — Tür (Otomatik / Manuel / Hibrit) */
+.th-tur-cell {
+  white-space: nowrap;
+}
+
+.th-tur-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.th-tur--manual {
+  background: rgba(88, 166, 255, 0.15);
+  color: var(--accent);
+}
+
+.th-tur--auto {
+  background: rgba(136, 136, 136, 0.2);
+  color: var(--text-secondary);
+}
+
+.th-tur--hybrid {
+  background: rgba(210, 153, 34, 0.18);
+  color: var(--warning);
 }
 
 /* ── Performans + Risk Panelleri ──────────────────────────────── */
@@ -1729,6 +2237,184 @@ h2 {
 
 .op-pnl-cell {
   font-size: 14px;
+}
+
+/* Tür (Manuel / Otomatik) */
+.op-tur-cell {
+  white-space: nowrap;
+}
+
+.op-tur-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.op-tur--manual {
+  background: rgba(88, 166, 255, 0.15);
+  color: var(--accent);
+}
+
+.op-tur--auto {
+  background: rgba(136, 136, 136, 0.2);
+  color: var(--text-secondary);
+}
+
+.op-tur--external {
+  background: rgba(88, 166, 255, 0.10);
+  color: var(--accent);
+}
+
+.op-tur--hybrid {
+  background: rgba(210, 153, 34, 0.18);
+  color: var(--warning);
+}
+
+/* Risk Göstergesi (Manuel pozisyonlar) */
+.op-risk-cell {
+  white-space: nowrap;
+  text-align: center;
+}
+
+.op-risk-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: default;
+}
+
+.op-risk--green {
+  background: rgba(63, 185, 80, 0.18);
+  color: var(--success, #3fb950);
+}
+
+.op-risk--yellow {
+  background: rgba(210, 153, 34, 0.18);
+  color: var(--warning, #d29922);
+}
+
+.op-risk--red {
+  background: rgba(248, 81, 73, 0.18);
+  color: var(--danger, #f85149);
+}
+
+.op-risk-score {
+  font-size: 10px;
+  opacity: 0.8;
+  margin-left: 2px;
+}
+
+/* Evrensel Yönetim Göstergeleri */
+.op-mgmt-cell {
+  white-space: nowrap;
+  display: flex;
+  gap: 3px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.op-mgmt-badge {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.op-mgmt--tp1 {
+  background: rgba(63, 185, 80, 0.18);
+  color: var(--success, #3fb950);
+}
+
+.op-mgmt--be {
+  background: rgba(88, 166, 255, 0.15);
+  color: var(--accent, #58a6ff);
+}
+
+.op-mgmt--avg {
+  background: rgba(210, 153, 34, 0.18);
+  color: var(--warning, #d29922);
+}
+
+.op-mgmt--vote-strong {
+  background: rgba(63, 185, 80, 0.12);
+  color: var(--success, #3fb950);
+}
+
+.op-mgmt--vote-weak {
+  background: rgba(248, 81, 73, 0.12);
+  color: var(--danger, #f85149);
+}
+
+/* İşlemi Kapat butonu (sadece manuel) */
+.op-action-cell {
+  white-space: nowrap;
+}
+
+.op-close-btn {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.op-close-btn:hover:not(:disabled) {
+  background: rgba(248, 81, 73, 0.12);
+  border-color: rgba(248, 81, 73, 0.4);
+  color: var(--loss);
+}
+
+.op-close-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.op-hybrid-btn {
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  border: 1px solid rgba(210, 153, 34, 0.3);
+  border-radius: 4px;
+  background: rgba(210, 153, 34, 0.1);
+  color: var(--warning);
+  cursor: pointer;
+  margin-left: 4px;
+  transition: background 0.2s, border-color 0.2s;
+}
+.op-hybrid-btn:hover:not(:disabled) {
+  background: rgba(210, 153, 34, 0.2);
+  border-color: rgba(210, 153, 34, 0.5);
+}
+.op-hybrid-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.op-hybrid-link-btn {
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  border: 1px solid rgba(210, 153, 34, 0.3);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--warning);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.op-hybrid-link-btn:hover {
+  background: rgba(210, 153, 34, 0.12);
 }
 
 /* Satır arka plan renkleri (hafif) */
@@ -2097,6 +2783,251 @@ h2 {
   font-size: 10px;
   color: var(--text-secondary);
   font-weight: 500;
+}
+
+/* ── Performance Chart Legend ──────────────────────────────── */
+.pf-chart-legend {
+  display: flex;
+  gap: 14px;
+  margin-left: auto;
+}
+
+.pf-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.pf-legend-line {
+  display: inline-block;
+  width: 16px;
+  height: 2px;
+  border-radius: 1px;
+}
+
+.pf-legend-dashed {
+  background: repeating-linear-gradient(
+    90deg,
+    #3fb950 0px, #3fb950 4px,
+    transparent 4px, transparent 8px
+  ) !important;
+}
+
+/* ── Performans Sekme Çubuğu ────────────────────────────────── */
+
+.pf-tab-bar {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+
+.pf-tab-btn {
+  padding: 8px 20px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.pf-tab-btn:hover {
+  color: var(--text-primary);
+}
+
+.pf-tab-btn.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+/* ── Kategori Grid (2x2) ───────────────────────────────────── */
+
+.pf-category-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+/* ── Kontrat Profilleri Grid ───────────────────────────────── */
+
+.pf-contract-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.pf-contract-card {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pf-contract-symbol {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.pf-contract-stat {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.pf-contract-stat .value {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.pf-contract-stat .value.profit { color: var(--profit); }
+.pf-contract-stat .value.loss   { color: var(--loss); }
+
+.pf-contract-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+
+.pf-contract-badge.buy {
+  background: rgba(63, 185, 80, 0.15);
+  color: var(--profit);
+}
+
+.pf-contract-badge.sell {
+  background: rgba(248, 81, 73, 0.15);
+  color: var(--loss);
+}
+
+/* ── Karar Akışı (Timeline) ────────────────────────────────── */
+
+.pf-decision-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.pf-decision-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.pf-decision-item:last-child {
+  border-bottom: none;
+}
+
+.pf-decision-time {
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+  min-width: 100px;
+}
+
+.pf-decision-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+  min-width: 56px;
+  text-align: center;
+}
+
+.pf-decision-badge.INFO {
+  background: rgba(88, 166, 255, 0.15);
+  color: var(--accent);
+}
+
+.pf-decision-badge.WARNING {
+  background: rgba(210, 153, 34, 0.15);
+  color: var(--warning);
+}
+
+.pf-decision-badge.CRITICAL {
+  background: rgba(248, 81, 73, 0.15);
+  color: var(--loss);
+}
+
+.pf-decision-msg {
+  color: var(--text-secondary);
+  flex: 1;
+  line-height: 1.4;
+}
+
+/* ── Placeholder (Yakında) Kartlar ─────────────────────────── */
+
+.pf-placeholder-card {
+  background: var(--bg-secondary);
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  padding: 28px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 8px;
+  min-height: 120px;
+}
+
+.pf-placeholder-icon {
+  font-size: 28px;
+  opacity: 0.5;
+}
+
+.pf-placeholder-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.pf-placeholder-desc {
+  font-size: 12px;
+  color: var(--text-dim);
+  max-width: 280px;
+  line-height: 1.4;
+}
+
+.pf-placeholder-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(88, 166, 255, 0.12);
+  color: var(--accent);
+  text-transform: uppercase;
+  margin-top: 4px;
+}
+
+/* ── Placeholder Grid (3 kolon) ────────────────────────────── */
+
+.pf-placeholder-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -2647,4 +3578,810 @@ h2 {
 ::selection {
   background: var(--accent);
   color: #fff;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   İŞLEM PANELİ (Manuel İşlem)
+   ═══════════════════════════════════════════════════════════════ */
+
+.manual-trade { padding: 16px; }
+.manual-trade h2 { margin-bottom: 16px; color: var(--text-primary); }
+
+.mt-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+/* ── Sol panel: Form ─────────────────────────────────────────── */
+
+.mt-form {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.mt-form-group { margin-bottom: 14px; }
+.mt-form-group label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.mt-select {
+  width: 100%;
+  padding: 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+.mt-select:disabled { opacity: 0.5; }
+
+/* ── BUY / SELL butonları ────────────────────────────────────── */
+
+.mt-dir-buttons { display: flex; gap: 8px; }
+
+.mt-dir-btn {
+  flex: 1;
+  padding: 10px;
+  border: 2px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary);
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.mt-dir-btn:hover { border-color: var(--text-secondary); }
+.mt-dir-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.mt-dir-btn.active-buy {
+  background: rgba(63, 185, 80, 0.15);
+  border-color: var(--profit);
+  color: var(--profit);
+}
+.mt-dir-btn.active-sell {
+  background: rgba(248, 81, 73, 0.15);
+  border-color: var(--loss);
+  color: var(--loss);
+}
+
+/* ── Lot input ───────────────────────────────────────────────── */
+
+.mt-lot-input {
+  width: 80px;
+  padding: 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* ── Fiyat bilgi satırları ───────────────────────────────────── */
+
+.mt-price-info {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+/* ── Aksiyon butonları ───────────────────────────────────────── */
+
+.mt-check-btn,
+.mt-execute-btn {
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  margin-top: 8px;
+  transition: opacity 0.2s;
+}
+
+.mt-check-btn {
+  background: var(--accent);
+  color: #fff;
+}
+.mt-check-btn:hover { opacity: 0.9; }
+.mt-check-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.mt-execute-btn {
+  background: var(--profit);
+  color: #fff;
+}
+.mt-execute-btn.sell { background: var(--loss); }
+.mt-execute-btn:hover { opacity: 0.9; }
+.mt-execute-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── Sağ panel: Risk özeti ───────────────────────────────────── */
+
+.mt-risk-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.mt-risk-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+}
+.mt-risk-row:last-child { border-bottom: none; }
+.mt-risk-label { color: var(--text-secondary); }
+.mt-risk-value { font-weight: 600; color: var(--text-primary); }
+
+/* ── Açık Manuel Pozisyonlar — Risk Göstergesi (monitor tablo) ─ */
+
+.mt-risk-monitor {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  margin-top: 16px;
+}
+
+.mt-risk-monitor h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 12px 0;
+  color: var(--text-primary);
+}
+
+.mt-risk-monitor table {
+  width: 100%;
+  font-size: 12px;
+  border-collapse: collapse;
+}
+
+.mt-risk-monitor thead tr {
+  border-bottom: 1px solid var(--border);
+  color: var(--text-dim);
+}
+
+.mt-risk-monitor th {
+  padding: 4px 8px;
+  font-weight: 500;
+}
+
+.mt-risk-monitor tbody tr {
+  border-bottom: 1px solid var(--border);
+}
+
+.mt-risk-monitor td {
+  padding: 6px 8px;
+}
+
+.mt-risk-dim {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.mt-risk-dim--green {
+  background: rgba(63, 185, 80, 0.18);
+  color: var(--success, #3fb950);
+}
+
+.mt-risk-dim--yellow {
+  background: rgba(210, 153, 34, 0.18);
+  color: var(--warning, #d29922);
+}
+
+.mt-risk-dim--red {
+  background: rgba(248, 81, 73, 0.18);
+  color: var(--danger, #f85149);
+}
+
+/* ── Durum göstergeleri ──────────────────────────────────────── */
+
+.mt-status-ok {
+  color: var(--profit);
+  font-weight: 700;
+  padding: 8px;
+  background: rgba(63, 185, 80, 0.1);
+  border-radius: 6px;
+  margin-top: 12px;
+  text-align: center;
+}
+
+.mt-status-fail {
+  color: var(--loss);
+  font-weight: 600;
+  padding: 8px;
+  background: rgba(248, 81, 73, 0.1);
+  border-radius: 6px;
+  margin-top: 12px;
+  text-align: center;
+  font-size: 12px;
+}
+
+/* ── Sonuç mesajı ────────────────────────────────────────────── */
+
+.mt-result {
+  padding: 12px;
+  border-radius: 6px;
+  font-weight: 600;
+  text-align: center;
+  margin-top: 12px;
+  font-size: 13px;
+}
+.mt-result.success {
+  background: rgba(63, 185, 80, 0.15);
+  color: var(--profit);
+  border: 1px solid var(--profit);
+}
+.mt-result.error {
+  background: rgba(248, 81, 73, 0.15);
+  color: var(--loss);
+  border: 1px solid var(--loss);
+}
+
+/* ── Son işlemler tablosu ────────────────────────────────────── */
+
+.mt-history {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+}
+.mt-history h3 {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   HİBRİT İŞLEM PANELİ
+═══════════════════════════════════════════════════════════════════ */
+.hybrid-trade { padding: 16px; }
+.hybrid-trade h2 { margin-bottom: 16px; color: var(--text-primary); }
+.hybrid-trade h3 {
+  font-size: 14px;
+  color: var(--text-primary);
+  margin-bottom: 10px;
+}
+
+/* Hibrit SL/TP modu badge'i */
+.ht-sltp-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  margin-left: 10px;
+  vertical-align: middle;
+  letter-spacing: 0.3px;
+}
+.ht-sltp--software {
+  background: rgba(210, 153, 34, 0.20);
+  color: var(--warning);
+}
+.ht-sltp--native {
+  background: rgba(63, 185, 80, 0.15);
+  color: var(--profit);
+}
+
+/* Hibrit durum badge'leri */
+.ht-state--active {
+  background: rgba(88, 166, 255, 0.15);
+  color: var(--accent);
+}
+.ht-state--breakeven {
+  background: rgba(210, 153, 34, 0.18);
+  color: var(--warning);
+}
+.ht-state--trailing {
+  background: rgba(63, 185, 80, 0.15);
+  color: var(--profit);
+}
+
+/* Hibrit event badge'leri */
+.ht-event-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ht-event--transfer {
+  background: rgba(88, 166, 255, 0.15);
+  color: var(--accent);
+}
+.ht-event--breakeven {
+  background: rgba(210, 153, 34, 0.18);
+  color: var(--warning);
+}
+.ht-event--trailing_update,
+.ht-event--trailing_start {
+  background: rgba(63, 185, 80, 0.15);
+  color: var(--profit);
+}
+.ht-event--software_sl,
+.ht-event--software_tp,
+.ht-event--sl_hit,
+.ht-event--tp_hit,
+.ht-event--close,
+.ht-event--eod_close,
+.ht-event--force_close {
+  background: rgba(248, 81, 73, 0.12);
+  color: var(--loss);
+}
+.ht-event--remove {
+  background: rgba(136, 136, 136, 0.15);
+  color: var(--text-secondary);
+}
+.ht-event--external_close {
+  background: rgba(136, 136, 136, 0.2);
+  color: var(--text-dim);
+}
+
+
+/* ══════════════════════════════════════════════════════════════════
+   SISTEM SAGLIGI (sh-*) — SystemHealth.jsx
+   ══════════════════════════════════════════════════════════════════ */
+
+.sh-page {
+  padding: 20px 24px;
+  overflow-y: auto;
+  height: 100%;
+}
+
+.sh-title {
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 20px;
+}
+
+.sh-loading {
+  color: var(--text-secondary);
+  text-align: center;
+  padding: 40px;
+}
+
+/* ── Grid layoutlar ──────────────────────────────────────────── */
+
+.sh-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+/* ── Section kart ────────────────────────────────────────────── */
+
+.sh-section {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.sh-grid-2 > .sh-section {
+  margin-bottom: 0;
+}
+
+.sh-section-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sh-sub-title {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin: 12px 0 6px;
+}
+
+/* ── Stats row (metrik kartciklar) ──────────────────────────── */
+
+.sh-stats-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.sh-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 70px;
+}
+
+.sh-stat-label {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.sh-stat-value {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.sh-stat-ok { color: var(--profit); }
+.sh-stat-warn { color: var(--warning); }
+.sh-stat-err { color: var(--loss); }
+
+/* ── Durum gostergesi (dot) ──────────────────────────────────── */
+
+.sh-status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.sh-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.sh-dot-ok {
+  background: var(--profit);
+  box-shadow: 0 0 6px rgba(63, 185, 80, 0.5);
+}
+
+.sh-dot-err {
+  background: var(--loss);
+  box-shadow: 0 0 6px rgba(248, 81, 73, 0.5);
+}
+
+.sh-status-text {
+  font-size: 0.85rem;
+  color: var(--text-primary);
+}
+
+/* ── Adim breakdown barlari ──────────────────────────────────── */
+
+.sh-steps {
+  margin-top: 8px;
+}
+
+.sh-steps-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.sh-overrun {
+  color: var(--loss);
+  font-weight: 600;
+}
+
+.sh-step-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.sh-step-name {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  width: 60px;
+  flex-shrink: 0;
+  text-align: right;
+}
+
+.sh-step-bar-track {
+  flex: 1;
+  height: 10px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.sh-step-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  min-width: 2px;
+  transition: width 0.3s ease;
+}
+
+.sh-step-ms {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  width: 50px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Mini trend grafik ───────────────────────────────────────── */
+
+.sh-trend {
+  margin-top: 12px;
+}
+
+.sh-trend-label {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+
+.sh-trend-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  height: 40px;
+  margin-top: 4px;
+  padding: 0 1px;
+}
+
+.sh-trend-bar {
+  flex: 1;
+  background: var(--accent);
+  border-radius: 1px 1px 0 0;
+  min-width: 2px;
+  opacity: 0.7;
+  transition: height 0.3s ease;
+}
+
+.sh-trend-bar:hover {
+  opacity: 1;
+}
+
+.sh-trend-bar--over {
+  background: var(--loss);
+}
+
+/* ── Tablolar ────────────────────────────────────────────────── */
+
+.sh-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.sh-table-sm {
+  font-size: 0.73rem;
+}
+
+.sh-table th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--text-dim);
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+  text-transform: uppercase;
+  font-size: 0.68rem;
+  letter-spacing: 0.5px;
+}
+
+.sh-table td {
+  padding: 4px 6px;
+  color: var(--text-primary);
+  border-bottom: 1px solid rgba(48, 54, 61, 0.4);
+}
+
+.sh-table tbody tr:hover {
+  background: var(--bg-hover);
+}
+
+.sh-mono {
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 0.78rem;
+}
+
+/* ── Badge'ler ───────────────────────────────────────────────── */
+
+.sh-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 500;
+}
+
+.sh-badge-ok {
+  background: rgba(63, 185, 80, 0.15);
+  color: var(--profit);
+}
+
+.sh-badge-err {
+  background: rgba(248, 81, 73, 0.15);
+  color: var(--loss);
+}
+
+.sh-dir-buy {
+  color: var(--profit);
+  font-weight: 500;
+}
+
+.sh-dir-sell {
+  color: var(--loss);
+  font-weight: 500;
+}
+
+/* ── Katman grid (4 kart) ────────────────────────────────────── */
+
+.sh-layer-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.sh-layer-card {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.sh-layer-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+
+.sh-layer-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sh-layer-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.78rem;
+}
+
+.sh-layer-row > span:first-child {
+  color: var(--text-secondary);
+}
+
+.sh-layer-row > span:last-child {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+/* ── Severity badge'leri ─────────────────────────────────────── */
+
+.sh-sev-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.sh-sev-error {
+  background: rgba(248, 81, 73, 0.15);
+  color: var(--loss);
+}
+
+.sh-sev-warning {
+  background: rgba(210, 153, 34, 0.18);
+  color: var(--warning);
+}
+
+.sh-sev-info {
+  background: rgba(88, 166, 255, 0.12);
+  color: var(--accent);
+}
+
+.sh-sev-debug {
+  background: rgba(139, 148, 158, 0.12);
+  color: var(--text-dim);
+}
+
+/* ── Filtre butonlari ────────────────────────────────────────── */
+
+.sh-filter-group {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.sh-filter-btn {
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 500;
+  transition: all 0.15s;
+}
+
+.sh-filter-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.sh-filter-active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ── Event tablosu ozel ──────────────────────────────────────── */
+
+.sh-events-wrap {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.sh-event-msg {
+  max-width: 400px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sh-empty {
+  color: var(--text-dim);
+  text-align: center;
+  padding: 20px;
+  font-size: 0.85rem;
+}
+
+/* ── Sistem grid ─────────────────────────────────────────────── */
+
+.sh-sys-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.sh-sys-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sh-sys-label {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.sh-sys-value {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Reconnect tablo ─────────────────────────────────────────── */
+
+.sh-reconnect {
+  margin-top: 8px;
 }

@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.0 — İşlem Geçmişi ekranı.
+ * ÜSTAT v5.1 — İşlem Geçmişi ekranı.
  *
  * Layout:
  *   1. Filtre çubuğu: Dönem, Sembol, Yön, Sonuç
@@ -97,13 +97,13 @@ function formatDuration(entryTs, exitTs) {
     const ms = new Date(exitTs) - new Date(entryTs);
     if (isNaN(ms) || ms < 0) return '—';
     const totalMin = Math.floor(ms / 60000);
-    if (totalMin < 60) return `${totalMin}dk`;
+    if (totalMin < 60) return totalMin === 0 ? '<1dk' : `${totalMin}dk`;
     const h = Math.floor(totalMin / 60);
     const m = totalMin % 60;
-    if (h < 24) return `${h}s ${m}dk`;
+    if (h < 24) return `${h}sa ${m}dk`;
     const days = Math.floor(h / 24);
     const rh = h % 24;
-    return `${days}g ${rh}s`;
+    return `${days}g ${rh}sa`;
   } catch {
     return '—';
   }
@@ -114,7 +114,7 @@ function formatMinutes(mins) {
   if (mins < 60) return `${mins.toFixed(0)} dk`;
   const h = Math.floor(mins / 60);
   const m = Math.round(mins % 60);
-  return `${h}s ${m}dk`;
+  return `${h}sa ${m}dk`;
 }
 
 /** Dönem filtresine göre başlangıç tarihi */
@@ -151,6 +151,7 @@ export default function TradeHistory() {
   const [stats, setStats] = useState(null);
   const [perf, setPerf] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(false);
 
   // Filtreler
   const [period, setPeriod] = useState('1m');
@@ -167,19 +168,26 @@ export default function TradeHistory() {
   // ── Veri çekme ───────────────────────────────────────────────────
   const fetchData = useCallback(async () => {
     setLoading(true);
-    const [t, s, p] = await Promise.all([
-      getTrades({ limit: 1000 }),
-      getTradeStats(1000),
-      getPerformance(365),
-    ]);
-    setAllTrades(t.trades || []);
-    setStats(s);
-    setPerf(p);
-    setLoading(false);
+    setFetchError(false);
+    try {
+      const [t, s, p] = await Promise.all([
+        getTrades({ limit: 1000 }),
+        getTradeStats(1000),
+        getPerformance(365),
+      ]);
+      setFetchError(Boolean(t && t.error));
+      setAllTrades(t && !t.error ? (t.trades || []) : []);
+      setStats(s);
+      setPerf(p);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
     fetchData();
+    const iv = setInterval(fetchData, 30_000); // 30sn auto-refresh
+    return () => clearInterval(iv);
   }, [fetchData]);
 
   // ── Sembol listesi (unique) ──────────────────────────────────────
@@ -381,7 +389,7 @@ export default function TradeHistory() {
           onClick={() => scrollToTrade(stats?.shortest_trade)}
           disabled={!stats?.shortest_trade}
         >
-          ⚡ En Kısa
+          ⏱ En Kısa
         </button>
       </div>
 
@@ -389,14 +397,25 @@ export default function TradeHistory() {
       <div className="th-table-wrap">
         {loading ? (
           <div className="th-loading">Yükleniyor...</div>
+        ) : fetchError ? (
+          <div className="th-loading th-error-msg">
+            <p>İşlem geçmişi yüklenemedi.</p>
+            <p className="th-error-hint">MT5 ve API bağlantısını kontrol edip <strong>Yenile</strong> butonuna tıklayın.</p>
+            <button type="button" className="th-retry-btn" onClick={fetchData}>Yenile</button>
+          </div>
         ) : filteredTrades.length === 0 ? (
-          <div className="th-loading">Filtre kriterlerine uygun işlem yok.</div>
+          <div className="th-loading">
+            {allTrades.length === 0
+              ? 'Henüz işlem kaydı yok veya veri gelmedi. Sayfayı yenileyin.'
+              : 'Filtre kriterlerine uygun işlem yok.'}
+          </div>
         ) : (
           <table className="th-table">
             <thead>
               <tr>
                 <th>Sembol</th>
                 <th>Yön</th>
+                <th>Tür</th>
                 <th>Lot</th>
                 <th>Giriş Fiy.</th>
                 <th>Çıkış Fiy.</th>
@@ -413,6 +432,12 @@ export default function TradeHistory() {
               {filteredTrades.map((t) => {
                 const approved = isApproved(t);
                 const isHighlighted = highlight === t.id;
+                const stratLower = (t.strategy || '').toLowerCase();
+                const exitReason = (t.exit_reason || '').toUpperCase();
+                const isHybrid = exitReason.includes('SOFTWARE') || stratLower === 'hybrid';
+                const isAuto = !isHybrid && stratLower !== '' && stratLower !== 'manual' && stratLower !== 'bilinmiyor';
+                const turLabel = isHybrid ? 'Hibrit' : isAuto ? 'Otomatik' : 'Manuel';
+                const turClass = isHybrid ? 'hybrid' : isAuto ? 'auto' : 'manual';
                 return (
                   <tr
                     key={t.id}
@@ -423,6 +448,11 @@ export default function TradeHistory() {
                     <td>
                       <span className={`dir-badge dir-badge--${(t.direction || '').toLowerCase()}`}>
                         {t.direction}
+                      </span>
+                    </td>
+                    <td className="th-tur-cell">
+                      <span className={`th-tur-badge th-tur--${turClass}`}>
+                        {turLabel}
                       </span>
                     </td>
                     <td className="mono">{t.lot?.toFixed(2) ?? '—'}</td>
@@ -490,7 +520,7 @@ export default function TradeHistory() {
               value={stats?.worst_trade ? `${formatMoney(stats.worst_trade.pnl)} (${stats.worst_trade.symbol})` : '—'}
               cls="loss"
             />
-            <PanelRow label="Maks. Ardışık Kayıp" value={maxConsecLosses} />
+            <PanelRow label="Maks. Ardışık Kayıp" value={maxConsecLosses != null ? `${maxConsecLosses} işlem` : '—'} />
             <PanelRow label="Sharpe Oranı" value={perf?.sharpe_ratio?.toFixed(2) ?? '—'} />
             <PanelRow label="Maks. Drawdown" value={perf?.max_drawdown_pct != null ? `%${perf.max_drawdown_pct.toFixed(2)}` : '—'} cls="loss" />
             <PanelRow label="Ort. İşlem Süresi" value={formatMinutes(stats?.avg_duration_minutes)} />

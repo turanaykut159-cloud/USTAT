@@ -18,7 +18,7 @@ class RiskParams:
 
     # ── Mevcut alanlar (değiştirilmiyor) ────────────────────────────
     max_position_size: float = 1.0
-    max_daily_loss: float = 0.02        # %2 günlük max kayıp
+    max_daily_loss: float = 0.018       # %1.8 günlük max kayıp
     max_total_drawdown: float = 0.10    # %10 toplam max drawdown
     risk_per_trade: float = 0.01        # %1 işlem başına risk
     max_open_positions: int = 5

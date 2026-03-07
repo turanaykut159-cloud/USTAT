@@ -1,4 +1,4 @@
-"""ÜSTAT v5.0 API — FastAPI Sunucu.
+"""ÜSTAT v5.1 API — FastAPI Sunucu.
 
 Desktop uygulamasına REST API + WebSocket köprüsü sağlar.
 
@@ -14,6 +14,7 @@ Endpoint'ler:
     GET  /api/risk           — Risk snapshot
     GET  /api/performance    — Performans metrikleri
     GET  /api/top5           — Top 5 kontrat
+    GET  /api/health         — Sistem sağlığı metrikleri
     POST /api/trades/approve — İşlem onaylama
     POST /api/killswitch     — Kill-switch tetikleme
     WS   /ws/live            — Canlı veri akışı
@@ -32,14 +33,18 @@ from api.deps import set_engine
 from api.routes import (
     account,
     events,
+    health,
+    hybrid_trade,
     killswitch,
     live,
+    manual_trade,
     performance,
     positions,
     risk,
     status,
     top5,
     trades,
+    ustat_brain,
 )
 
 logger = logging.getLogger("ustat.api")
@@ -108,7 +113,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="ÜSTAT API",
-    version="5.0.0",
+    version="5.1.0",
     description="VİOP Algorithmic Trading — REST & WebSocket API",
     lifespan=lifespan,
 )
@@ -138,6 +143,10 @@ app.include_router(performance.router, prefix="/api", tags=["performance"])
 app.include_router(top5.router, prefix="/api", tags=["top5"])
 app.include_router(killswitch.router, prefix="/api", tags=["killswitch"])
 app.include_router(events.router, prefix="/api", tags=["events"])
+app.include_router(manual_trade.router, prefix="/api", tags=["manual-trade"])
+app.include_router(hybrid_trade.router, prefix="/api", tags=["hybrid-trade"])
+app.include_router(ustat_brain.router, prefix="/api", tags=["ustat-brain"])
+app.include_router(health.router, prefix="/api", tags=["health"])
 app.include_router(live.router, tags=["websocket"])
 
 

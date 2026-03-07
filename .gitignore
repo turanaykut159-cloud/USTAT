@@ -61,6 +61,26 @@ check_test.json
 
 # Build
 *.spec
+desktop/release/
+
+# Backup dosyaları
+*.bak
+
+# Root package-lock (desktop'ınki hariç)
+/package-lock.json
+
+# Geçici test dosyaları
+test_trade.py
 
 # Claude (yerel context)
 .claude/
+
+# Görev dosyaları (tamamlanmış)
+CLAUDE_CODE_GOREV_*.md
+
+# USTAT DEPO (proje dokümanları, git dışı)
+USTAT DEPO/
+
+# Geçici log/rapor dosyaları
+collector_log.txt
+rapor_*.txt

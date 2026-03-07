@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.0 — Kilit / Bekleme Ekranı.
+ * ÜSTAT v5.1 — Kilit / Bekleme Ekranı.
  *
  * Akış (fire-and-forget MT5 başlatma + polling doğrulama):
  *   CHECKING    → kayıtlı credential kontrol
@@ -276,7 +276,7 @@ export default function LockScreen({ onUnlock }) {
 
       {/* ── Logo ─────────────────────────────────────────────────── */}
       <div className="lock-logo">
-        <h1>ÜSTAT <span className="version">v5.0</span></h1>
+        <h1>ÜSTAT <span className="version">v5.1</span></h1>
         <p className="lock-tagline">VİOP Algorithmic Trading</p>
       </div>
 

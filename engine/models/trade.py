@@ -55,3 +55,12 @@ class Trade:
     cancel_reason: str = ""           # iptal/red nedeni
     retry_count: int = 0              # market retry sayısı (max 1)
     max_slippage: float = 0.0         # kabul edilebilir maks slippage
+    # ── Evrensel pozisyon yönetimi alanları ────────────────────
+    peak_profit: float = 0.0          # ulaşılan en yüksek kâr (puan cinsinden)
+    tp1_hit: bool = False             # TP1 tetiklendi mi (yarı kapanış)
+    tp1_price: float = 0.0           # TP1 tetiklenme fiyatı
+    cost_averaged: bool = False       # maliyetlendirme yapıldı mı
+    initial_volume: float = 0.0      # TP1/ekleme öncesi orijinal lot
+    breakeven_hit: bool = False       # breakeven seviyesi çekildi mi
+    voting_score: int = 0            # anlık 4-gösterge oylama skoru (0-4)
+    flat_candle_count: int = 0       # yatay mum sayacı (2 saat kontrol)

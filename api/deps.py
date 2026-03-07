@@ -17,9 +17,13 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from engine.baba import Baba
+    from engine.data_pipeline import DataPipeline
     from engine.database import Database
+    from engine.h_engine import HEngine
     from engine.main import Engine
+    from engine.manuel_motor import ManuelMotor
     from engine.mt5_bridge import MT5Bridge
+    from engine.ogul import Ogul
     from engine.ustat import Ustat
 
 # ── Global engine referansları ────────────────────────────────────
@@ -58,6 +62,26 @@ def get_baba() -> Baba | None:
 def get_ustat() -> Ustat | None:
     """Ustat (strateji yöneticisi) instance'ına eriş."""
     return _engine.ustat if _engine else None
+
+
+def get_ogul() -> Ogul | None:
+    """Ogul (sinyal üretici) instance'ına eriş."""
+    return _engine.ogul if _engine else None
+
+
+def get_pipeline() -> DataPipeline | None:
+    """DataPipeline instance'ına eriş."""
+    return _engine.pipeline if _engine else None
+
+
+def get_h_engine() -> HEngine | None:
+    """HEngine (hibrit motor) instance'ına eriş."""
+    return _engine.h_engine if _engine else None
+
+
+def get_manuel_motor() -> ManuelMotor | None:
+    """ManuelMotor (bağımsız manuel işlem motoru) instance'ına eriş."""
+    return _engine.manuel_motor if _engine else None
 
 
 def get_uptime() -> int:

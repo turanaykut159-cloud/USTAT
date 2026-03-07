@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.0 — Ayarlar ekranı.
+ * ÜSTAT v5.1 — Ayarlar ekranı.
  *
  * Bölümler:
  *   1. MT5 Bağlantı Bilgileri (sunucu, hesap, şifre maskeli)
@@ -18,8 +18,8 @@ import { getAccount, getRisk, getStatus, getEvents } from '../services/api';
 
 // ── Sabitler ──────────────────────────────────────────────────────
 
-const VERSION = '5.0.0';
-const BUILD_DATE = '2026-02-22';
+const VERSION = '5.1.0';
+const BUILD_DATE = '2026-03-04';
 
 const SEVERITY_ORDER = { CRITICAL: 0, WARNING: 1, INFO: 2 };
 
@@ -94,6 +94,21 @@ export default function Settings() {
 
   // MT5 şifre göster/gizle
   const [showLogin, setShowLogin] = useState(false);
+
+  // Tema (localStorage + DOM)
+  const [theme, setTheme] = useState(() => {
+    return localStorage.getItem('ustat_theme') || 'dark';
+  });
+
+  const applyTheme = useCallback((newTheme) => {
+    setTheme(newTheme);
+    localStorage.setItem('ustat_theme', newTheme);
+    if (newTheme === 'light') {
+      document.documentElement.setAttribute('data-theme', 'light');
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+    }
+  }, []);
 
   // ── Veri çekme ──────────────────────────────────────────────────
 
@@ -232,11 +247,17 @@ export default function Settings() {
               <h3>Tema</h3>
             </div>
             <div className="st-theme-row">
-              <div className="st-theme-card active">
+              <div
+                className={`st-theme-card ${theme === 'dark' ? 'active' : ''}`}
+                onClick={() => applyTheme('dark')}
+              >
                 <div className="st-theme-preview dark" />
                 <span>Koyu Tema</span>
               </div>
-              <div className="st-theme-card disabled" title="Yakında...">
+              <div
+                className={`st-theme-card ${theme === 'light' ? 'active' : ''}`}
+                onClick={() => applyTheme('light')}
+              >
                 <div className="st-theme-preview light" />
                 <span>Açık Tema</span>
               </div>

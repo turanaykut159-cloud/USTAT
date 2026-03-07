@@ -1,20 +1,24 @@
 /**
- * ÜSTAT v5.0 — Sol dikey navigasyon menüsü.
+ * ÜSTAT v5.1 — Sol dikey navigasyon menüsü.
  *
- * 6 sayfa linki (ikonlu) + Kill-Switch butonu (en altta, kırmızı, 2s basılı tutma).
+ * 6 sayfa linki (ikonlu) + Güvenli Kapat (2 adım doğrulama) + Kill-Switch (en altta, kırmızı, 2s basılı tutma).
  */
 
 import React, { useState, useRef, useCallback } from 'react';
 import { NavLink } from 'react-router-dom';
 import { activateKillSwitch } from '../services/api';
+import ConfirmModal from './ConfirmModal';
 
 // ── Menü öğeleri ─────────────────────────────────────────────────
 const NAV_ITEMS = [
   { path: '/',            label: 'Dashboard',          icon: '📊' },
+  { path: '/manual',      label: 'Manuel İşlem Paneli', icon: '🎯' },
+  { path: '/hybrid',      label: 'Hibrit İşlem Paneli',  icon: '🔀' },
   { path: '/trades',      label: 'İşlem Geçmişi',     icon: '📋' },
   { path: '/positions',   label: 'Açık Pozisyonlar',   icon: '📈' },
-  { path: '/performance', label: 'Performans Analizi', icon: '🏆' },
+  { path: '/performance', label: 'Üstat & Performans', icon: '🏆' },
   { path: '/risk',        label: 'Risk Yönetimi',      icon: '🛡️' },
+  { path: '/health',      label: 'Sistem Sağlığı',     icon: '🩺' },
   { path: '/settings',    label: 'Ayarlar',            icon: '⚙️' },
 ];
 
@@ -29,6 +33,10 @@ export default function SideNav() {
   const holdTimerRef = useRef(null);
   const progressRef = useRef(null);
   const holdStartRef = useRef(0);
+
+  // ── Güvenli Kapat modal (2 adım + hata mesajı) ─────────────────
+  const [safeQuitStep, setSafeQuitStep] = useState(null);
+  const [alertMessage, setAlertMessage] = useState(null);
 
   // ── Kill-Switch basılı tutma başlat ────────────────────────────
   const handleKillDown = useCallback(() => {
@@ -59,6 +67,38 @@ export default function SideNav() {
     }, KILL_HOLD_DURATION);
   }, [killFired]);
 
+  // ── Güvenli Kapat: ilk tıklamada 1. modalı aç ─────────────────────
+  const handleSafeQuit = useCallback(() => {
+    setSafeQuitStep(1);
+  }, []);
+
+  // ── 1. adım onayı → 2. modalı göster ───────────────────────────
+  const handleSafeQuitStep1Confirm = useCallback(() => {
+    setSafeQuitStep(2);
+  }, []);
+
+  // ── 2. adım onayı → gerçek kapatma ─────────────────────────────
+  const handleSafeQuitStep2Confirm = useCallback(async () => {
+    setSafeQuitStep(null);
+    try {
+      if (typeof window.electronAPI?.safeQuit === 'function') {
+        await window.electronAPI.safeQuit();
+      } else {
+        setAlertMessage('Güvenli kapatma kullanılamıyor. Lütfen sistem tepsisindeki ÜSTAT ikonuna sağ tıklayıp "Çıkış" seçin.');
+      }
+    } catch (err) {
+      setAlertMessage('Kapatma sırasında hata: ' + (err?.message || String(err)));
+    }
+  }, []);
+
+  const handleSafeQuitCancel = useCallback(() => {
+    setSafeQuitStep(null);
+  }, []);
+
+  const handleAlertClose = useCallback(() => {
+    setAlertMessage(null);
+  }, []);
+
   // ── Kill-Switch bırakma (erken) ────────────────────────────────
   const handleKillUp = useCallback(() => {
     if (holdTimerRef.current) {
@@ -74,6 +114,7 @@ export default function SideNav() {
   }, []);
 
   return (
+    <>
     <nav className="side-nav">
       {/* ── Navigasyon linkleri ─────────────────────────────────── */}
       <ul className="side-nav-links">
@@ -90,8 +131,18 @@ export default function SideNav() {
         ))}
       </ul>
 
-      {/* ── Kill-Switch butonu (en altta) ──────────────────────── */}
+      {/* ── Güvenli Kapat + Kill-Switch (en altta) ───────────────── */}
       <div className="side-nav-bottom">
+        <button
+          type="button"
+          className="safe-quit-btn"
+          onClick={handleSafeQuit}
+          title="Uygulamayı tamamen kapat (2 adım doğrulama)"
+        >
+          <span className="safe-quit-icon">🚪</span>
+          <span className="safe-quit-label">Güvenli Kapat</span>
+        </button>
+
         <button
           className={`kill-switch-btn ${killHolding ? 'holding' : ''} ${killFired ? 'fired' : ''}`}
           onMouseDown={handleKillDown}
@@ -117,5 +168,41 @@ export default function SideNav() {
         </button>
       </div>
     </nav>
+
+    {/* ── Güvenli Kapat: 1. adım ────────────────────────────────── */}
+    <ConfirmModal
+      open={safeQuitStep === 1}
+      title="Güvenli Kapat"
+      message={'ÜSTAT tamamen kapatılacak (arka plan dahil). API ve motor duracak, MT5 açma sinyali gönderilmez.\n\nDevam etmek istiyor musunuz?'}
+      confirmLabel="Devam Et"
+      cancelLabel="İptal"
+      variant="warning"
+      onConfirm={handleSafeQuitStep1Confirm}
+      onCancel={handleSafeQuitCancel}
+    />
+
+    {/* ── Güvenli Kapat: 2. adım (son onay) ──────────────────────── */}
+    <ConfirmModal
+      open={safeQuitStep === 2}
+      title="Son onay"
+      message="Uygulama kapatılsın mı?"
+      confirmLabel="Kapat"
+      cancelLabel="İptal"
+      variant="warning"
+      onConfirm={handleSafeQuitStep2Confirm}
+      onCancel={handleSafeQuitCancel}
+    />
+
+    {/* ── Hata / bilgi mesajı (tek buton) ────────────────────────── */}
+    <ConfirmModal
+      open={!!alertMessage}
+      title="Bilgi"
+      message={alertMessage || ''}
+      confirmLabel="Tamam"
+      cancelLabel={null}
+      variant="primary"
+      onConfirm={handleAlertClose}
+    />
+    </>
   );
 }
