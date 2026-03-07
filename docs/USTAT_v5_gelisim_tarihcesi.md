@@ -528,3 +528,40 @@ Bu düzeltmeler native SLTP çalışmadığı için sorunu çözmedi ama kod kal
 
 ### Geri Alma Planı
 - `engine/baba.py` satır 126: `RISK_BASELINE_DATE` → `"2026-02-23"` geri çevrilir
+
+---
+
+## #18 — Açık Pozisyonlar Dashboard'a Birleştirilmesi (2026-03-07)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-07 |
+| **Neden** | Dashboard zaten "Açık Pozisyonlar" kartı içeriyordu. Ayrı bir "Açık Pozisyonlar" sayfası gereksiz tekrara neden oluyordu. Kullanıcı tek ekrandan tüm pozisyon yönetimini istedi. |
+| **Kök Neden** | Mimari: Aynı veri iki farklı sayfada gösteriliyordu. OpenPositions sayfasında ekstra özellikler (Swap, Yönetim, Süre, Rejim, Hibrit Devir) Dashboard'da eksikti. |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `desktop/src/components/Dashboard.jsx` | Tam özellikli pozisyon tablosu: Swap, Yönetim (TP1/BE/MA/Oylama), Süre, Rejim kolonları eklendi. Hibrit devir butonu eklendi. Tür sınıflandırması API `tur` alanı öncelikli. Hesap şeridi 6 kolona genişletildi (Teminat, Serbest Teminat eklendi). Teminat kullanım badge'i eklendi. `getHybridStatus`, `checkHybridTransfer`, `transferToHybrid` API çağrıları, `useNavigate`, `hybridTickets` state, `elapsed()`, `marginUsagePct()` eklendi. |
+| `desktop/src/components/SideNav.jsx` | `/positions` (Açık Pozisyonlar) nav öğesi kaldırıldı. |
+| `desktop/src/App.jsx` | `OpenPositions` import ve `/positions` route kaldırıldı. |
+| `desktop/src/styles/theme.css` | `.dash-account-strip` → 6 kolon. `.dash-card-header-right`, `.dash-margin-badge` stilleri eklendi. |
+
+### Eklenen
+- Dashboard'a: Swap, Yönetim, Süre, Rejim kolonları
+- Dashboard'a: "Hibrite Devret" / "Hibritte" butonları
+- Dashboard'a: Teminat kullanım yüzdesi badge
+- Hesap şeridine: Teminat, Serbest Teminat alanları
+- `elapsed()`, `marginUsagePct()` yardımcı fonksiyonlar
+- `.dash-card-header-right`, `.dash-margin-badge` CSS sınıfları
+
+### Çıkartılan
+- Sidebar'dan: "Açık Pozisyonlar" menü öğesi
+- App.jsx'ten: `/positions` route
+- `OpenPositions.jsx` dosyası artık kullanılmıyor (referans amaçlı korundu)
+
+### Geri Alma Planı
+- `SideNav.jsx`'e `/positions` nav öğesi geri eklenir
+- `App.jsx`'e `OpenPositions` import + route geri eklenir
+- `Dashboard.jsx` git history'den eski versiyona dönülür
