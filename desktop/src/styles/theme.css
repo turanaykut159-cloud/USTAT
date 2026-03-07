@@ -2080,6 +2080,33 @@ h2 {
   overflow-y: auto;
 }
 
+/* FAZ 2.10: Sayfalama */
+.th-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 0;
+}
+.th-page-btn {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-primary);
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.th-page-btn:hover:not(:disabled) { background: var(--bg-hover); }
+.th-page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.th-page-info {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  min-width: 80px;
+  text-align: center;
+}
+.th-page-total { font-size: 0.75rem; opacity: 0.7; }
+
 .th-loading {
   display: flex;
   align-items: center;

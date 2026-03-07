@@ -14,7 +14,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { getTrades, getTradeStats, getPerformance, approveTrade, connectLiveWS, STATS_BASELINE } from '../services/api';
+import { getTrades, getTradeStats, getPerformance, approveTrade, syncTrades, connectLiveWS, STATS_BASELINE } from '../services/api';
 import { formatMoney, formatPrice, pnlClass } from '../utils/formatters';
 
 // ── Sabitler ─────────────────────────────────────────────────────
@@ -136,11 +136,19 @@ export default function TradeHistory() {
   const [dirFilter, setDirFilter] = useState('all');
   const [resultFilter, setResultFilter] = useState('all');
 
+  // Sayfalama (FAZ 2.10)
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 50;
+
   // Hızlı erişim vurgu
   const [highlight, setHighlight] = useState(null); // trade id
 
   // Onay
   const [approving, setApproving] = useState(null);
+
+  // MT5 Senkronizasyon
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState(null);
 
   // ── Veri çekme ───────────────────────────────────────────────────
   const fetchData = useCallback(async () => {
@@ -167,7 +175,7 @@ export default function TradeHistory() {
     fetchData();
 
     // WebSocket bağlantısı: trade_closed/position_closed olayında yenile
-    const { ws, close } = connectLiveWS((messages) => {
+    const { close } = connectLiveWS((messages) => {
       const arr = Array.isArray(messages) ? messages : [messages];
       for (const msg of arr) {
         if (msg.type === 'trade_closed' || msg.type === 'position_closed') {
@@ -176,9 +184,9 @@ export default function TradeHistory() {
         }
       }
     });
-    wsRef.current = ws;
+    wsRef.current = close;
 
-    return () => close();
+    return () => { if (wsRef.current) wsRef.current(); };
   }, [fetchData]);
 
   // ── Sembol listesi (unique) ──────────────────────────────────────
@@ -186,6 +194,9 @@ export default function TradeHistory() {
     const set = new Set(allTrades.map((t) => t.symbol).filter(Boolean));
     return ['all', ...Array.from(set).sort()];
   }, [allTrades]);
+
+  // Filtre değiştiğinde sayfayı sıfırla
+  useEffect(() => { setPage(1); }, [period, symbolFilter, dirFilter, resultFilter]);
 
   // ── Client-side filtre ───────────────────────────────────────────
   const filteredTrades = useMemo(() => {
@@ -237,6 +248,13 @@ export default function TradeHistory() {
     };
   }, [filteredTrades]);
 
+  // ── Sayfalama (FAZ 2.10) ─────────────────────────────────────────
+  const totalPages = Math.max(1, Math.ceil(filteredTrades.length / PAGE_SIZE));
+  const pagedTrades = useMemo(() => {
+    const start = (page - 1) * PAGE_SIZE;
+    return filteredTrades.slice(start, start + PAGE_SIZE);
+  }, [filteredTrades, page]);
+
   // ── Ardışık kayıp hesapla ────────────────────────────────────────
   const maxConsecLosses = useMemo(() => {
     let max = 0, cur = 0;
@@ -246,6 +264,23 @@ export default function TradeHistory() {
     }
     return max;
   }, [filteredTrades]);
+
+  // ── MT5 Sync handler ─────────────────────────────────────────────
+  const handleSync = async () => {
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const res = await syncTrades(90);
+      setSyncResult(res);
+      if (res.success) {
+        await fetchData();  // Listeyi yenile
+      }
+    } finally {
+      setSyncing(false);
+      // Sonucu 5 saniye sonra kaldır
+      setTimeout(() => setSyncResult(null), 5000);
+    }
+  };
 
   // ── Onay handler ─────────────────────────────────────────────────
   const handleApprove = async (tradeId) => {
@@ -321,7 +356,22 @@ export default function TradeHistory() {
         <button className="th-refresh-btn" onClick={fetchData} disabled={loading}>
           {loading ? '...' : '↻'}
         </button>
+
+        <button
+          className="th-sync-btn"
+          onClick={handleSync}
+          disabled={syncing}
+          title="MT5'ten son 90 günlük işlem geçmişini senkronize et"
+        >
+          {syncing ? 'Senkronize ediliyor...' : '⟳ MT5 Senkronize Et'}
+        </button>
       </div>
+
+      {syncResult && (
+        <div className={`th-sync-result ${syncResult.success ? 'th-sync-ok' : 'th-sync-err'}`}>
+          {syncResult.message}
+        </div>
+      )}
 
       {/* ═══ ÖZET KARTLAR (4) ══════════════════════════════════════ */}
       <div className="th-summary-row">
@@ -420,7 +470,7 @@ export default function TradeHistory() {
               </tr>
             </thead>
             <tbody>
-              {filteredTrades.map((t) => {
+              {pagedTrades.map((t) => {
                 const approved = isApproved(t);
                 const isHighlighted = highlight === t.id;
                 const stratLower = (t.strategy || '').toLowerCase();
@@ -478,6 +528,44 @@ export default function TradeHistory() {
           </table>
         )}
       </div>
+
+      {/* ═══ SAYFALAMA (FAZ 2.10) ═════════════════════════════════ */}
+      {totalPages > 1 && (
+        <div className="th-pagination">
+          <button
+            className="th-page-btn"
+            onClick={() => setPage(1)}
+            disabled={page === 1}
+          >
+            ««
+          </button>
+          <button
+            className="th-page-btn"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={page === 1}
+          >
+            «
+          </button>
+          <span className="th-page-info">
+            {page} / {totalPages}
+            <span className="th-page-total"> ({filteredTrades.length} kayit)</span>
+          </span>
+          <button
+            className="th-page-btn"
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={page === totalPages}
+          >
+            »
+          </button>
+          <button
+            className="th-page-btn"
+            onClick={() => setPage(totalPages)}
+            disabled={page === totalPages}
+          >
+            »»
+          </button>
+        </div>
+      )}
 
       {/* ═══ PERFORMANS + RİSK PANELLERİ ═══════════════════════════ */}
       <div className="th-panels-row">

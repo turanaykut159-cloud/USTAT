@@ -18,6 +18,7 @@ Tablolar:
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 import threading
 from datetime import datetime, date
@@ -216,6 +217,32 @@ class Database:
         self._create_tables()
         self._migrate_schema()
         logger.info(f"Veritabanı hazır: {self._db_path}")
+
+    # ── Yedekleme ──────────────────────────────────────────────────────
+    def backup(self) -> str:
+        """trades.db'nin tarihli yedeğini al. Son 5 yedeği tutar.
+
+        Returns:
+            Yedek dosya yolu.
+        """
+        db_path = Path(self._db_path)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_path = db_path.parent / f"trades_backup_{ts}.db"
+        try:
+            shutil.copy2(str(db_path), str(backup_path))
+            logger.info(f"DB yedekleme tamamlandı: {backup_path}")
+        except Exception as exc:
+            logger.error(f"DB yedekleme hatası: {exc}")
+            return ""
+        # Eski yedekleri temizle — son 5 tane tut
+        backups = sorted(db_path.parent.glob("trades_backup_*.db"))
+        for old in backups[:-5]:
+            try:
+                old.unlink()
+                logger.debug(f"Eski yedek silindi: {old}")
+            except Exception:
+                pass
+        return str(backup_path)
 
     def _create_tables(self) -> None:
         """Tüm tabloları ve indeksleri oluştur (idempotent)."""

@@ -11,6 +11,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getPositions, getAccount, getStatus, getHybridStatus, connectLiveWS, closePosition, checkHybridTransfer, transferToHybrid } from '../services/api';
 import { formatMoney, formatPrice, pnlClass, elapsed } from '../utils/formatters';
+import ConfirmModal from './ConfirmModal';
 
 // ── Yardımcılar ──────────────────────────────────────────────────
 
@@ -39,6 +40,7 @@ export default function OpenPositions() {
   const [closingTicket, setClosingTicket] = useState(null); // kapatılan pozisyon ticket (loading)
   const [hybridTickets, setHybridTickets] = useState(new Set()); // hibrit yönetimindeki ticket'lar
   const [transferringTicket, setTransferringTicket] = useState(null); // devir işlemi yapılan ticket
+  const [errorModal, setErrorModal] = useState(null); // { title, message }
   const wsRef = useRef(null);
 
   // ── REST fallback (5sn) ──────────────────────────────────────────
@@ -106,7 +108,7 @@ export default function OpenPositions() {
       await closePosition(ticket);
       await fetchData();
     } catch (err) {
-      window.alert('Kapatma hatası: ' + (err?.message ?? String(err)));
+      setErrorModal({ title: 'Kapatma Hatası', message: err?.message ?? String(err) });
     } finally {
       setClosingTicket(null);
     }
@@ -119,17 +121,17 @@ export default function OpenPositions() {
     try {
       const check = await checkHybridTransfer(ticket);
       if (!check.can_transfer) {
-        window.alert('Hibrite devir yapılamaz: ' + (check.reason || 'Bilinmeyen hata'));
+        setErrorModal({ title: 'Devir Yapılamaz', message: check.reason || 'Bilinmeyen hata' });
         return;
       }
       const result = await transferToHybrid(ticket);
       if (result.success) {
         setHybridTickets((prev) => new Set([...prev, ticket]));
       } else {
-        window.alert('Devir hatası: ' + (result.message || 'Bilinmeyen hata'));
+        setErrorModal({ title: 'Devir Hatası', message: result.message || 'Bilinmeyen hata' });
       }
     } catch (err) {
-      window.alert('Devir hatası: ' + (err?.message ?? String(err)));
+      setErrorModal({ title: 'Devir Hatası', message: err?.message ?? String(err) });
     } finally {
       setTransferringTicket(null);
     }
@@ -368,6 +370,16 @@ export default function OpenPositions() {
           </span>
         </div>
       </div>
+
+      {/* Hata Modalı */}
+      <ConfirmModal
+        open={errorModal != null}
+        title={errorModal?.title || 'Hata'}
+        message={errorModal?.message || ''}
+        variant="danger"
+        confirmLabel="Tamam"
+        onConfirm={() => setErrorModal(null)}
+      />
     </div>
   );
 }
