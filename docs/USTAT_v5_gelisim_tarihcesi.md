@@ -528,3 +528,28 @@ Bu düzeltmeler native SLTP çalışmadığı için sorunu çözmedi ama kod kal
 
 ### Geri Alma Planı
 - `engine/baba.py` satır 126: `RISK_BASELINE_DATE` → `"2026-02-23"` geri çevrilir
+
+---
+
+## #18 — Peak Equity Doğrulama Eşiği Düzeltmesi (2026-03-07)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-07 |
+| **Neden** | RISK_BASELINE_DATE güncellendikten sonra eski peak_equity DB'de kaldı. Doğrulama eşiği (1.5x) çok gevşekti — eski peak sıfırlanmadı, drawdown %13.39 olarak kalmaya devam etti. |
+| **Kök Neden** | `_validate_peak_equity()` koşulu `stored_peak > max_eq * 1.5` — peak baseline sonrası max'ın 1.5 katından büyük olmalıydı. Gerçek fark (~%13) bu eşiğin altında kalıyordu. |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `engine/data_pipeline.py` | `_validate_peak_equity()`: koşul `stored_peak > max_eq * 1.5` → `stored_peak > max_eq` olarak güncellendi |
+
+### Eklenen
+- (yok)
+
+### Çıkartılan
+- (yok)
+
+### Geri Alma Planı
+- `engine/data_pipeline.py` satır 632: koşul `stored_peak > max_eq` → `stored_peak > max_eq * 1.5` geri çevrilir

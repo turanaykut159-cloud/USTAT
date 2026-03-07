@@ -628,8 +628,8 @@ class DataPipeline:
             default=0.0,
         )
 
-        # Stored peak, gerçek max'ın 1.5 katından büyükse → stale
-        if max_eq > 0 and stored_peak > max_eq * 1.5:
+        # Stored peak baseline sonrası max'tan büyükse → eski dönemden kalmış
+        if max_eq > 0 and stored_peak > max_eq:
             self._db.set_state("peak_equity", str(max_eq))
             logger.warning(
                 f"Peak equity sıfırlandı: {stored_peak:.2f} → {max_eq:.2f} "
