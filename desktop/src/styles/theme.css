@@ -2031,13 +2031,56 @@ h2 {
   line-height: 1.1;
 }
 
-/* ── Hızlı Erişim Butonları ──────────────────────────────────── */
-.th-quick-btns {
+/* ── Zaman Filtre Butonları (üst satır) ──────────────────────── */
+.th-period-btns {
   display: flex;
-  gap: 8px;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
-.th-quick-btn {
+.th-period-btn {
+  padding: 6px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.th-period-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
+
+.th-period-btn--active {
+  background: var(--accent, #3498db);
+  border-color: var(--accent, #3498db);
+  color: #fff;
+}
+
+.th-period-btn--active:hover {
+  background: var(--accent, #3498db);
+  border-color: var(--accent, #3498db);
+  color: #fff;
+  opacity: 0.9;
+}
+
+.th-period-btn--default {
+  font-weight: 600;
+}
+
+/* ── Sıralama Butonları (filtre satırında) ───────────────────── */
+.th-sort-btns {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.th-sort-btn {
   padding: 5px 12px;
   background: var(--bg-card);
   border: 1px solid var(--border);
@@ -2049,25 +2092,29 @@ h2 {
   transition: all 0.15s;
 }
 
-.th-quick-btn:hover:not(:disabled) {
+.th-sort-btn:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
   border-color: var(--text-secondary);
 }
 
-.th-quick-btn:disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
+.th-sort-btn--active {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--accent, #3498db);
+  box-shadow: 0 0 0 1px var(--accent, #3498db);
 }
 
-.th-quick--profit:hover:not(:disabled) {
+.th-sort--profit.th-sort-btn--active {
   color: var(--profit);
   border-color: var(--profit);
+  box-shadow: 0 0 0 1px var(--profit);
 }
 
-.th-quick--loss:hover:not(:disabled) {
+.th-sort--loss.th-sort-btn--active {
   color: var(--loss);
   border-color: var(--loss);
+  box-shadow: 0 0 0 1px var(--loss);
 }
 
 /* ── İşlem Tablosu ───────────────────────────────────────────── */
@@ -4781,4 +4828,236 @@ h2 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   SİSTEM GÜNLÜĞÜ (sl-)
+   ═══════════════════════════════════════════════════════════════════ */
+
+.sl-page {
+  padding: 20px 24px;
+  overflow-y: auto;
+  height: 100%;
+}
+
+.sl-title {
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 16px;
+}
+
+.sl-loading {
+  color: var(--text-secondary);
+  text-align: center;
+  padding: 40px;
+}
+
+/* ── Özet kartlar ─────────────────────────────────────────────── */
+
+.sl-summary {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.sl-summary-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 60px;
+  padding: 8px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.sl-summary-count {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.sl-summary-label {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.sl-summary-critical .sl-summary-count { color: var(--loss); font-weight: 800; }
+.sl-summary-error .sl-summary-count    { color: var(--loss); }
+.sl-summary-warning .sl-summary-count  { color: var(--warning); }
+.sl-summary-info .sl-summary-count     { color: var(--accent); }
+
+/* ── Filtreler ────────────────────────────────────────────────── */
+
+.sl-filters {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.sl-filter-group {
+  display: flex;
+  gap: 6px;
+}
+
+.sl-filter-btn {
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 500;
+  transition: all 0.15s;
+}
+
+.sl-filter-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.sl-filter-active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.sl-select {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 0.78rem;
+  cursor: pointer;
+  outline: none;
+}
+
+.sl-select:focus {
+  border-color: var(--accent);
+}
+
+/* ── Tablo ────────────────────────────────────────────────────── */
+
+.sl-table-wrap {
+  max-height: calc(100vh - 280px);
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.sl-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.sl-table th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--text-dim);
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  text-transform: uppercase;
+  font-size: 0.68rem;
+  letter-spacing: 0.5px;
+  position: sticky;
+  top: 0;
+  background: var(--bg-secondary);
+  z-index: 1;
+}
+
+.sl-table td {
+  padding: 5px 8px;
+  color: var(--text-primary);
+  border-bottom: 1px solid rgba(48, 54, 61, 0.4);
+}
+
+.sl-table tbody tr:hover {
+  background: var(--bg-hover);
+}
+
+.sl-row-critical {
+  background: rgba(248, 81, 73, 0.06);
+}
+
+.sl-row-critical:hover {
+  background: rgba(248, 81, 73, 0.12) !important;
+}
+
+.sl-mono {
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
+.sl-type {
+  white-space: nowrap;
+}
+
+.sl-event-msg {
+  max-width: 500px;
+  word-break: break-word;
+}
+
+.sl-event-action {
+  max-width: 200px;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+
+/* ── Severity badge'ler ───────────────────────────────────────── */
+
+.sl-sev-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.sl-sev-critical {
+  background: rgba(248, 81, 73, 0.25);
+  color: var(--loss);
+  font-weight: 800;
+}
+
+.sl-sev-error {
+  background: rgba(248, 81, 73, 0.15);
+  color: var(--loss);
+}
+
+.sl-sev-warning {
+  background: rgba(210, 153, 34, 0.18);
+  color: var(--warning);
+}
+
+.sl-sev-info {
+  background: rgba(88, 166, 255, 0.12);
+  color: var(--accent);
+}
+
+.sl-sev-debug {
+  background: rgba(139, 148, 158, 0.12);
+  color: var(--text-dim);
+}
+
+/* ── Boş durum ────────────────────────────────────────────────── */
+
+.sl-empty {
+  color: var(--text-dim);
+  text-align: center;
+  padding: 40px;
+  font-size: 0.85rem;
 }

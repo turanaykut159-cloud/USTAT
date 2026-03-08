@@ -983,3 +983,33 @@ Bu düzeltmeler native SLTP çalışmadığı için sorunu çözmedi ama kod kal
 ### Çıkartılan
 - `Ogul.check_manual_trade()` (~145 satır) → ManuelMotor'a taşındı
 - `Ogul.open_manual_trade()` (~200 satır) → ManuelMotor'a taşındı
+
+---
+
+## #32 — Ayarlar Sayfa Düzeni + Sistem Günlüğü Sayfası (2026-03-08)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-08 |
+| **Neden** | (1) Ayarlar sayfasında kartlar arasında gereksiz boşluk vardı. (2) BABA kararlarını, erken uyarıları ve sistem olaylarını geriye dönük görüntüleyecek bir sayfa eksikti. |
+| **Kök Neden** | (1) Hakkında kartı sağ sütunda tek başına kalıyordu. (2) Events tablosu ve API mevcut ama görüntüleyici UI yoktu. |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `desktop/src/components/Settings.jsx` | Hakkında bölümü sağ sütundan sol sütuna taşındı (Sol: Hesap + Hakkında, Sağ: Tema + Bildirim) |
+| `desktop/src/components/SystemLog.jsx` | **YENİ** — Sistem Günlüğü sayfası (~220 satır): severity özet kartları, severity/tip filtreleri, scrollable event tablosu, 10sn auto-refresh |
+| `desktop/src/components/SideNav.jsx` | NAV_ITEMS'a "Sistem Günlüğü" eklendi (Sistem Sağlığı ile Ayarlar arası) |
+| `desktop/src/App.jsx` | SystemLog import + `/logs` route eklendi |
+| `desktop/src/styles/theme.css` | `sl-` prefixli CSS bloğu eklendi (~150 satır): tablo, badge, filtre, özet kartları |
+
+### Eklenen
+- Sistem Günlüğü sayfası — 22 farklı event tipini Türkçe etiketlerle gösterir
+- Severity badge renk kodlaması: Kritik (koyu kırmızı), Hata (kırmızı), Uyarı (sarı), Bilgi (mavi), Debug (gri)
+- Client-side filtreleme (severity butonları + event type dropdown)
+- Severity özet kartları (Toplam, Kritik, Hata, Uyarı, Bilgi sayıları)
+- Sidebar'da 📜 ikonlu yeni menü öğesi
+
+### Çıkartılan
+- Yok (sadece ekleme ve düzenleme)
