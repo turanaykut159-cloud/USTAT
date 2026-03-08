@@ -122,6 +122,7 @@ MAX_INDEX_WEIGHT_SCORE:     float = 0.25
 # ── Risk hesaplama başlangıç tarihi (varsayılan) ──────────────────
 # Config'den okunur (risk.baseline_date). Bu sabit yalnızca fallback.
 _DEFAULT_RISK_BASELINE_DATE: str = "2026-03-07"
+RISK_BASELINE_DATE = _DEFAULT_RISK_BASELINE_DATE      # data_pipeline uyumu
 
 # ── Kill-switch seviyeleri ───────────────────────────────────────────
 KILL_SWITCH_NONE: int = 0

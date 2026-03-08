@@ -1056,3 +1056,25 @@ Bu düzeltmeler native SLTP çalışmadığı için sorunu çözmedi ama kod kal
 - `scrollToTrade()` fonksiyonu ve `highlight` state (tek satıra scroll mantığı)
 - `PERIOD_OPTIONS` dropdown sabiti → `PERIOD_BUTTONS` buton sabiti ile değiştirildi
 - Dönem dropdown (`<select>`) kaldırıldı
+
+---
+
+## #34 — Engine Başlatma Hatası Düzeltmesi: RISK_BASELINE_DATE (2026-03-08)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-08 |
+| **Neden** | Uygulama yeniden başlatıldığında "Bağlantı Yok!" hatası — engine ayağa kalkamıyordu. |
+| **Kök Neden** | Remote commit `6c909f1` (#32 — Uzman Ekip Raporu) `baba.py`'daki `RISK_BASELINE_DATE` sabitini `_DEFAULT_RISK_BASELINE_DATE` olarak yeniden adlandırmış ama `data_pipeline.py:611`'deki import güncellenmemiş. `ImportError` → engine oluşturulamıyor → `mt5_connected: false` → "Bağlantı Yok!". |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `engine/baba.py` | `RISK_BASELINE_DATE = _DEFAULT_RISK_BASELINE_DATE` alias eklendi (satır 125) — `data_pipeline.py` geriye uyumluluğu sağlandı |
+
+### Eklenen
+- `RISK_BASELINE_DATE` public alias (1 satır) — `data_pipeline._validate_peak_equity()` import uyumu
+
+### Çıkartılan
+- Yok
