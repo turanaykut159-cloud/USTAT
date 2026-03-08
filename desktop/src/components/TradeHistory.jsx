@@ -2,10 +2,10 @@
  * ÜSTAT v5.2 — İşlem Geçmişi ekranı.
  *
  * Layout:
- *   1. Filtre çubuğu: Dönem, Sembol, Yön, Sonuç
- *   2. Özet kartlar: Toplam İşlem, Başarı Oranı, Net K/Z, Profit Factor
- *   3. Hızlı erişim butonları: En kârlı/zararlı/uzun/kısa
- *   4. İşlem tablosu (11 sütun + Onayla butonu)
+ *   1. Zaman filtre butonları (Varsayılan | Bugün | Bu Hafta | Bu Ay | 3 Ay | 6 Ay | 1 Yıl)
+ *   2. Filtre çubuğu: Sembol, Yön, Sonuç + Sıralama butonları + Yenile + MT5 Sync
+ *   3. Özet kartlar: Toplam İşlem, Başarı Oranı, Net K/Z, Profit Factor
+ *   4. İşlem tablosu (11 sütun + Onayla butonu) — sayfalama (50/sayfa)
  *   5. Performans paneli (sol) + Risk paneli (sağ)
  *   6. Alt özet satırı
  *
@@ -19,14 +19,13 @@ import { formatMoney, formatPrice, pnlClass } from '../utils/formatters';
 
 // ── Sabitler ─────────────────────────────────────────────────────
 
-const PERIOD_OPTIONS = [
+const PERIOD_BUTTONS = [
   { value: 'today',  label: 'Bugün' },
-  { value: '1w',     label: 'Son Hafta' },
-  { value: '1m',     label: 'Son Ay' },
-  { value: '3m',     label: 'Son 3 Ay' },
-  { value: '6m',     label: 'Son 6 Ay' },
-  { value: '1y',     label: 'Son Yıl' },
-  { value: 'all',    label: 'Tümü' },
+  { value: '1w',     label: 'Bu Hafta' },
+  { value: '1m',     label: 'Bu Ay' },
+  { value: '3m',     label: '3 Ay' },
+  { value: '6m',     label: '6 Ay' },
+  { value: '1y',     label: '1 Yıl' },
 ];
 
 const DIR_OPTIONS = [
@@ -40,6 +39,19 @@ const RESULT_OPTIONS = [
   { value: 'profit', label: 'Kârlı' },
   { value: 'loss',   label: 'Zararlı' },
 ];
+
+const SORT_BUTTONS = [
+  { value: 'pnl_desc',      label: '↑ En Kârlı',   cls: 'th-sort--profit' },
+  { value: 'pnl_asc',       label: '↓ En Zararlı',  cls: 'th-sort--loss' },
+  { value: 'duration_desc', label: '⏱ En Uzun',     cls: '' },
+  { value: 'duration_asc',  label: '⏱ En Kısa',     cls: '' },
+];
+
+// Varsayılan filtre değerleri
+const DEFAULT_PERIOD = '1m';
+const DEFAULT_SYMBOL = 'all';
+const DEFAULT_DIR = 'all';
+const DEFAULT_RESULT = 'all';
 
 // ── Yardımcılar ──────────────────────────────────────────────────
 
@@ -112,6 +124,13 @@ function periodStartDate(period) {
   }
 }
 
+/** İşlemin süresini ms cinsinden hesapla (sıralama için) */
+function tradeDurationMs(t) {
+  if (!t.entry_time || !t.exit_time) return 0;
+  const ms = new Date(t.exit_time) - new Date(t.entry_time);
+  return isNaN(ms) || ms < 0 ? 0 : ms;
+}
+
 /** İşlem onaylı mı kontrolü */
 function isApproved(trade) {
   return (trade.exit_reason || '').includes('APPROVED');
@@ -131,17 +150,17 @@ export default function TradeHistory() {
   const [fetchError, setFetchError] = useState(false);
 
   // Filtreler
-  const [period, setPeriod] = useState('1m');
-  const [symbolFilter, setSymbolFilter] = useState('all');
-  const [dirFilter, setDirFilter] = useState('all');
-  const [resultFilter, setResultFilter] = useState('all');
+  const [period, setPeriod] = useState(DEFAULT_PERIOD);
+  const [symbolFilter, setSymbolFilter] = useState(DEFAULT_SYMBOL);
+  const [dirFilter, setDirFilter] = useState(DEFAULT_DIR);
+  const [resultFilter, setResultFilter] = useState(DEFAULT_RESULT);
 
-  // Sayfalama (FAZ 2.10)
+  // Sıralama
+  const [sortMode, setSortMode] = useState(null);
+
+  // Sayfalama
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 50;
-
-  // Hızlı erişim vurgu
-  const [highlight, setHighlight] = useState(null); // trade id
 
   // Onay
   const [approving, setApproving] = useState(null);
@@ -149,6 +168,29 @@ export default function TradeHistory() {
   // MT5 Senkronizasyon
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState(null);
+
+  // ── Filtre sıfırlama ──────────────────────────────────────────
+  const resetFilters = useCallback(() => {
+    setPeriod(DEFAULT_PERIOD);
+    setSymbolFilter(DEFAULT_SYMBOL);
+    setDirFilter(DEFAULT_DIR);
+    setResultFilter(DEFAULT_RESULT);
+    setSortMode(null);
+  }, []);
+
+  /** Zaman butonuna tıklayınca: periyodu ayarla + diğer filtreleri sıfırla */
+  const handlePeriodClick = useCallback((value) => {
+    setPeriod(value);
+    setSymbolFilter(DEFAULT_SYMBOL);
+    setDirFilter(DEFAULT_DIR);
+    setResultFilter(DEFAULT_RESULT);
+    setSortMode(null);
+  }, []);
+
+  /** Sıralama butonuna tıklayınca: toggle (aynıysa kapat, farklıysa aç) */
+  const handleSortClick = useCallback((value) => {
+    setSortMode((prev) => prev === value ? null : value);
+  }, []);
 
   // ── Veri çekme ───────────────────────────────────────────────────
   const fetchData = useCallback(async () => {
@@ -174,7 +216,6 @@ export default function TradeHistory() {
   useEffect(() => {
     fetchData();
 
-    // WebSocket bağlantısı: trade_closed/position_closed olayında yenile
     const { close } = connectLiveWS((messages) => {
       const arr = Array.isArray(messages) ? messages : [messages];
       for (const msg of arr) {
@@ -195,28 +236,37 @@ export default function TradeHistory() {
     return ['all', ...Array.from(set).sort()];
   }, [allTrades]);
 
-  // Filtre değiştiğinde sayfayı sıfırla
-  useEffect(() => { setPage(1); }, [period, symbolFilter, dirFilter, resultFilter]);
+  // Filtre/sıralama değiştiğinde sayfayı sıfırla
+  useEffect(() => { setPage(1); }, [period, symbolFilter, dirFilter, resultFilter, sortMode]);
 
   // ── Client-side filtre ───────────────────────────────────────────
   const filteredTrades = useMemo(() => {
     const startDate = periodStartDate(period);
     return allTrades.filter((t) => {
-      // Dönem
       if (startDate) {
         const ts = t.exit_time || t.entry_time;
         if (ts && new Date(ts) < startDate) return false;
       }
-      // Sembol
       if (symbolFilter !== 'all' && t.symbol !== symbolFilter) return false;
-      // Yön
       if (dirFilter !== 'all' && t.direction !== dirFilter) return false;
-      // Sonuç
       if (resultFilter === 'profit' && (t.pnl == null || t.pnl <= 0)) return false;
       if (resultFilter === 'loss' && (t.pnl == null || t.pnl >= 0)) return false;
       return true;
     });
   }, [allTrades, period, symbolFilter, dirFilter, resultFilter]);
+
+  // ── Sıralama ───────────────────────────────────────────────────
+  const sortedTrades = useMemo(() => {
+    if (!sortMode) return filteredTrades;
+    const arr = [...filteredTrades];
+    switch (sortMode) {
+      case 'pnl_desc':      return arr.sort((a, b) => (b.pnl || 0) - (a.pnl || 0));
+      case 'pnl_asc':       return arr.sort((a, b) => (a.pnl || 0) - (b.pnl || 0));
+      case 'duration_desc': return arr.sort((a, b) => tradeDurationMs(b) - tradeDurationMs(a));
+      case 'duration_asc':  return arr.sort((a, b) => tradeDurationMs(a) - tradeDurationMs(b));
+      default:               return arr;
+    }
+  }, [filteredTrades, sortMode]);
 
   // ── Filtre bazlı hesaplamalar ────────────────────────────────────
   const filteredStats = useMemo(() => {
@@ -248,12 +298,12 @@ export default function TradeHistory() {
     };
   }, [filteredTrades]);
 
-  // ── Sayfalama (FAZ 2.10) ─────────────────────────────────────────
-  const totalPages = Math.max(1, Math.ceil(filteredTrades.length / PAGE_SIZE));
+  // ── Sayfalama ────────────────────────────────────────────────────
+  const totalPages = Math.max(1, Math.ceil(sortedTrades.length / PAGE_SIZE));
   const pagedTrades = useMemo(() => {
     const start = (page - 1) * PAGE_SIZE;
-    return filteredTrades.slice(start, start + PAGE_SIZE);
-  }, [filteredTrades, page]);
+    return sortedTrades.slice(start, start + PAGE_SIZE);
+  }, [sortedTrades, page]);
 
   // ── Ardışık kayıp hesapla ────────────────────────────────────────
   const maxConsecLosses = useMemo(() => {
@@ -273,11 +323,10 @@ export default function TradeHistory() {
       const res = await syncTrades(90);
       setSyncResult(res);
       if (res.success) {
-        await fetchData();  // Listeyi yenile
+        await fetchData();
       }
     } finally {
       setSyncing(false);
-      // Sonucu 5 saniye sonra kaldır
       setTimeout(() => setSyncResult(null), 5000);
     }
   };
@@ -287,7 +336,6 @@ export default function TradeHistory() {
     setApproving(tradeId);
     const res = await approveTrade(tradeId, 'operator', '');
     if (res.success) {
-      // Trade listesini güncelle
       setAllTrades((prev) =>
         prev.map((t) =>
           t.id === tradeId
@@ -299,33 +347,38 @@ export default function TradeHistory() {
     setApproving(null);
   };
 
-  // ── Hızlı erişim ────────────────────────────────────────────────
-  const scrollToTrade = (trade) => {
-    if (!trade) return;
-    setHighlight(trade.id);
-    // Highlight'ı 3 saniye sonra kaldır
-    setTimeout(() => setHighlight(null), 3000);
-    // Satırı görünüme kaydır
-    const el = document.getElementById(`trade-row-${trade.id}`);
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  };
+  // Varsayılan durumda mı kontrolü
+  const isDefault = period === DEFAULT_PERIOD
+    && symbolFilter === DEFAULT_SYMBOL
+    && dirFilter === DEFAULT_DIR
+    && resultFilter === DEFAULT_RESULT
+    && sortMode === null;
 
   // ── Render ───────────────────────────────────────────────────────
   return (
     <div className="trade-history">
-      <h2>İşlem Geçmişi</h2>
 
-      {/* ═══ FİLTRE ÇUBUĞU ═════════════════════════════════════════ */}
+      {/* ═══ ZAMAN FİLTRE BUTONLARI (üst satır) ═════════════════ */}
+      <div className="th-period-btns">
+        <button
+          className={`th-period-btn th-period-btn--default ${isDefault ? 'th-period-btn--active' : ''}`}
+          onClick={resetFilters}
+        >
+          Varsayılan
+        </button>
+        {PERIOD_BUTTONS.map((o) => (
+          <button
+            key={o.value}
+            className={`th-period-btn ${period === o.value && !isDefault ? 'th-period-btn--active' : ''}`}
+            onClick={() => handlePeriodClick(o.value)}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ═══ FİLTRE + SIRALAMA ÇUBUĞU (alt satır) ═══════════════ */}
       <div className="th-filters">
-        <label className="th-filter">
-          <span>Dönem</span>
-          <select value={period} onChange={(e) => setPeriod(e.target.value)}>
-            {PERIOD_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
-        </label>
-
         <label className="th-filter">
           <span>Sembol</span>
           <select value={symbolFilter} onChange={(e) => setSymbolFilter(e.target.value)}>
@@ -352,6 +405,18 @@ export default function TradeHistory() {
             ))}
           </select>
         </label>
+
+        <div className="th-sort-btns">
+          {SORT_BUTTONS.map((s) => (
+            <button
+              key={s.value}
+              className={`th-sort-btn ${s.cls} ${sortMode === s.value ? 'th-sort-btn--active' : ''}`}
+              onClick={() => handleSortClick(s.value)}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
 
         <button className="th-refresh-btn" onClick={fetchData} disabled={loading}>
           {loading ? '...' : '↻'}
@@ -402,38 +467,6 @@ export default function TradeHistory() {
         </div>
       </div>
 
-      {/* ═══ HIZLI ERİŞİM BUTONLARI ════════════════════════════════ */}
-      <div className="th-quick-btns">
-        <button
-          className="th-quick-btn th-quick--profit"
-          onClick={() => scrollToTrade(stats?.best_trade)}
-          disabled={!stats?.best_trade}
-        >
-          ↑ En Kârlı
-        </button>
-        <button
-          className="th-quick-btn th-quick--loss"
-          onClick={() => scrollToTrade(stats?.worst_trade)}
-          disabled={!stats?.worst_trade}
-        >
-          ↓ En Zararlı
-        </button>
-        <button
-          className="th-quick-btn"
-          onClick={() => scrollToTrade(stats?.longest_trade)}
-          disabled={!stats?.longest_trade}
-        >
-          ⏱ En Uzun
-        </button>
-        <button
-          className="th-quick-btn"
-          onClick={() => scrollToTrade(stats?.shortest_trade)}
-          disabled={!stats?.shortest_trade}
-        >
-          ⏱ En Kısa
-        </button>
-      </div>
-
       {/* ═══ İŞLEM TABLOSU ═════════════════════════════════════════ */}
       <div className="th-table-wrap">
         {loading ? (
@@ -444,7 +477,7 @@ export default function TradeHistory() {
             <p className="th-error-hint">MT5 ve API bağlantısını kontrol edip <strong>Yenile</strong> butonuna tıklayın.</p>
             <button type="button" className="th-retry-btn" onClick={fetchData}>Yenile</button>
           </div>
-        ) : filteredTrades.length === 0 ? (
+        ) : sortedTrades.length === 0 ? (
           <div className="th-loading">
             {allTrades.length === 0
               ? 'Henüz işlem kaydı yok veya veri gelmedi. Sayfayı yenileyin.'
@@ -472,7 +505,6 @@ export default function TradeHistory() {
             <tbody>
               {pagedTrades.map((t) => {
                 const approved = isApproved(t);
-                const isHighlighted = highlight === t.id;
                 const stratLower = (t.strategy || '').toLowerCase();
                 const exitReason = (t.exit_reason || '').toUpperCase();
                 const isHybrid = exitReason.includes('SOFTWARE') || stratLower === 'hybrid' || stratLower === 'hibrit';
@@ -483,7 +515,7 @@ export default function TradeHistory() {
                   <tr
                     key={t.id}
                     id={`trade-row-${t.id}`}
-                    className={`${isHighlighted ? 'th-row-hl' : ''} ${approved ? '' : 'th-row-new'}`}
+                    className={approved ? '' : 'th-row-new'}
                   >
                     <td className="mono">{t.symbol}</td>
                     <td>
@@ -529,41 +561,17 @@ export default function TradeHistory() {
         )}
       </div>
 
-      {/* ═══ SAYFALAMA (FAZ 2.10) ═════════════════════════════════ */}
+      {/* ═══ SAYFALAMA ════════════════════════════════════════════ */}
       {totalPages > 1 && (
         <div className="th-pagination">
-          <button
-            className="th-page-btn"
-            onClick={() => setPage(1)}
-            disabled={page === 1}
-          >
-            ««
-          </button>
-          <button
-            className="th-page-btn"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page === 1}
-          >
-            «
-          </button>
+          <button className="th-page-btn" onClick={() => setPage(1)} disabled={page === 1}>««</button>
+          <button className="th-page-btn" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>«</button>
           <span className="th-page-info">
             {page} / {totalPages}
-            <span className="th-page-total"> ({filteredTrades.length} kayit)</span>
+            <span className="th-page-total"> ({sortedTrades.length} kayit)</span>
           </span>
-          <button
-            className="th-page-btn"
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={page === totalPages}
-          >
-            »
-          </button>
-          <button
-            className="th-page-btn"
-            onClick={() => setPage(totalPages)}
-            disabled={page === totalPages}
-          >
-            »»
-          </button>
+          <button className="th-page-btn" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}>»</button>
+          <button className="th-page-btn" onClick={() => setPage(totalPages)} disabled={page === totalPages}>»»</button>
         </div>
       )}
 

@@ -1025,3 +1025,34 @@ Bu düzeltmeler native SLTP çalışmadığı için sorunu çözmedi ama kod kal
 - `RISK_BASELINE_DATE` sabit → `_risk_baseline_date` instance değişkeni (config'den)
 - `SPREAD_HISTORY_LEN` sabit → `_spread_history_len` dinamik (cycle_interval'a göre)
 - 5× `window.alert()` çağrısı → ConfirmModal
+
+---
+
+## #33 — İşlem Geçmişi: Filtre ve Sıralama İyileştirmesi (2026-03-08)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-08 |
+| **Neden** | Sıralama butonları (En Kârlı/Zararlı/Uzun/Kısa) tabloyu sıralamıyor, sadece tek satıra scroll yapıyordu. Zaman filtresi dropdown olarak gizliydi, hızlı erişim buton olmalıydı. |
+| **Kök Neden** | Butonlar `scrollToTrade()` çağırıyordu (stats API'den gelen tek işleme scroll). Gerçek sıralama mantığı yoktu. |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `desktop/src/components/TradeHistory.jsx` | Zaman filtresi dropdown → buton satırı (Varsayılan / Bugün / Bu Hafta / Bu Ay / 3 Ay / 6 Ay / 1 Yıl); sıralama butonları gerçek sıralama yapacak şekilde yeniden yazıldı (sortMode state + sortedTrades useMemo); Varsayılan butonu tüm filtreleri sıfırlar; zaman butonuna tıklayınca diğer filtreler sıfırlanır |
+| `desktop/src/styles/theme.css` | `.th-period-btns`, `.th-period-btn`, `.th-period-btn--active`, `.th-sort-btns`, `.th-sort-btn`, `.th-sort-btn--active` stilleri eklendi; eski `.th-quick-btns`, `.th-quick-btn` stilleri kaldırıldı |
+
+### Eklenen
+- `sortMode` state: `null | pnl_desc | pnl_asc | duration_desc | duration_asc`
+- `sortedTrades` useMemo: filtrelenmiş verileri seçilen moda göre sıralar
+- `tradeDurationMs()` yardımcı fonksiyonu: işlem süresini ms cinsinden hesaplar
+- `resetFilters()`: tüm filtreleri varsayılana döndürür
+- `handlePeriodClick()`: zaman butonuna tıklanınca periyod ayarlar + diğer filtreleri sıfırlar
+- Zaman buton satırı: Varsayılan | Bugün | Bu Hafta | Bu Ay | 3 Ay | 6 Ay | 1 Yıl
+- Sıralama toggle: aynı butona tekrar tıklanınca sıralama kapanır
+
+### Çıkartılan
+- `scrollToTrade()` fonksiyonu ve `highlight` state (tek satıra scroll mantığı)
+- `PERIOD_OPTIONS` dropdown sabiti → `PERIOD_BUTTONS` buton sabiti ile değiştirildi
+- Dönem dropdown (`<select>`) kaldırıldı

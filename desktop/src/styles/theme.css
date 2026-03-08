@@ -2031,13 +2031,56 @@ h2 {
   line-height: 1.1;
 }
 
-/* ── Hızlı Erişim Butonları ──────────────────────────────────── */
-.th-quick-btns {
+/* ── Zaman Filtre Butonları (üst satır) ──────────────────────── */
+.th-period-btns {
   display: flex;
-  gap: 8px;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
-.th-quick-btn {
+.th-period-btn {
+  padding: 6px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.th-period-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
+
+.th-period-btn--active {
+  background: var(--accent, #3498db);
+  border-color: var(--accent, #3498db);
+  color: #fff;
+}
+
+.th-period-btn--active:hover {
+  background: var(--accent, #3498db);
+  border-color: var(--accent, #3498db);
+  color: #fff;
+  opacity: 0.9;
+}
+
+.th-period-btn--default {
+  font-weight: 600;
+}
+
+/* ── Sıralama Butonları (filtre satırında) ───────────────────── */
+.th-sort-btns {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.th-sort-btn {
   padding: 5px 12px;
   background: var(--bg-card);
   border: 1px solid var(--border);
@@ -2049,25 +2092,29 @@ h2 {
   transition: all 0.15s;
 }
 
-.th-quick-btn:hover:not(:disabled) {
+.th-sort-btn:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
   border-color: var(--text-secondary);
 }
 
-.th-quick-btn:disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
+.th-sort-btn--active {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--accent, #3498db);
+  box-shadow: 0 0 0 1px var(--accent, #3498db);
 }
 
-.th-quick--profit:hover:not(:disabled) {
+.th-sort--profit.th-sort-btn--active {
   color: var(--profit);
   border-color: var(--profit);
+  box-shadow: 0 0 0 1px var(--profit);
 }
 
-.th-quick--loss:hover:not(:disabled) {
+.th-sort--loss.th-sort-btn--active {
   color: var(--loss);
   border-color: var(--loss);
+  box-shadow: 0 0 0 1px var(--loss);
 }
 
 /* ── İşlem Tablosu ───────────────────────────────────────────── */
