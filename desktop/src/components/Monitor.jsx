@@ -62,9 +62,9 @@ function StatCard({ label, value, sub, color }) {
       padding: '11px 13px', position: 'relative', overflow: 'hidden',
     }}>
       <div style={{ position: 'absolute', top: 0, left: 0, width: 3, height: '100%', background: color }} />
-      <div style={{ fontSize: 8, letterSpacing: 3, color: '#3a5070', marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 8, letterSpacing: 3, color: '#6a8aa8', marginBottom: 4 }}>{label}</div>
       <div style={{ fontSize: 18, fontWeight: 'bold', color }}>{value}</div>
-      <div style={{ fontSize: 8, color: '#3a5070', marginTop: 2 }}>{sub}</div>
+      <div style={{ fontSize: 8, color: '#6a8aa8', marginTop: 2 }}>{sub}</div>
     </div>
   );
 }
@@ -85,12 +85,12 @@ function ModBox({ name, role, color, status, metric, metricLabel, details, fill 
       <div style={{ position: 'absolute', top: -1, left: 8, right: 8, height: 2, background: color, borderRadius: 2, opacity: 0.6 }} />
       <div style={{ position: 'absolute', top: 7, right: 7 }}><Badge status={status} /></div>
       <div style={{ fontSize: 12, fontWeight: 'bold', color, letterSpacing: 3, textAlign: 'center', marginBottom: 2 }}>{name}</div>
-      <div style={{ fontSize: 7, color: '#3a5070', letterSpacing: 2, textAlign: 'center', marginBottom: 8 }}>{role}</div>
+      <div style={{ fontSize: 7, color: '#6a8aa8', letterSpacing: 2, textAlign: 'center', marginBottom: 8 }}>{role}</div>
       <div style={{ fontSize: 18, fontWeight: 'bold', color: '#e0eeff', textAlign: 'center', marginBottom: 1 }}>{metric}</div>
-      <div style={{ fontSize: 7, color: '#3a5070', textAlign: 'center', letterSpacing: 1, marginBottom: 8 }}>{metricLabel}</div>
+      <div style={{ fontSize: 7, color: '#6a8aa8', textAlign: 'center', letterSpacing: 1, marginBottom: 8 }}>{metricLabel}</div>
       <div style={{ borderTop: '1px solid #1a2540', paddingTop: 6, display: 'flex', flexDirection: 'column', gap: 3 }}>
         {details.map(([k, v, vc], i) => (
-          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 8, color: '#4a6080' }}>
+          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 8, color: '#7a9ab0' }}>
             <span>{k}</span><span style={{ color: vc || '#8ab0d0' }}>{v}</span>
           </div>
         ))}
@@ -111,7 +111,7 @@ function Arrow({ c1, c2, label }) {
         </div>
         <div style={{ width: 0, height: 0, borderTop: '5px solid transparent', borderBottom: '5px solid transparent', borderLeft: `7px solid ${c2}` }} />
       </div>
-      <div style={{ fontSize: 7, color: '#2a3a55', letterSpacing: 1, marginTop: 3 }}>{label}</div>
+      <div style={{ fontSize: 7, color: '#5a7a9a', letterSpacing: 1, marginTop: 3 }}>{label}</div>
     </div>
   );
 }
@@ -120,7 +120,7 @@ function ResponseBar({ label, value, max, color }) {
   const pct = max > 0 ? Math.min((value / max) * 100, 100) : 0;
   return (
     <div style={{ marginBottom: 8 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 8, color: '#3a5070', marginBottom: 3 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 8, color: '#6a8aa8', marginBottom: 3 }}>
         <span>{label}</span><span style={{ color }}>{value}ms</span>
       </div>
       <div style={{ height: 4, background: '#1a2540', borderRadius: 2, overflow: 'hidden' }}>
@@ -309,6 +309,7 @@ export default function Monitor() {
         @keyframes mnPulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.3;transform:scale(0.8)} }
         @keyframes mnFlowH { 0%{left:-40%} 100%{left:100%} }
         @keyframes mnFlowV { 0%{top:-40%} 100%{top:100%} }
+        @keyframes mnFlowVUp { 0%{bottom:-40%} 100%{bottom:100%} }
         .mn-page::-webkit-scrollbar{width:3px}
         .mn-page::-webkit-scrollbar-thumb{background:#1a2540;border-radius:2px}
       `}</style>
@@ -322,7 +323,7 @@ export default function Monitor() {
           <div style={{ fontSize: 14, letterSpacing: 5, color: '#4a9eff', fontWeight: 'bold' }}>
             ÜSTAT · System Monitor
           </div>
-          <div style={{ fontSize: 8, color: '#3a5070', letterSpacing: 3, marginTop: 2 }}>
+          <div style={{ fontSize: 8, color: '#6a8aa8', letterSpacing: 3, marginTop: 2 }}>
             VİOP ALGORİTMİK TİCARET SİSTEMİ
           </div>
         </div>
@@ -350,7 +351,7 @@ export default function Monitor() {
               ⛔ KILL-SWITCH L{killLevel}
             </div>
           )}
-          <div style={{ fontSize: 11, color: '#3a5880', letterSpacing: 2 }}>{time}</div>
+          <div style={{ fontSize: 11, color: '#7a9ab8', letterSpacing: 2 }}>{time}</div>
         </div>
       </div>
 
@@ -399,7 +400,7 @@ export default function Monitor() {
         background: '#0d1220', border: '1px solid #1a2540', borderRadius: 10,
         padding: '26px 28px 20px', marginBottom: 14, position: 'relative',
       }}>
-        <div style={{ position: 'absolute', top: 9, left: 16, fontSize: 8, letterSpacing: 3, color: '#253550' }}>
+        <div style={{ position: 'absolute', top: 9, left: 16, fontSize: 8, letterSpacing: 3, color: '#4a6a8a' }}>
           MODÜL MİMARİSİ · CANLI DURUM
         </div>
 
@@ -421,31 +422,56 @@ export default function Monitor() {
                   ['KOPMA', `${mt5?.disconnect_count ?? 0}`, '#9a80ff'],
                   ['UPTIME', fmtUptime(mt5?.mt5_uptime_seconds ?? 0), '#9a80ff'],
                 ].map(([k, v, c], i) => (
-                  <div key={i} style={{ fontSize: 8, color: '#4a6080', textAlign: 'center' }}>
-                    <div style={{ color: '#2a3a55', marginBottom: 2 }}>{k}</div>
+                  <div key={i} style={{ fontSize: 8, color: '#7a9ab0', textAlign: 'center' }}>
+                    <div style={{ color: '#5a7a9a', marginBottom: 2 }}>{k}</div>
                     <div style={{ color: c }}>{v}</div>
                   </div>
                 ))}
               </div>
             </div>
 
-            {/* MT5'ten aşağı 3 ok */}
-            <div style={{ display: 'flex', gap: 80, marginTop: 0 }}>
+            {/* MT5 ↔ OĞUL/MANUEL/HİBRİT çift yönlü oklar */}
+            <div style={{ display: 'flex', gap: 50, marginTop: 0 }}>
               {[['OĞUL', COLORS.ogul], ['MANUEL', COLORS.manuel], ['HİBRİT', COLORS.hibrit]].map(([lbl, c]) => (
                 <div key={lbl} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                  <div style={{
-                    width: 2, height: 22,
-                    background: `linear-gradient(180deg,${COLORS.mt5},${c})`,
-                    position: 'relative', overflow: 'hidden',
-                  }}>
-                    <div style={{
-                      position: 'absolute', left: 0, top: '-40%', width: '100%', height: '40%',
-                      background: 'linear-gradient(180deg,transparent,rgba(255,255,255,0.5),transparent)',
-                      animation: 'mnFlowV 1.5s linear infinite',
-                    }} />
+                  <div style={{ display: 'flex', alignItems: 'stretch', gap: 6 }}>
+                    {/* Yukarı ok — EMİR → MT5 */}
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                      <div style={{ width: 0, height: 0, borderLeft: '4px solid transparent', borderRight: '4px solid transparent', borderBottom: `6px solid ${COLORS.mt5}` }} />
+                      <div style={{
+                        width: 2, height: 20,
+                        background: `linear-gradient(0deg,${c},${COLORS.mt5})`,
+                        position: 'relative', overflow: 'hidden',
+                      }}>
+                        <div style={{
+                          position: 'absolute', left: 0, bottom: '-40%', width: '100%', height: '40%',
+                          background: 'linear-gradient(0deg,transparent,rgba(255,255,255,0.6),transparent)',
+                          animation: 'mnFlowVUp 1.5s linear infinite',
+                        }} />
+                      </div>
+                    </div>
+                    {/* Etiketler */}
+                    <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 2 }}>
+                      <div style={{ fontSize: 6, color: COLORS.mt5, letterSpacing: 1, lineHeight: 1 }}>EMİR ↑</div>
+                      <div style={{ fontSize: 6, color: c, letterSpacing: 1, lineHeight: 1 }}>VERİ ↓</div>
+                    </div>
+                    {/* Aşağı ok — VERİ → Modül */}
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                      <div style={{
+                        width: 2, height: 20,
+                        background: `linear-gradient(180deg,${COLORS.mt5},${c})`,
+                        position: 'relative', overflow: 'hidden',
+                      }}>
+                        <div style={{
+                          position: 'absolute', left: 0, top: '-40%', width: '100%', height: '40%',
+                          background: 'linear-gradient(180deg,transparent,rgba(255,255,255,0.6),transparent)',
+                          animation: 'mnFlowV 1.5s linear infinite',
+                        }} />
+                      </div>
+                      <div style={{ width: 0, height: 0, borderLeft: '4px solid transparent', borderRight: '4px solid transparent', borderTop: `6px solid ${c}` }} />
+                    </div>
                   </div>
-                  <div style={{ width: 0, height: 0, borderLeft: '4px solid transparent', borderRight: '4px solid transparent', borderTop: `6px solid ${c}` }} />
-                  <div style={{ fontSize: 7, color: '#2a3a55', letterSpacing: 1, marginTop: 2 }}>{lbl}</div>
+                  <div style={{ fontSize: 8, color: c, letterSpacing: 1, marginTop: 3, fontWeight: 'bold' }}>{lbl}</div>
                 </div>
               ))}
             </div>
@@ -546,19 +572,19 @@ export default function Monitor() {
         background: '#0d1220', border: '1px solid #1a2540', borderRadius: 10,
         padding: '14px 16px', marginBottom: 14,
       }}>
-        <div style={{ fontSize: 8, letterSpacing: 3, color: '#253550', marginBottom: 10 }}>
+        <div style={{ fontSize: 8, letterSpacing: 3, color: '#4a6a8a', marginBottom: 10 }}>
           EMİR AKIŞ TABLOSU · SON {last10.length} EMİR
         </div>
         <div style={{
           display: 'grid', gridTemplateColumns: '70px 140px 60px 70px 65px 65px',
-          gap: '0 8px', fontSize: 8, color: '#2a3a55', letterSpacing: 1,
+          gap: '0 8px', fontSize: 8, color: '#5a7a9a', letterSpacing: 1,
           marginBottom: 6, paddingBottom: 6, borderBottom: '1px solid #1a2540',
         }}>
           {['ZAMAN', 'KONTRAT', 'YÖN', 'DURUM', 'SÜRESİ', 'KAYMA'].map(h => <div key={h}>{h}</div>)}
         </div>
         <div style={{ maxHeight: 160, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
           {last10.length === 0 && (
-            <div style={{ fontSize: 9, color: '#2a3a55', textAlign: 'center', padding: 16 }}>Henüz emir yok</div>
+            <div style={{ fontSize: 9, color: '#5a7a9a', textAlign: 'center', padding: 16 }}>Henüz emir yok</div>
           )}
           {last10.map((o, i) => {
             const dir = o.direction === 'BUY' || o.direction === 'LONG' ? 'LONG' : 'SHORT';
@@ -568,12 +594,12 @@ export default function Monitor() {
                 display: 'grid', gridTemplateColumns: '70px 140px 60px 70px 65px 65px',
                 gap: '0 8px', fontSize: 9, padding: '4px 0', borderBottom: '1px solid #0f1828',
               }}>
-                <div style={{ color: '#3a5070' }}>{fmtTimestamp(o.timestamp)}</div>
+                <div style={{ color: '#6a8aa8' }}>{fmtTimestamp(o.timestamp)}</div>
                 <div style={{ color: '#8ab0d0' }}>{o.symbol}</div>
                 <div style={{ color: dir === 'LONG' ? '#2ecc71' : '#e74c3c', fontWeight: 'bold' }}>{dir}</div>
                 <div style={{ color: o.success ? '#2ecc71' : '#e74c3c' }}>{mt5St}</div>
-                <div style={{ color: o.duration_ms > 50 ? '#f39c12' : '#4a6080' }}>{o.duration_ms}ms</div>
-                <div style={{ color: Math.abs(o.slippage ?? 0) > 0 ? '#f39c12' : '#4a6080' }}>{(o.slippage ?? 0).toFixed(4)}</div>
+                <div style={{ color: o.duration_ms > 50 ? '#f39c12' : '#7a9ab0' }}>{o.duration_ms}ms</div>
+                <div style={{ color: Math.abs(o.slippage ?? 0) > 0 ? '#f39c12' : '#7a9ab0' }}>{(o.slippage ?? 0).toFixed(4)}</div>
               </div>
             );
           })}
@@ -585,10 +611,10 @@ export default function Monitor() {
 
         {/* ── [E1] LOG AKIŞI ──────────────────────────────────── */}
         <div style={{ background: '#0d1220', border: '1px solid #1a2540', borderRadius: 10, padding: '14px 14px 10px' }}>
-          <div style={{ fontSize: 8, letterSpacing: 3, color: '#253550', marginBottom: 10 }}>SİSTEM LOG AKIŞI</div>
+          <div style={{ fontSize: 8, letterSpacing: 3, color: '#4a6a8a', marginBottom: 10 }}>SİSTEM LOG AKIŞI</div>
           <div style={{ height: 200, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }}>
             {events.length === 0 && (
-              <div style={{ fontSize: 9, color: '#2a3a55', textAlign: 'center', padding: 16 }}>Olay yok</div>
+              <div style={{ fontSize: 9, color: '#5a7a9a', textAlign: 'center', padding: 16 }}>Olay yok</div>
             )}
             {events.map((ev, i) => {
               const t = sevToType(ev.severity);
@@ -601,7 +627,7 @@ export default function Monitor() {
                     background: t === 'warn' ? 'rgba(243,156,18,0.05)' : t === 'error' ? 'rgba(231,76,60,0.07)' : 'transparent',
                   }}
                 >
-                  <span style={{ color: '#2a3a55', flexShrink: 0 }}>{fmtTime(ev.timestamp)}</span>
+                  <span style={{ color: '#5a7a9a', flexShrink: 0 }}>{fmtTime(ev.timestamp)}</span>
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ev.message}</span>
                 </div>
               );
@@ -611,7 +637,7 @@ export default function Monitor() {
 
         {/* ── [E2] PERFORMANS ─────────────────────────────────── */}
         <div style={{ background: '#0d1220', border: '1px solid #1a2540', borderRadius: 10, padding: '14px 14px 10px' }}>
-          <div style={{ fontSize: 8, letterSpacing: 3, color: '#253550', marginBottom: 12 }}>PERFORMANS · DÖNGÜ ADIMLARI</div>
+          <div style={{ fontSize: 8, letterSpacing: 3, color: '#4a6a8a', marginBottom: 12 }}>PERFORMANS · DÖNGÜ ADIMLARI</div>
           <ResponseBar label="BABA DÖNGÜ" value={steps.baba_cycle ?? 0} max={50} color={COLORS.baba} />
           <ResponseBar label="OĞUL SİNYAL" value={steps.ogul_signals ?? 0} max={100} color={COLORS.ogul} />
           <ResponseBar label="ÜSTAT BEYİN" value={steps.ustat_brain ?? 0} max={50} color={COLORS.ustat} />
@@ -619,7 +645,7 @@ export default function Monitor() {
           <ResponseBar label="VERİ GÜNCELLEME" value={steps.data_update ?? 0} max={100} color="#8ab0d0" />
           <ResponseBar label="TOPLAM DÖNGÜ" value={lastCycle?.total_ms ?? 0} max={300} color="#00d4aa" />
 
-          <div style={{ marginTop: 10, fontSize: 8, letterSpacing: 3, color: '#253550', marginBottom: 8 }}>DÖNGÜ İSTATİSTİK</div>
+          <div style={{ marginTop: 10, fontSize: 8, letterSpacing: 3, color: '#4a6a8a', marginBottom: 8 }}>DÖNGÜ İSTATİSTİK</div>
           <div style={{ display: 'flex', gap: 8 }}>
             {[
               ['ORT', `${cycle?.avg_ms ?? 0}ms`, '#8ab0d0'],
@@ -628,7 +654,7 @@ export default function Monitor() {
             ].map(([k, v, c]) => (
               <div key={k} style={{ flex: 1, background: '#0a0e18', borderRadius: 4, padding: '5px 6px', textAlign: 'center' }}>
                 <div style={{ fontSize: 12, fontWeight: 'bold', color: c }}>{v}</div>
-                <div style={{ fontSize: 7, color: '#2a3a55', letterSpacing: 1 }}>{k}</div>
+                <div style={{ fontSize: 7, color: '#5a7a9a', letterSpacing: 1 }}>{k}</div>
               </div>
             ))}
           </div>
@@ -636,7 +662,7 @@ export default function Monitor() {
 
         {/* ── [E3] RISK & KILL-SWITCH ─────────────────────────── */}
         <div style={{ background: '#0d1220', border: '1px solid #1a2540', borderRadius: 10, padding: '14px 14px 10px' }}>
-          <div style={{ fontSize: 8, letterSpacing: 3, color: '#253550', marginBottom: 10 }}>RİSK & KİLL-SWİTCH</div>
+          <div style={{ fontSize: 8, letterSpacing: 3, color: '#4a6a8a', marginBottom: 10 }}>RİSK & KİLL-SWİTCH</div>
 
           {/* Kill-switch seviyeleri */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
@@ -653,9 +679,9 @@ export default function Monitor() {
                     borderRadius: 6, padding: '8px 6px', textAlign: 'center',
                   }}
                 >
-                  <div style={{ fontSize: 16, fontWeight: 'bold', color: active ? '#e74c3c' : '#2a3a55', marginBottom: 2 }}>{lvl}</div>
-                  <div style={{ fontSize: 7, color: '#3a5070', letterSpacing: 1 }}>{label}</div>
-                  <div style={{ fontSize: 8, color: '#1e3050', marginTop: 2 }}>%{pct}</div>
+                  <div style={{ fontSize: 16, fontWeight: 'bold', color: active ? '#e74c3c' : '#5a7a9a', marginBottom: 2 }}>{lvl}</div>
+                  <div style={{ fontSize: 7, color: '#6a8aa8', letterSpacing: 1 }}>{label}</div>
+                  <div style={{ fontSize: 8, color: '#4a6a8a', marginTop: 2 }}>%{pct}</div>
                 </div>
               );
             })}
@@ -668,7 +694,7 @@ export default function Monitor() {
             ['FLOATING P&L', `${floatingPnl.toFixed(0)} TL`, floatingPct, floatingPnl < 0 ? '#e74c3c' : '#2ecc71'],
           ].map(([lbl, val, pct, clr], i) => (
             <div key={i}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 8, color: '#3a5070', marginBottom: 3 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 8, color: '#6a8aa8', marginBottom: 3 }}>
                 <span>{lbl}</span><span>{val}</span>
               </div>
               <div style={{ height: 4, background: '#1a2540', borderRadius: 2, overflow: 'hidden', marginBottom: 7 }}>
@@ -678,12 +704,12 @@ export default function Monitor() {
           ))}
 
           {/* Modül hata sayacı */}
-          <div style={{ fontSize: 8, letterSpacing: 3, color: '#253550', marginBottom: 8, marginTop: 4 }}>HATA SAYACI · BUGÜN</div>
+          <div style={{ fontSize: 8, letterSpacing: 3, color: '#4a6a8a', marginBottom: 8, marginTop: 4 }}>HATA SAYACI · BUGÜN</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 5 }}>
             {Object.entries(errorCounts).map(([mod, cnt]) => (
               <div key={mod} style={{ background: '#0a0e18', borderRadius: 4, padding: '5px 6px', textAlign: 'center' }}>
-                <div style={{ fontSize: 14, fontWeight: 'bold', color: cnt > 0 ? '#f39c12' : '#2a3a55' }}>{cnt}</div>
-                <div style={{ fontSize: 7, color: '#2a3a55', letterSpacing: 1 }}>{mod.toUpperCase()}</div>
+                <div style={{ fontSize: 14, fontWeight: 'bold', color: cnt > 0 ? '#f39c12' : '#5a7a9a' }}>{cnt}</div>
+                <div style={{ fontSize: 7, color: '#5a7a9a', letterSpacing: 1 }}>{mod.toUpperCase()}</div>
               </div>
             ))}
           </div>

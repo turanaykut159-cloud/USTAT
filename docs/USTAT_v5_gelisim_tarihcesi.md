@@ -1112,3 +1112,25 @@ Bu düzeltmeler native SLTP çalışmadığı için sorunu çözmedi ama kod kal
 - `.sh-*` CSS kuralları (448 satır)
 - `.sl-*` CSS kuralları (231 satır)
 - `/health` ve `/logs` route'ları
+
+---
+
+## #36 — Monitor: Çift Yönlü Oklar + Metin Okunabilirliği (2026-03-09)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-09 |
+| **Neden** | Flow diyagramında MT5 ↔ OĞUL/MANUEL/HİBRİT bağlantıları tek yönlü (sadece aşağı) gösteriliyordu; gerçek mimaride modüller MT5'e emir de gönderiyor. Ayrıca tüm sayfa metinleri koyu arka planda çok silik/okunaksız kalıyordu. |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `desktop/src/components/Monitor.jsx` | MT5 okları tek yönlü → çift yönlü (yukarı EMİR ↑ + aşağı VERİ ↓), `mnFlowVUp` animasyonu eklendi. 6 silik renk tonu parlatıldı: `#2a3a55→#5a7a9a`, `#253550→#4a6a8a`, `#3a5070→#6a8aa8`, `#1e3050→#4a6a8a`, `#3a5880→#7a9ab8`, `#4a6080→#7a9ab0` |
+
+### Eklenen
+- Çift yönlü ok bileşeni (EMİR ↑ / VERİ ↓ etiketli)
+- `@keyframes mnFlowVUp` animasyonu (yukarı akış)
+
+### Çıkartılan
+- Tek yönlü aşağı oklar (MT5 → modül)
