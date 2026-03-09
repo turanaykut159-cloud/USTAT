@@ -1169,3 +1169,24 @@ Bu düzeltmeler native SLTP çalışmadığı için sorunu çözmedi ama kod kal
 
 ### Cikartilan
 - (yok — mevcut davranisa ekleme yapildi)
+
+---
+
+## VERSIYON GECISI: v5.2 → v5.3 (2026-03-09)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-09 |
+| **Neden** | v5.2 etiketinden (commit cd7eda9) bu yana kumulatif degisiklik orani %15.1 (4.703 satir / 31.116 toplam) — %10 esigini asti |
+| **Kapsam** | 13 commit, 27 dosya, 3.092 ekleme + 1.611 silme |
+
+### Guncellenen Referanslar (26 dosya)
+- engine/__init__.py (VERSION sabiti)
+- config/default.json (version alani)
+- api/schemas.py (StatusResponse.version)
+- desktop/package.json (version + description)
+- desktop/src/components/Settings.jsx (VERSION sabiti)
+- desktop/src/components/TopBar.jsx (logo metni)
+- desktop/src/components/LockScreen.jsx (splash ekrani)
+- desktop/src/styles/theme.css (CSS baslik yorumu)
+- 17 dosyada JSDoc yorum basliklari (v5.2 → v5.3)

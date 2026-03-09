@@ -1,5 +1,5 @@
 /**
- * USTAT v5.2 Desktop — React Error Boundary.
+ * USTAT v5.3 Desktop — React Error Boundary.
  *
  * Yakalanmamis React renderlamasi hatalarinda
  * uygulamanin tamamen cokmesini onler.

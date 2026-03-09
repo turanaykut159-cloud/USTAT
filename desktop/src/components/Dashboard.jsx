@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.2 — Ana Dashboard ekranı.
+ * ÜSTAT v5.3 — Ana Dashboard ekranı.
  *
  * Layout:
  *   Üst:    4 stat kartı (Günlük İşlem, Başarı Oranı, Net K/Z, Profit Factor)
@@ -21,6 +21,7 @@ import {
   getHybridStatus, checkHybridTransfer, transferToHybrid,
 } from '../services/api';
 import { formatMoney, formatPrice, pnlClass, elapsed } from '../utils/formatters';
+import ConfirmModal from './ConfirmModal';
 
 // ── Yardımcılar ──────────────────────────────────────────────────
 
@@ -90,7 +91,13 @@ export default function Dashboard() {
 
   // WebSocket kaynak canlı veri
   const [liveEquity, setLiveEquity] = useState(null);
+  const [wsState, setWsState] = useState('disconnected'); // 'connected' | 'reconnecting' | 'disconnected'
+  const [equityStale, setEquityStale] = useState(false);
   const wsRef = useRef(null);
+
+  // Hata gösterimi (window.alert yerine)
+  const [apiError, setApiError] = useState(null);
+  const [errorModal, setErrorModal] = useState(null); // { title, message }
 
   // Süre yenileme tetikleyici (30sn)
   const [, setTick] = useState(new Date());
@@ -109,24 +116,31 @@ export default function Dashboard() {
 
   // ── Durum/Pozisyon veri çekme (REST fallback, 30sn) ────────────
   const fetchAll = useCallback(async () => {
-    const [s, p, t, st, acc, pos, hybrid] = await Promise.all([
-      getTradeStats(),
-      getPerformance(30),
-      getTrades({ limit: 5 }),
-      getStatus(),
-      getAccount(),
-      getPositions(),
-      getHybridStatus(),
-    ]);
-    setStats(s);
-    setPerf(p);
-    setRecentTrades(t.trades || []);
-    setStatus(st);
-    setAccount(acc);
-    setLivePositions(pos.positions || []);
-    setInitialLoading(false);
-    const tickets = (hybrid.positions || []).map((hp) => hp.ticket).filter(Boolean);
-    setHybridTickets(new Set(tickets));
+    try {
+      const [s, p, t, st, acc, pos, hybrid] = await Promise.all([
+        getTradeStats(),
+        getPerformance(30),
+        getTrades({ limit: 5 }),
+        getStatus(),
+        getAccount(),
+        getPositions(),
+        getHybridStatus(),
+      ]);
+      setStats(s);
+      setPerf(p);
+      setRecentTrades(t.trades || []);
+      setStatus(st);
+      setAccount(acc);
+      setLivePositions(pos.positions || []);
+      const tickets = (hybrid.positions || []).map((hp) => hp.ticket).filter(Boolean);
+      setHybridTickets(new Set(tickets));
+      setApiError(null); // Başarılı fetch → hata banner'ını temizle
+    } catch (err) {
+      console.error('[Dashboard] fetchAll:', err?.message ?? err);
+      setApiError('Veri yüklenemedi. API erişilebilir mi kontrol edin.');
+    } finally {
+      setInitialLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -141,34 +155,60 @@ export default function Dashboard() {
     return () => clearInterval(iv);
   }, []);
 
+  // ── Equity staleness kontrolü (10 saniye eşik) ──────────────────
+  useEffect(() => {
+    const iv = setInterval(() => {
+      if (liveEquity && liveEquity.ts) {
+        const ageSec = Date.now() / 1000 - liveEquity.ts;
+        setEquityStale(ageSec > 10);
+      } else {
+        setEquityStale(wsState !== 'connected');
+      }
+    }, 2000);
+    return () => clearInterval(iv);
+  }, [liveEquity, wsState]);
+
   // ── WebSocket canlı veri ─────────────────────────────────────────
   useEffect(() => {
-    const { close } = connectLiveWS((messages) => {
-      const arr = Array.isArray(messages) ? messages : [messages];
-      for (const msg of arr) {
-        if (msg.type === 'equity') {
-          setLiveEquity(msg);
+    const { close } = connectLiveWS(
+      (messages) => {
+        const arr = Array.isArray(messages) ? messages : [messages];
+        for (const msg of arr) {
+          if (msg.type === 'equity') {
+            setLiveEquity(msg);
+            setEquityStale(false);
+            // Margin/free_margin artık WS'ten de geliyor (2sn, REST 30sn yerine)
+            if (msg.margin != null) {
+              setAccount((prev) => ({
+                ...prev,
+                margin: msg.margin,
+                free_margin: msg.free_margin,
+              }));
+            }
+          }
+          if (msg.type === 'status') {
+            setStatus((prev) => ({
+              ...prev,
+              regime: msg.regime || prev.regime,
+              can_trade: msg.can_trade,
+              kill_switch_level: msg.kill_switch_level,
+            }));
+          }
+          if (msg.type === 'position') {
+            setLivePositions(msg.positions || []);
+          }
+          if (msg.type === 'hybrid') {
+            const tickets = new Set((msg.positions || []).map((hp) => hp.ticket));
+            setHybridTickets(tickets);
+          }
+          if (msg.type === 'trade_closed' || msg.type === 'position_closed') {
+            fetchTradeData();
+          }
         }
-        if (msg.type === 'status') {
-          setStatus((prev) => ({
-            ...prev,
-            regime: msg.regime || prev.regime,
-            can_trade: msg.can_trade,
-            kill_switch_level: msg.kill_switch_level,
-          }));
-        }
-        if (msg.type === 'position') {
-          setLivePositions(msg.positions || []);
-        }
-        if (msg.type === 'hybrid') {
-          const tickets = new Set((msg.positions || []).map((hp) => hp.ticket));
-          setHybridTickets(tickets);
-        }
-        if (msg.type === 'trade_closed' || msg.type === 'position_closed') {
-          fetchTradeData();
-        }
-      }
-    });
+      },
+      null,
+      (newState) => setWsState(newState),
+    );
 
     wsRef.current = close;
     return () => {
@@ -184,7 +224,10 @@ export default function Dashboard() {
       await closePosition(ticket);
       await fetchAll();
     } catch (err) {
-      window.alert('Kapatma hatası: ' + (err?.message ?? String(err)));
+      setErrorModal({
+        title: 'Pozisyon Kapatma Hatası',
+        message: 'Kapatma hatası: ' + (err?.message ?? String(err)),
+      });
     } finally {
       setClosingTicket(null);
     }
@@ -197,17 +240,26 @@ export default function Dashboard() {
     try {
       const check = await checkHybridTransfer(ticket);
       if (!check.can_transfer) {
-        window.alert('Hibrite devir yapılamaz: ' + (check.reason || 'Bilinmeyen hata'));
+        setErrorModal({
+          title: 'Hibrite Devir',
+          message: 'Hibrite devir yapılamaz: ' + (check.reason || 'Bilinmeyen hata'),
+        });
         return;
       }
       const result = await transferToHybrid(ticket);
       if (result.success) {
         setHybridTickets((prev) => new Set([...prev, ticket]));
       } else {
-        window.alert('Devir hatası: ' + (result.message || 'Bilinmeyen hata'));
+        setErrorModal({
+          title: 'Devir Hatası',
+          message: 'Devir hatası: ' + (result.message || 'Bilinmeyen hata'),
+        });
       }
     } catch (err) {
-      window.alert('Devir hatası: ' + (err?.message ?? String(err)));
+      setErrorModal({
+        title: 'Devir Hatası',
+        message: 'Devir hatası: ' + (err?.message ?? String(err)),
+      });
     } finally {
       setTransferringTicket(null);
     }
@@ -218,7 +270,10 @@ export default function Dashboard() {
   const totalFloating = (livePositions || []).reduce((s, p) => s + (p.pnl || 0), 0);
   const totalLot = (livePositions || []).reduce((s, p) => s + (p.volume || 0), 0);
   const totalSwap = (livePositions || []).reduce((s, p) => s + (p.swap || 0), 0);
-  const eq = liveEquity?.equity ?? account.equity;
+  // Stale durumda REST fallback kullan
+  const eq = equityStale
+    ? account.equity
+    : (liveEquity?.equity ?? account.equity);
   const marginPct = marginUsagePct(account.margin, eq);
 
   if (initialLoading) {
@@ -266,14 +321,26 @@ export default function Dashboard() {
       </div>
 
       {/* ═══ HESAP DURUMU (canlı) ═════════════════════════════════ */}
+      {(equityStale || wsState === 'reconnecting') && (
+        <div className="dash-stale-banner">
+          {wsState === 'reconnecting'
+            ? '⚠ Bağlantı koptu — yeniden bağlanıyor...'
+            : '⚠ Veri eski — son güncelleme 10+ saniye önce'}
+        </div>
+      )}
+      {apiError && (
+        <div className="dash-api-error-banner">
+          ⚠ {apiError}
+        </div>
+      )}
       <div className="dash-account-strip">
         <AccountItem
           label="Bakiye"
-          value={formatMoney(liveEquity?.balance ?? account.balance)}
+          value={formatMoney(equityStale ? account.balance : (liveEquity?.balance ?? account.balance))}
         />
         <AccountItem
           label="Varlık"
-          value={formatMoney(liveEquity?.equity ?? account.equity)}
+          value={formatMoney(eq)}
         />
         <AccountItem
           label="Teminat"
@@ -285,13 +352,13 @@ export default function Dashboard() {
         />
         <AccountItem
           label="Floating K/Z"
-          value={formatMoney(liveEquity?.floating_pnl ?? account.floating_pnl)}
-          cls={pnlClass(liveEquity?.floating_pnl ?? account.floating_pnl)}
+          value={formatMoney(equityStale ? account.floating_pnl : (liveEquity?.floating_pnl ?? account.floating_pnl))}
+          cls={pnlClass(equityStale ? account.floating_pnl : (liveEquity?.floating_pnl ?? account.floating_pnl))}
         />
         <AccountItem
           label="Günlük K/Z"
-          value={formatMoney(liveEquity?.daily_pnl ?? account.daily_pnl)}
-          cls={pnlClass(liveEquity?.daily_pnl ?? account.daily_pnl)}
+          value={formatMoney(equityStale ? account.daily_pnl : (liveEquity?.daily_pnl ?? account.daily_pnl))}
+          cls={pnlClass(equityStale ? account.daily_pnl : (liveEquity?.daily_pnl ?? account.daily_pnl))}
         />
       </div>
 
@@ -452,7 +519,19 @@ export default function Dashboard() {
       {/* ═══ ALT: Son İşlemler (tam genişlik) ══════════════════════ */}
       <div className="dash-bottom-row">
         <div className="dash-card">
-          <h3>Son İşlemler</h3>
+          <h3>
+            Son İşlemler
+            {(() => {
+              const unapproved = recentTrades.filter(
+                (t) => !(t.exit_reason || '').includes('APPROVED')
+              ).length;
+              return unapproved > 0 ? (
+                <span className="dash-unapproved-badge" title="Onaylanmamış işlem sayısı">
+                  {unapproved} onaysız
+                </span>
+              ) : null;
+            })()}
+          </h3>
           {recentTrades.length > 0 ? (
             <table className="dash-trades-table">
               <thead>
@@ -489,6 +568,17 @@ export default function Dashboard() {
           )}
         </div>
       </div>
+
+      {/* ═══ HATA MODAL (window.alert yerine) ═════════════════════ */}
+      <ConfirmModal
+        open={errorModal != null}
+        title={errorModal?.title || 'Hata'}
+        message={errorModal?.message || ''}
+        variant="danger"
+        confirmLabel="Tamam"
+        onConfirm={() => setErrorModal(null)}
+        onCancel={() => setErrorModal(null)}
+      />
     </div>
   );
 }

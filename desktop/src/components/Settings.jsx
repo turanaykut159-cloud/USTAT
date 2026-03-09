@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.2 — Ayarlar ekranı.
+ * ÜSTAT v5.3 — Ayarlar ekranı.
  *
  * Bölümler:
  *   1. MT5 Bağlantı Bilgileri (sunucu, hesap, şifre maskeli)
@@ -19,7 +19,7 @@ import { getAccount, getStatus, getEvents, getRiskBaseline, updateRiskBaseline }
 
 // ── Sabitler ──────────────────────────────────────────────────────
 
-const VERSION = '5.2';
+const VERSION = '5.3';
 const BUILD_DATE = '2026-03-08';
 
 const DEFAULT_PREFS = {

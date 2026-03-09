@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.2 — Kilit / Bekleme Ekranı.
+ * ÜSTAT v5.3 — Kilit / Bekleme Ekranı.
  *
  * Akış (fire-and-forget MT5 başlatma + polling doğrulama):
  *   CHECKING    → kayıtlı credential kontrol
@@ -61,6 +61,26 @@ export default function LockScreen({ onUnlock }) {
   const serverRef = useRef(null);
   const otpInputRef = useRef(null);
   const pollingRef = useRef(false); // polling aktif mi
+  const prevStepRef = useRef(step);
+  const savedAlwaysOnTopRef = useRef(false);
+
+  const otpFocusTimeoutRef = useRef(null);
+  // OTP input DOM'a bağlandığı an hemen focus ver — tıklamadan yazılabilmesi için
+  const otpRefCallback = useCallback((node) => {
+    if (otpFocusTimeoutRef.current) {
+      clearTimeout(otpFocusTimeoutRef.current);
+      otpFocusTimeoutRef.current = null;
+    }
+    otpInputRef.current = node;
+    if (node && !otpSending) {
+      node.focus(); // Senkron: ekran gelir gelmez klavye yazılabilsin
+      requestAnimationFrame(() => node.focus());
+      otpFocusTimeoutRef.current = setTimeout(() => {
+        otpFocusTimeoutRef.current = null;
+        if (otpInputRef.current) otpInputRef.current.focus();
+      }, 100);
+    }
+  }, [otpSending]);
 
   // ── Başlangıç ─────────────────────────────────────────────────
   const initFlow = useCallback(async () => {
@@ -92,10 +112,84 @@ export default function LockScreen({ onUnlock }) {
     if (step === MT5LauncherState.CREDENTIALS && serverRef.current && !savedInfo) {
       serverRef.current.focus();
     }
-    if (step === MT5LauncherState.WAITING && otpInputRef.current) {
-      otpInputRef.current.focus();
-    }
   }, [step, savedInfo]);
+
+  // OTP ekranından çıkınca "her zaman üstte"yi kullanıcının önceki değerine döndür
+  useEffect(() => {
+    if (prevStepRef.current === MT5LauncherState.WAITING && step !== MT5LauncherState.WAITING) {
+      window.electronAPI?.setAlwaysOnTop?.(savedAlwaysOnTopRef.current ?? false);
+    }
+    prevStepRef.current = step;
+  }, [step]);
+
+  // OTP input'a otomatik focus — şifre ekranı gelince tıklamadan yazılabilsin; MT5 focus çalarsa tekrarla
+  useEffect(() => {
+    if (step !== MT5LauncherState.WAITING) return;
+
+    // OTP'ye girerken mevcut "her zaman üstte" değerini sakla (main 900ms'de true yapacak; çıkınca bunu geri yükleyeceğiz)
+    if (typeof window.electronAPI?.getAlwaysOnTop === 'function') {
+      window.electronAPI.getAlwaysOnTop().then((v) => {
+        savedAlwaysOnTopRef.current = v;
+      });
+    }
+
+    const focusOTP = () => {
+      if (otpInputRef.current && !otpSending) {
+        otpInputRef.current.focus();
+      }
+    };
+
+    // Birden fazla gecikmeyle dene (MT5 açılınca focus çalınabilir)
+    const t1 = setTimeout(focusOTP, 50);
+    const t2 = setTimeout(focusOTP, 200);
+    const t3 = setTimeout(focusOTP, 500);
+    const t4 = setTimeout(focusOTP, 1200);
+
+    // Pencere tekrar öne geldiğinde mutlaka OTP alanına focus ver
+    window.addEventListener('focus', focusOTP);
+
+    // Main process pencereyi öne getirince gönderdiği IPC — OTP alanına kesin focus (çoklu deneme)
+    let unsubscribeFocusOTP = null;
+    if (typeof window.electronAPI?.onFocusOTPInputRequested === 'function') {
+      const focusOTPWithRetries = () => {
+        focusOTP();
+        setTimeout(focusOTP, 50);
+        setTimeout(focusOTP, 120);
+      };
+      unsubscribeFocusOTP = window.electronAPI.onFocusOTPInputRequested(focusOTPWithRetries);
+    }
+
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+      clearTimeout(t4);
+      window.removeEventListener('focus', focusOTP);
+      if (unsubscribeFocusOTP) unsubscribeFocusOTP();
+    };
+  }, [step, otpSending]);
+
+  // ÇÖZÜM: Chromium programatik focus'u (user gesture olmadan) bazen kabul etmiyor.
+  // İlk rakam tuşuna basıldığında (user gesture) OTP alanı odakta değilse, tuşu yakala + input'a focus ver + rakamı ekle.
+  useEffect(() => {
+    if (step !== MT5LauncherState.WAITING || otpSending) return;
+
+    const handleGlobalKeydown = (e) => {
+      if (!/^\d$/.test(e.key)) return; // Sadece rakam
+      const input = otpInputRef.current;
+      if (!input) return;
+      if (document.activeElement === input) return; // Zaten OTP'de, dokunma
+
+      e.preventDefault();
+      e.stopPropagation();
+      input.focus();
+      setOtpCode((prev) => (prev + e.key).replace(/\D/g, '').slice(0, 8));
+      setOtpResult(null);
+    };
+
+    document.addEventListener('keydown', handleGlobalKeydown, true);
+    return () => document.removeEventListener('keydown', handleGlobalKeydown, true);
+  }, [step, otpSending]);
 
   // ── Polling: WAITING adımında mt5.initialize() kontrolü ───────
   useEffect(() => {
@@ -276,7 +370,7 @@ export default function LockScreen({ onUnlock }) {
 
       {/* ── Logo ─────────────────────────────────────────────────── */}
       <div className="lock-logo">
-        <h1>ÜSTAT <span className="version">v5.2</span></h1>
+        <h1>ÜSTAT <span className="version">v5.3</span></h1>
         <p className="lock-tagline">VİOP Algorithmic Trading</p>
       </div>
 
@@ -363,19 +457,34 @@ export default function LockScreen({ onUnlock }) {
                 type="button"
                 className="btn-link account-switch"
                 onClick={handleSwitchAccount}
+                tabIndex={-1}
+                aria-label="Farklı hesap seç"
               >
                 Farklı Hesap
               </button>
             </div>
           )}
 
-          {/* OTP giriş formu + polling durumu */}
-          <div className="otp-waiting">
+          {/* OTP giriş formu + polling durumu — tıklanınca input focus (tek tık yeter) */}
+          <div
+            className="otp-waiting"
+            role="button"
+            tabIndex={0}
+            onClick={() => otpInputRef.current?.focus()}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter' && e.key !== ' ') return;
+              if (document.activeElement === otpInputRef.current) return;
+              e.preventDefault();
+              otpInputRef.current?.focus();
+            }}
+            aria-label="OTP alanına focus ver"
+          >
             <p className="status-msg otp-msg">OTP Kodunuzu Girin</p>
+            <p className="otp-focus-hint">Yazmaya başlamak için bu alana tıklayın</p>
 
-            <form onSubmit={handleOTPSubmit} className="otp-form">
+            <form onSubmit={handleOTPSubmit} className="otp-form" onClick={(e) => e.stopPropagation()}>
               <input
-                ref={otpInputRef}
+                ref={otpRefCallback}
                 type="text"
                 inputMode="numeric"
                 className="otp-input"
@@ -389,6 +498,7 @@ export default function LockScreen({ onUnlock }) {
                 placeholder="••••••"
                 maxLength={8}
                 autoComplete="one-time-code"
+                autoFocus
                 disabled={otpSending}
               />
               <button
@@ -440,6 +550,11 @@ export default function LockScreen({ onUnlock }) {
           </div>
         </div>
       )}
+
+      {/* ── Telif (ilk açılış ekranı) ─────────────────────────────── */}
+      <div className="lock-screen-copyright">
+        © 2026 TURAN AYKUT — Tüm hakları saklıdır
+      </div>
     </div>
   );
 }
