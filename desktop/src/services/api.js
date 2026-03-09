@@ -143,6 +143,28 @@ export async function getRisk() {
   }
 }
 
+// ── Settings — Risk Baseline ──────────────────────────────────────
+
+export async function getRiskBaseline() {
+  try {
+    const { data } = await client.get('/settings/risk-baseline');
+    return data;
+  } catch (err) {
+    console.error('[ÜSTAT API] getRiskBaseline:', err?.message ?? err);
+    return { baseline_date: '', source: 'error' };
+  }
+}
+
+export async function updateRiskBaseline(newDate) {
+  try {
+    const { data } = await client.post('/settings/risk-baseline', { new_date: newDate });
+    return data;
+  } catch (err) {
+    console.error('[ÜSTAT API] updateRiskBaseline:', err?.message ?? err);
+    return { success: false, message: 'API hatası.' };
+  }
+}
+
 // ── Performance ──────────────────────────────────────────────────
 
 export async function getPerformance(days = 30) {

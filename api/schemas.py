@@ -689,3 +689,26 @@ class HealthResponse(BaseModel):
 
 # Forward-ref güncelle
 UstatBrainResponse.model_rebuild()
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  SETTINGS — Risk Baseline Date
+# ═══════════════════════════════════════════════════════════════════
+
+class RiskBaselineGetResponse(BaseModel):
+    """GET /api/settings/risk-baseline — Mevcut risk baseline tarihi."""
+    baseline_date: str = ""
+    source: str = "config"    # config | default
+
+
+class RiskBaselineUpdateRequest(BaseModel):
+    """POST /api/settings/risk-baseline — Baseline tarih güncelle."""
+    new_date: str = Field(..., description="Yeni baseline tarihi (YYYY-MM-DD)")
+
+
+class RiskBaselineUpdateResponse(BaseModel):
+    """POST /api/settings/risk-baseline response."""
+    success: bool = False
+    message: str = ""
+    old_date: str = ""
+    new_date: str = ""

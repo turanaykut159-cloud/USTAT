@@ -133,6 +133,7 @@ class Engine:
         self.manuel_motor.ogul = self.ogul
         self.manuel_motor.h_engine = self.h_engine
         self.ogul.manuel_motor = self.manuel_motor
+        self.h_engine.manuel_motor = self.manuel_motor
 
         # ── Sistem Sağlığı ─────────────────────────────────────────
         self.health = HealthCollector()

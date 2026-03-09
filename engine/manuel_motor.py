@@ -466,6 +466,10 @@ class ManuelMotor:
 
         SL/TP hit, L3 kapanma veya harici kapanmayı tespit eder.
         Ayrıca SENT → FILLED geçişini kontrol eder.
+
+        NOT: FILLED pozisyonlar ticket bazlı kontrol edilir (sembol değil).
+        Böylece aynı sembolde hibrit/oğul pozisyonu varken manuel ghost
+        entry oluşması engellenir.
         """
         if not self.active_trades:
             return
@@ -476,15 +480,21 @@ class ManuelMotor:
             logger.error(f"get_positions hatası (ManuelMotor sync): {exc}")
             return
 
+        # Symbol-based lookup (SENT → FILLED geçişi için)
         pos_by_symbol: dict[str, dict] = {
             p.get("symbol"): p for p in positions
         }
         open_symbols = set(pos_by_symbol.keys())
 
+        # Ticket-based lookup (FILLED kapanma tespiti için)
+        open_tickets: set[int] = {
+            p.get("ticket") for p in positions if p.get("ticket")
+        }
+
         for symbol in list(self.active_trades):
             trade = self.active_trades[symbol]
 
-            # SENT → FILLED geçişi kontrol
+            # SENT → FILLED geçişi kontrol (sembol bazlı — ticket henüz yok)
             if trade.state == TradeState.SENT:
                 if symbol in open_symbols:
                     pos = pos_by_symbol[symbol]
@@ -505,12 +515,21 @@ class ManuelMotor:
                         })
                 continue
 
-            # FILLED pozisyon: MT5'te hâlâ var mı?
+            # FILLED pozisyon: ticket bazlı kontrol (sembol değil!)
+            # Hibrite devredilen pozisyon aynı sembolle MT5'te kalır,
+            # ama ticket farklıysa veya yoksa manuel işlem kapanmıştır.
             if trade.state == TradeState.FILLED:
-                if symbol not in open_symbols:
+                if trade.ticket and trade.ticket not in open_tickets:
                     logger.info(
                         f"Manuel pozisyon kapanmış [{symbol}]: "
                         f"ticket={trade.ticket}"
+                    )
+                    self._handle_closed_trade(symbol, trade, "external_close")
+                elif not trade.ticket and symbol not in open_symbols:
+                    # Ticket atanmamış eski kayıt — sembol bazlı fallback
+                    logger.info(
+                        f"Manuel pozisyon kapanmış [{symbol}]: "
+                        f"ticket yok, sembol bazlı tespit"
                     )
                     self._handle_closed_trade(symbol, trade, "external_close")
 

@@ -1134,3 +1134,38 @@ Bu düzeltmeler native SLTP çalışmadığı için sorunu çözmedi ama kod kal
 
 ### Çıkartılan
 - Tek yönlü aşağı oklar (MT5 → modül)
+
+---
+
+## #37 — Manuel/Hibrit Bug Fix + Risk Baseline Ayari (2026-03-09)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-09 |
+| **Neden** | Manuel islem hibrite devredildikten sonra iki sorun yasaniyordu: (1) ManuelMotor ghost entry — active_trades temizlenmedigi icin ayni sembolde yeni islem acilamiyordu, (2) Fiyat zaten SL seviyesini ihlal etmisken devir yapilabiliyordu ve 10sn sonra pozisyon aninda kapaniyordu. Ayrica kullanici istegiyle BABA risk hesaplama baslangic tarihini arayuzden degistirme ozelligi eklendi. |
+
+### Degisiklikler
+
+| Dosya | Ne Degisti |
+|-------|-----------|
+| engine/h_engine.py | transfer_to_hybrid(): ManuelMotor.active_trades temizleme. check_transfer(): fiyat SL ihlali kontrolu. __init__: manuel_motor cross-motor referansi. |
+| engine/manuel_motor.py | sync_positions(): FILLED pozisyon kontrolu symbol-based yerine ticket-based. |
+| engine/main.py | Engine.__init__: h_engine.manuel_motor cross-referans eklendi. |
+| engine/config.py | set() ve save() metotlari eklendi (config JSON guncelleme destegi). |
+| api/routes/settings.py | **YENI** — GET/POST /settings/risk-baseline endpoint'leri. |
+| api/schemas.py | RiskBaselineGetResponse, RiskBaselineUpdateRequest, RiskBaselineUpdateResponse semalari eklendi. |
+| api/server.py | Settings router import ve include eklendi. |
+| desktop/src/services/api.js | getRiskBaseline() ve updateRiskBaseline() API fonksiyonlari eklendi. |
+| desktop/src/components/Settings.jsx | Risk Hesaplama Baslangici karti — tarih input, iki asamali dogrulama. |
+| desktop/src/styles/theme.css | .st-baseline-*, .st-btn-primary, .st-btn-danger, .st-section-desc CSS kurallari eklendi. |
+
+### Eklenen
+- ManuelMotor ghost entry temizleme (hibrite devir sonrasi)
+- Fiyat vs SL ihlal kontrolu (devir oncesi guvenlik)
+- Ticket-based sync (symbol-based yerine)
+- Config set/save API destegi
+- /api/settings/risk-baseline endpoint (GET + POST)
+- Settings: Risk Baseline Date karti (iki asamali dogrulama)
+
+### Cikartilan
+- (yok — mevcut davranisa ekleme yapildi)

@@ -87,3 +87,31 @@ class Config:
             else:
                 return default
         return value if value is not None else default
+
+    def set(self, key: str, value) -> None:
+        """Konfigürasyon değeri güncelle (bellekte).
+
+        Args:
+            key: Konfigürasyon anahtarı (nokta ile ayrılmış).
+            value: Yeni değer.
+        """
+        keys = key.split(".")
+        target = self._data
+        for k in keys[:-1]:
+            if k not in target or not isinstance(target[k], dict):
+                target[k] = {}
+            target = target[k]
+        target[keys[-1]] = value
+        logger.info(f"Config güncellendi: {key} = {value}")
+
+    def save(self) -> None:
+        """Bellekteki konfigürasyonu JSON dosyasına kaydet."""
+        try:
+            with open(self._path, "w", encoding="utf-8") as f:
+                json.dump(self._data, f, indent=2, ensure_ascii=False)
+                f.write("
+")
+            logger.info(f"Config dosyaya kaydedildi: {self._path}")
+        except OSError as exc:
+            logger.error(f"Config kayıt hatası: {self._path} — {exc}")
+            raise

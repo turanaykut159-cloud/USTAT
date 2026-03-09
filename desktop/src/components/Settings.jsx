@@ -15,7 +15,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { getAccount, getStatus, getEvents } from '../services/api';
+import { getAccount, getStatus, getEvents, getRiskBaseline, updateRiskBaseline } from '../services/api';
 
 // ── Sabitler ──────────────────────────────────────────────────────
 
@@ -88,6 +88,12 @@ export default function Settings() {
   // MT5 şifre göster/gizle
   const [showLogin, setShowLogin] = useState(false);
 
+  // Risk Baseline Date — iki aşamalı doğrulama
+  const [baselineDate, setBaselineDate] = useState('');
+  const [baselineDateInput, setBaselineDateInput] = useState('');
+  const [baselineStep, setBaselineStep] = useState('idle'); // idle | confirm | saving
+  const [baselineMsg, setBaselineMsg] = useState('');
+
   // Tema (localStorage + DOM)
   const [theme, setTheme] = useState(() => {
     return localStorage.getItem('ustat_theme') || 'dark';
@@ -107,14 +113,19 @@ export default function Settings() {
 
   const fetchData = useCallback(async () => {
     setLoading(true);
-    const [acc, sts, evt] = await Promise.all([
+    const [acc, sts, evt, bl] = await Promise.all([
       getAccount(),
       getStatus(),
       getEvents({ limit: logLimit }),
+      getRiskBaseline(),
     ]);
     setAccount(acc);
     setStatusData(sts);
     setEvents(evt.events || []);
+    if (bl.baseline_date) {
+      setBaselineDate(bl.baseline_date);
+      setBaselineDateInput(bl.baseline_date);
+    }
     setLoading(false);
   }, [logLimit]);
 
@@ -139,6 +150,55 @@ export default function Settings() {
       return next;
     });
   };
+
+  // ── Risk Baseline handlers ─────────────────────────────────────
+
+  const handleBaselineChange = useCallback(() => {
+    const val = baselineDateInput.trim();
+    if (!val || val === baselineDate) {
+      setBaselineMsg('Tarih değişmedi.');
+      return;
+    }
+    // Tarih formatı kontrolü
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(val)) {
+      setBaselineMsg('Geçersiz format. YYYY-MM-DD kullanın.');
+      return;
+    }
+    // Geçerli tarih mi?
+    const d = new Date(val + 'T00:00:00');
+    if (isNaN(d.getTime())) {
+      setBaselineMsg('Geçersiz tarih.');
+      return;
+    }
+    // Gelecek tarih mi?
+    if (d > new Date()) {
+      setBaselineMsg('Gelecek tarih kabul edilmez.');
+      return;
+    }
+    setBaselineMsg('Tarih ' + baselineDate + ' \u2192 ' + val + ' olarak de\u011fi\u015ftirilecek. Risk hesaplamalar\u0131 bu tarihten itibaren yeniden hesaplanacak.');
+    setBaselineStep('confirm');
+  }, [baselineDateInput, baselineDate]);
+
+  const confirmBaselineChange = useCallback(async () => {
+    setBaselineStep('saving');
+    setBaselineMsg('Kaydediliyor...');
+    const result = await updateRiskBaseline(baselineDateInput);
+    if (result.success) {
+      setBaselineDate(baselineDateInput);
+      setBaselineMsg('Ba\u015far\u0131l\u0131: ' + result.old_date + ' \u2192 ' + result.new_date);
+      setBaselineStep('idle');
+      setTimeout(() => setBaselineMsg(''), 4000);
+    } else {
+      setBaselineMsg('Hata: ' + result.message);
+      setBaselineStep('idle');
+    }
+  }, [baselineDateInput]);
+
+  const cancelBaselineChange = useCallback(() => {
+    setBaselineDateInput(baselineDate);
+    setBaselineStep('idle');
+    setBaselineMsg('');
+  }, [baselineDate]);
 
   // ── Render ──────────────────────────────────────────────────────
 
@@ -198,6 +258,84 @@ export default function Settings() {
             }}>
               Farklı Hesap ile Giriş
             </button>
+          </section>
+
+          {/* ── RİSK BASELINE TARİHİ ───────────────────────────── */}
+          <section className="st-section">
+            <div className="st-section-header">
+              <h3>Risk Hesaplama Başlangıcı</h3>
+            </div>
+            <p className="st-section-desc">
+              BABA'nın risk hesaplamalarında (drawdown, haftalık/aylık zarar)
+              kullandığı referans başlangıç tarihi. Bu tarihten önceki veriler
+              risk hesabına dahil edilmez.
+            </p>
+            <div className="st-baseline-row">
+              <label className="st-field-label">Başlangıç Tarihi</label>
+              <input
+                type="date"
+                className="st-baseline-input"
+                value={baselineDateInput}
+                onChange={(e) => {
+                  setBaselineDateInput(e.target.value);
+                  setBaselineStep('idle');
+                  setBaselineMsg('');
+                }}
+              />
+            </div>
+
+            {baselineStep === 'idle' && (
+              <button
+                className="st-btn st-btn-primary"
+                onClick={handleBaselineChange}
+                disabled={!baselineDateInput || baselineDateInput === baselineDate}
+              >
+                Tarihi Güncelle
+              </button>
+            )}
+
+            {baselineStep === 'confirm' && (
+              <div className="st-baseline-confirm">
+                <div className="st-baseline-warning">
+                  ⚠ {baselineMsg}
+                </div>
+                <div className="st-baseline-actions">
+                  <button className="st-btn st-btn-danger" onClick={confirmBaselineChange}>
+                    Onayla ve Uygula
+                  </button>
+                  <button className="st-btn st-btn-secondary" onClick={cancelBaselineChange}>
+                    İptal
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {baselineStep === 'saving' && (
+              <div className="st-baseline-msg saving">{baselineMsg}</div>
+            )}
+
+            {baselineStep === 'idle' && baselineMsg && (
+              <div className={'st-baseline-msg ' + (baselineMsg.startsWith('Hata') ? 'error' : 'success')}>
+                {baselineMsg}
+              </div>
+            )}
+          </section>
+
+          {/* ── VERSİYON BİLGİSİ ─────────────────────────────────── */}
+          <section className="st-section st-version-section">
+            <div className="st-section-header">
+              <h3>Hakkında</h3>
+            </div>
+            <div className="st-version-grid">
+              <FieldRow label="Uygulama" value="ÜSTAT Desktop" />
+              <FieldRow label="Versiyon" value={`v${VERSION}`} />
+              <FieldRow label="Build Tarihi" value={BUILD_DATE} />
+              <FieldRow label="Engine" value={status?.engine_running ? 'Çalışıyor' : 'Durduruldu'} cls={status?.engine_running ? 'profit' : 'loss'} />
+              <FieldRow label="Uptime" value={status?.uptime_seconds ? formatUptime(status.uptime_seconds) : '—'} />
+              <FieldRow label="Faz" value={status?.phase || '—'} />
+              <FieldRow label="Geliştirici" value="TURAN AYKUT" />
+              <FieldRow label="Copyright" value="© 2026 TURAN AYKUT — Tüm hakları saklıdır" />
+            </div>
           </section>
 
         </div>
@@ -264,21 +402,6 @@ export default function Settings() {
                 checked={prefs.regimeAlert}
                 onChange={() => togglePref('regimeAlert')}
               />
-            </div>
-          </section>
-
-          {/* ── VERSİYON BİLGİSİ ─────────────────────────────────── */}
-          <section className="st-section st-version-section">
-            <div className="st-section-header">
-              <h3>Hakkında</h3>
-            </div>
-            <div className="st-version-grid">
-              <FieldRow label="Uygulama" value="ÜSTAT Desktop" />
-              <FieldRow label="Versiyon" value={`v${VERSION}`} />
-              <FieldRow label="Build Tarihi" value={BUILD_DATE} />
-              <FieldRow label="Engine" value={status?.engine_running ? 'Çalışıyor' : 'Durduruldu'} cls={status?.engine_running ? 'profit' : 'loss'} />
-              <FieldRow label="Uptime" value={status?.uptime_seconds ? formatUptime(status.uptime_seconds) : '—'} />
-              <FieldRow label="Faz" value={status?.phase || '—'} />
             </div>
           </section>
 

@@ -3696,6 +3696,111 @@ h2 {
   transform: translateX(0);
 }
 
+/* ── Risk Baseline Tarihi ────────────────────────────────────── */
+
+.st-section-desc {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin: 0 0 12px 0;
+  line-height: 1.5;
+}
+
+.st-baseline-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.st-baseline-input {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  width: 160px;
+}
+
+.st-baseline-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.st-btn-primary {
+  background: var(--accent);
+  color: #fff;
+  width: 100%;
+}
+
+.st-btn-primary:hover:not(:disabled) {
+  background: #2188ff;
+}
+
+.st-btn-primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.st-btn-danger {
+  background: #da3633;
+  color: #fff;
+}
+
+.st-btn-danger:hover {
+  background: #f85149;
+}
+
+.st-baseline-confirm {
+  margin-top: 8px;
+}
+
+.st-baseline-warning {
+  background: rgba(218, 150, 54, 0.12);
+  border: 1px solid rgba(218, 150, 54, 0.4);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: #e3b341;
+  margin-bottom: 10px;
+  line-height: 1.5;
+}
+
+.st-baseline-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.st-baseline-actions .st-btn {
+  flex: 1;
+}
+
+.st-baseline-msg {
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+.st-baseline-msg.success {
+  background: rgba(63, 185, 80, 0.12);
+  color: #3fb950;
+  border: 1px solid rgba(63, 185, 80, 0.3);
+}
+
+.st-baseline-msg.error {
+  background: rgba(248, 81, 73, 0.12);
+  color: #f85149;
+  border: 1px solid rgba(248, 81, 73, 0.3);
+}
+
+.st-baseline-msg.saving {
+  background: rgba(88, 166, 255, 0.12);
+  color: #58a6ff;
+  border: 1px solid rgba(88, 166, 255, 0.3);
+}
+
 /* ── Versiyon ────────────────────────────────────────────────── */
 
 .st-version-section .st-field-group,

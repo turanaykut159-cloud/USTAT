@@ -46,6 +46,7 @@ from api.routes import (
     top5,
     trades,
     ustat_brain,
+    settings,
 )
 
 logger = logging.getLogger("ustat.api")
@@ -173,6 +174,7 @@ app.include_router(ustat_brain.router, prefix="/api", tags=["ustat-brain"])
 app.include_router(health.router, prefix="/api", tags=["health"])
 app.include_router(ogul_activity.router, prefix="/api", tags=["ogul"])
 app.include_router(live.router, tags=["websocket"])
+app.include_router(settings.router, prefix="/api", tags=["settings"])
 
 
 @app.get("/")

@@ -114,6 +114,9 @@ class HEngine:
         self.baba = baba
         self.pipeline = pipeline
 
+        # Cross-motor referansı (Engine.__init__ tarafından atanır)
+        self.manuel_motor: Any | None = None
+
         # ── Pozisyon deposu (bellek) ──────────────────────────────
         self.hybrid_positions: dict[int, HybridPosition] = {}
 
@@ -279,6 +282,21 @@ class HEngine:
             result["suggested_sl"] = entry_price + (atr_value * self._sl_atr_mult)
             result["suggested_tp"] = entry_price - (atr_value * self._tp_atr_mult)
 
+        # 10. Güncel fiyat SL'yi zaten ihlal ediyor mu?
+        suggested_sl = result["suggested_sl"]
+        if direction == "BUY" and current_price <= suggested_sl:
+            result["reason"] = (
+                f"Güncel fiyat ({current_price:.4f}) zaten SL seviyesinin "
+                f"({suggested_sl:.4f}) altında — devir güvenli değil"
+            )
+            return result
+        if direction == "SELL" and current_price >= suggested_sl:
+            result["reason"] = (
+                f"Güncel fiyat ({current_price:.4f}) zaten SL seviyesinin "
+                f"({suggested_sl:.4f}) üstünde — devir güvenli değil"
+            )
+            return result
+
         result["can_transfer"] = True
         result["reason"] = "Hibrite devir uygun"
         return result
@@ -400,6 +418,15 @@ class HEngine:
             db_id=db_id,
         )
         self.hybrid_positions[ticket] = hp
+
+        # ── 3b. ManuelMotor aktif işlemlerden çıkar ──────────────────
+        if self.manuel_motor and hasattr(self.manuel_motor, 'active_trades'):
+            removed = self.manuel_motor.active_trades.pop(symbol, None)
+            if removed:
+                logger.info(
+                    f"ManuelMotor aktif işlemden çıkarıldı (hibrite devir): "
+                    f"ticket={ticket} {symbol}"
+                )
 
         # ── 4. Event log ──────────────────────────────────────────
         self.db.insert_hybrid_event(
