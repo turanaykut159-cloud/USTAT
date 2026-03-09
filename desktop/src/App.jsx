@@ -17,7 +17,7 @@ import RiskManagement from './components/RiskManagement';
 import ManualTrade from './components/ManualTrade';
 import HybridTrade from './components/HybridTrade';
 import AutoTrading from './components/AutoTrading';
-import SystemHealth from './components/SystemHealth';
+import Monitor from './components/Monitor';
 import Settings from './components/Settings';
 import ErrorBoundary from './components/ErrorBoundary';
 
@@ -52,7 +52,7 @@ export default function App() {
                 <Route path="/trades" element={<TradeHistory />} />
                 <Route path="/performance" element={<Performance />} />
                 <Route path="/risk" element={<RiskManagement />} />
-                <Route path="/health" element={<SystemHealth />} />
+                <Route path="/monitor" element={<Monitor />} />
                 <Route path="/settings" element={<Settings />} />
               </Routes>
             </ErrorBoundary>

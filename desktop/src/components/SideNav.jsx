@@ -18,7 +18,7 @@ const NAV_ITEMS = [
   { path: '/trades',      label: 'İşlem Geçmişi',     icon: '📋' },
   { path: '/performance', label: 'Üstat & Performans', icon: '🏆' },
   { path: '/risk',        label: 'Risk Yönetimi',      icon: '🛡️' },
-  { path: '/health',      label: 'Sistem Sağlığı',     icon: '🩺' },
+  { path: '/monitor',     label: 'System Monitor',      icon: '📡' },
   { path: '/settings',    label: 'Ayarlar',            icon: '⚙️' },
 ];
 

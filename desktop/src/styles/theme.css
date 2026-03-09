@@ -893,6 +893,16 @@ tr:hover td {
   margin-top: 2px;
 }
 
+/* Telif — ilk açılış ekranı altında sabit */
+.lock-screen-copyright {
+  margin-top: auto;
+  padding: 12px 16px 20px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  opacity: 0.7;
+  letter-spacing: 0.5px;
+}
+
 .lock-subtitle {
   color: var(--text-secondary);
   font-size: 14px;
@@ -1106,6 +1116,12 @@ tr:hover td {
   font-size: 15px;
   font-weight: 600;
   color: var(--accent);
+}
+
+.otp-focus-hint {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin: -6px 0 0;
 }
 
 .otp-hint {
@@ -4236,452 +4252,17 @@ h2 {
 
 
 /* ══════════════════════════════════════════════════════════════════
-   SISTEM SAGLIGI (sh-*) — SystemHealth.jsx
+   SYSTEM MONITOR (mn-*) — Monitor.jsx
    ══════════════════════════════════════════════════════════════════ */
 
-.sh-page {
-  padding: 20px 24px;
+.mn-page {
+  padding: 16px 20px;
   overflow-y: auto;
   height: 100%;
-}
-
-.sh-title {
-  font-size: 1.4rem;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin-bottom: 20px;
-}
-
-.sh-loading {
-  color: var(--text-secondary);
-  text-align: center;
-  padding: 40px;
-}
-
-/* ── Grid layoutlar ──────────────────────────────────────────── */
-
-.sh-grid-2 {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  margin-bottom: 16px;
-}
-
-/* ── Section kart ────────────────────────────────────────────── */
-
-.sh-section {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 16px;
-  margin-bottom: 16px;
-}
-
-.sh-grid-2 > .sh-section {
-  margin-bottom: 0;
-}
-
-.sh-section-title {
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin-bottom: 12px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--border);
-}
-
-.sh-sub-title {
-  font-size: 0.8rem;
-  font-weight: 500;
-  color: var(--text-secondary);
-  margin: 12px 0 6px;
-}
-
-/* ── Stats row (metrik kartciklar) ──────────────────────────── */
-
-.sh-stats-row {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 12px;
-  flex-wrap: wrap;
-}
-
-.sh-stat {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 70px;
-}
-
-.sh-stat-label {
-  font-size: 0.7rem;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.sh-stat-value {
-  font-size: 1.1rem;
-  font-weight: 600;
-  color: var(--text-primary);
-  font-variant-numeric: tabular-nums;
-}
-
-.sh-stat-ok { color: var(--profit); }
-.sh-stat-warn { color: var(--warning); }
-.sh-stat-err { color: var(--loss); }
-
-/* ── Durum gostergesi (dot) ──────────────────────────────────── */
-
-.sh-status-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.sh-status-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.sh-dot-ok {
-  background: var(--profit);
-  box-shadow: 0 0 6px rgba(63, 185, 80, 0.5);
-}
-
-.sh-dot-err {
-  background: var(--loss);
-  box-shadow: 0 0 6px rgba(248, 81, 73, 0.5);
-}
-
-.sh-status-text {
-  font-size: 0.85rem;
-  color: var(--text-primary);
-}
-
-/* ── Adim breakdown barlari ──────────────────────────────────── */
-
-.sh-steps {
-  margin-top: 8px;
-}
-
-.sh-steps-header {
-  display: flex;
-  justify-content: space-between;
-  font-size: 0.8rem;
-  color: var(--text-secondary);
-  margin-bottom: 8px;
-}
-
-.sh-overrun {
-  color: var(--loss);
-  font-weight: 600;
-}
-
-.sh-step-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 4px;
-}
-
-.sh-step-name {
-  font-size: 0.72rem;
-  color: var(--text-secondary);
-  width: 60px;
-  flex-shrink: 0;
-  text-align: right;
-}
-
-.sh-step-bar-track {
-  flex: 1;
-  height: 10px;
-  background: var(--bg-tertiary);
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-.sh-step-bar-fill {
-  height: 100%;
-  border-radius: 4px;
-  min-width: 2px;
-  transition: width 0.3s ease;
-}
-
-.sh-step-ms {
-  font-size: 0.7rem;
-  color: var(--text-dim);
-  width: 50px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
-/* ── Mini trend grafik ───────────────────────────────────────── */
-
-.sh-trend {
-  margin-top: 12px;
-}
-
-.sh-trend-label {
-  font-size: 0.72rem;
-  color: var(--text-dim);
-}
-
-.sh-trend-chart {
-  display: flex;
-  align-items: flex-end;
-  gap: 1px;
-  height: 40px;
-  margin-top: 4px;
-  padding: 0 1px;
-}
-
-.sh-trend-bar {
-  flex: 1;
-  background: var(--accent);
-  border-radius: 1px 1px 0 0;
-  min-width: 2px;
-  opacity: 0.7;
-  transition: height 0.3s ease;
-}
-
-.sh-trend-bar:hover {
-  opacity: 1;
-}
-
-.sh-trend-bar--over {
-  background: var(--loss);
-}
-
-/* ── Tablolar ────────────────────────────────────────────────── */
-
-.sh-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.78rem;
-}
-
-.sh-table-sm {
-  font-size: 0.73rem;
-}
-
-.sh-table th {
-  text-align: left;
-  font-weight: 500;
-  color: var(--text-dim);
-  padding: 4px 6px;
-  border-bottom: 1px solid var(--border);
-  text-transform: uppercase;
-  font-size: 0.68rem;
-  letter-spacing: 0.5px;
-}
-
-.sh-table td {
-  padding: 4px 6px;
-  color: var(--text-primary);
-  border-bottom: 1px solid rgba(48, 54, 61, 0.4);
-}
-
-.sh-table tbody tr:hover {
-  background: var(--bg-hover);
-}
-
-.sh-mono {
-  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
-  font-size: 0.78rem;
-}
-
-/* ── Badge'ler ───────────────────────────────────────────────── */
-
-.sh-badge {
-  display: inline-block;
-  padding: 1px 6px;
-  border-radius: 4px;
-  font-size: 0.7rem;
-  font-weight: 500;
-}
-
-.sh-badge-ok {
-  background: rgba(63, 185, 80, 0.15);
-  color: var(--profit);
-}
-
-.sh-badge-err {
-  background: rgba(248, 81, 73, 0.15);
-  color: var(--loss);
-}
-
-.sh-dir-buy {
-  color: var(--profit);
-  font-weight: 500;
-}
-
-.sh-dir-sell {
-  color: var(--loss);
-  font-weight: 500;
-}
-
-/* ── Katman grid (4 kart) ────────────────────────────────────── */
-
-.sh-layer-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
-}
-
-.sh-layer-card {
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 12px;
-}
-
-.sh-layer-name {
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--accent);
-  margin-bottom: 8px;
-}
-
-.sh-layer-rows {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.sh-layer-row {
-  display: flex;
-  justify-content: space-between;
-  font-size: 0.78rem;
-}
-
-.sh-layer-row > span:first-child {
-  color: var(--text-secondary);
-}
-
-.sh-layer-row > span:last-child {
-  color: var(--text-primary);
-  font-weight: 500;
-}
-
-/* ── Severity badge'leri ─────────────────────────────────────── */
-
-.sh-sev-badge {
-  display: inline-block;
-  padding: 1px 6px;
-  border-radius: 4px;
-  font-size: 0.68rem;
-  font-weight: 600;
-  text-transform: uppercase;
-}
-
-.sh-sev-error {
-  background: rgba(248, 81, 73, 0.15);
-  color: var(--loss);
-}
-
-.sh-sev-warning {
-  background: rgba(210, 153, 34, 0.18);
-  color: var(--warning);
-}
-
-.sh-sev-info {
-  background: rgba(88, 166, 255, 0.12);
-  color: var(--accent);
-}
-
-.sh-sev-debug {
-  background: rgba(139, 148, 158, 0.12);
-  color: var(--text-dim);
-}
-
-/* ── Filtre butonlari ────────────────────────────────────────── */
-
-.sh-filter-group {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 10px;
-}
-
-.sh-filter-btn {
-  padding: 4px 12px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 0.75rem;
-  font-weight: 500;
-  transition: all 0.15s;
-}
-
-.sh-filter-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-.sh-filter-active {
-  background: var(--accent-dim);
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-/* ── Event tablosu ozel ──────────────────────────────────────── */
-
-.sh-events-wrap {
-  max-height: 300px;
-  overflow-y: auto;
-}
-
-.sh-event-msg {
-  max-width: 400px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.sh-empty {
-  color: var(--text-dim);
-  text-align: center;
-  padding: 20px;
-  font-size: 0.85rem;
-}
-
-/* ── Sistem grid ─────────────────────────────────────────────── */
-
-.sh-sys-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-}
-
-.sh-sys-item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.sh-sys-label {
-  font-size: 0.7rem;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.sh-sys-value {
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--text-primary);
-  font-variant-numeric: tabular-nums;
-}
-
-/* ── Reconnect tablo ─────────────────────────────────────────── */
-
-.sh-reconnect {
-  margin-top: 8px;
+  background: #080c18;
+  color: #c8d8e8;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -4856,3 +4437,4 @@ h2 {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+

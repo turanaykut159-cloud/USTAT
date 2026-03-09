@@ -1078,3 +1078,37 @@ Bu düzeltmeler native SLTP çalışmadığı için sorunu çözmedi ama kod kal
 
 ### Çıkartılan
 - Yok
+
+---
+
+## #35 — System Monitor: Sistem Sağlığı + Günlük Birleştirme (2026-03-09)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-09 |
+| **Neden** | Sistem Sağlığı ve Sistem Günlüğü iki ayrı sayfada dağınıktı; kullanıcı tüm izleme verilerini tek terminale benzer bir panelde görmek istedi. Referans tasarım (SİSTEM SAĞLIĞI.txt) temel alındı, simülasyon verisi gerçek API'ye dönüştürüldü. |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `desktop/src/components/Monitor.jsx` | **YENİ** (520 satır) — Tek sayfa sistem izleme paneli: Header, 6 stat kart, modül mimarisi diyagramı (BABA→OĞUL→ÜSTAT→H-ENGINE→MANUEL→HİBRİT), emir akış tablosu, log akışı, performans barları, risk & kill-switch paneli. 6 API endpoint'ten Promise.all ile 3sn poll. |
+| `desktop/src/components/SystemHealth.jsx` | **SİLİNDİ** (545 satır) — tüm verisi Monitor'e taşındı |
+| `desktop/src/components/SystemLog.jsx` | **SİLİNDİ** (270 satır) — tüm verisi Monitor'e taşındı |
+| `desktop/src/App.jsx` | `/health` + `/logs` route'ları kaldırıldı → `/monitor` eklendi, import'lar güncellendi |
+| `desktop/src/components/SideNav.jsx` | 2 menü öğesi (Sistem Sağlığı, Sistem Günlüğü) → 1 menü öğesi (📡 System Monitor) |
+| `desktop/src/styles/theme.css` | 679 satır `.sh-*` + `.sl-*` CSS kaldırıldı → 13 satır `.mn-page` CSS eklendi |
+
+### Eklenen
+- `Monitor.jsx` — Terminal tarzı koyu arka plan, modül bazlı renk kodları, animasyonlu akış okları
+- `.mn-page` CSS sınıfı
+- Modül hata sayacı (event'lerden türetme)
+- Kill-switch seviye göstergesi (L1/L2/L3 aktif vurgu)
+- VİOP piyasa durumu (09:30–18:15 seans saati kontrolü)
+
+### Çıkartılan
+- `SystemHealth.jsx` (545 satır)
+- `SystemLog.jsx` (270 satır)
+- `.sh-*` CSS kuralları (448 satır)
+- `.sl-*` CSS kuralları (231 satır)
+- `/health` ve `/logs` route'ları
