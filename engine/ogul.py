@@ -427,12 +427,6 @@ class Ogul:
         if not self._is_trading_allowed():
             return
 
-        # 9. Öğle arası kontrolü — yeni işlem yok
-        current_time = now.time()
-        if LUNCH_START <= current_time <= LUNCH_END:
-            logger.debug("Öğle arası: yeni sinyal üretimi atlandı")
-            return
-
         # 10. Her sembol için sinyal üretimi
         for symbol in symbols:
             # Sembol başına 1 aktif işlem kuralı

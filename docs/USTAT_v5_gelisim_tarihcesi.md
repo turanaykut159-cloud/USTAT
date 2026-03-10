@@ -2,6 +2,35 @@
 
 ---
 
+## #41 — Kill-Switch L2 Döngü Bugu Düzeltmesi (2026-03-10)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-10 |
+| **Neden** | Otomatik işlem sistemi tüm gün boyunca işlem açmıyor. Dashboard'da sinyal üretiliyor (BUY) ama OĞUL AKTİVİTE 0 tarama, 0 sinyal gösteriyor. |
+| **Kök Neden** | (1) `_reset_daily()` sadece `reason=="daily_loss"` olan L2'yi temizliyordu; `"consecutive_loss"` nedenli L2 yeni günde de devam ediyordu. (2) Üst üste kayıp sayacı (`consecutive_losses`) ve cooldown günlük sıfırlamada resetlenmiyordu → engine restart sonrası eski kayıplar tekrar sayılıp L2 sonsuz döngüsü oluşuyordu. (3) `_check_unopened_trades()` işlem saatleri dışında da çalışarak gereksiz UNOPENED_TRADE log kirliliği yaratıyordu. (4) `_find_block_reason()` fallback mesajı belirsizdi ("Parametre/sinyal eşiği karşılanmadı"). (5) Öğle arası (12:30-14:00) sinyal engeli gereksiz yere işlem fırsatlarını kaçırıyordu. |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `engine/baba.py` | `_reset_daily()`: L2 temizleme koşuluna `"consecutive_loss"` eklendi. Yeni gün başlangıcında `consecutive_losses=0`, `cooldown_until=None`, `last_cooldown_end=now` sıfırlaması eklendi |
+| `engine/ogul.py` | `process_signals()`: Öğle arası sinyal engeli (12:30-14:00) kaldırıldı — artık gün boyu kesintisiz sinyal üretimi |
+| `engine/ustat.py` | `_check_unopened_trades()`: İşlem saatleri dışında (09:45 öncesi / 17:45 sonrası) early return eklendi |
+| `engine/ustat.py` | `_find_block_reason()`: Üst üste kayıp bilgisi (`consec >= 2`), işlem saatleri dışı, M15 bekleme durumları eklendi |
+
+### Eklenen
+- Günlük sıfırlamada `consecutive_losses` ve `cooldown` reset mantığı (baba.py)
+- İşlem saatleri dışı guard (ustat.py `_check_unopened_trades`)
+- Detaylı UNOPENED neden raporlaması (ustat.py `_find_block_reason`)
+
+### Çıkartılan
+- `reason == "daily_loss"` tek koşullu L2 temizleme (artık `consecutive_loss` da dahil)
+- Öğle arası sinyal engeli (ogul.py `LUNCH_START/LUNCH_END` bloğu)
+- Belirsiz "Parametre/sinyal eşiği karşılanmadı" fallback mesajı
+
+---
+
 ## #1 — Yazılımsal SL/TP Modu (2026-03-05)
 
 | Alan | Detay |

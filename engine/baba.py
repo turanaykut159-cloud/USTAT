@@ -121,8 +121,23 @@ MAX_INDEX_WEIGHT_SCORE:     float = 0.25
 
 # ── Risk hesaplama başlangıç tarihi (varsayılan) ──────────────────
 # Config'den okunur (risk.baseline_date). Bu sabit yalnızca fallback.
+# Format: "YYYY-MM-DD" veya "YYYY-MM-DD HH:MM"
 _DEFAULT_RISK_BASELINE_DATE: str = "2026-03-07"
 RISK_BASELINE_DATE = _DEFAULT_RISK_BASELINE_DATE      # data_pipeline uyumu
+
+
+def _baseline_to_iso(baseline: str) -> str:
+    """Baseline string'ini ISO karşılaştırma formatına çevir.
+
+    "2026-03-10"       → "2026-03-10T00:00:00"
+    "2026-03-10 12:00" → "2026-03-10T12:00:00"
+    """
+    baseline = baseline.strip()
+    if " " in baseline:
+        # "YYYY-MM-DD HH:MM" → "YYYY-MM-DDThh:mm:00"
+        parts = baseline.split(" ", 1)
+        return f"{parts[0]}T{parts[1]}:00"
+    return f"{baseline}T00:00:00"
 
 # ── Kill-switch seviyeleri ───────────────────────────────────────────
 KILL_SWITCH_NONE: int = 0
@@ -940,12 +955,22 @@ class Baba:
         self._risk_state["daily_trade_count"] = 0
         self._risk_state["daily_reset_equity"] = None   # önceki günü temizle
 
-        # Günlük kayıp nedenli L2 varsa kaldır
+        # Günlük kayıp veya üst üste kayıp nedenli L2 varsa kaldır
+        # (yeni gün = temiz başlangıç — eski günün kaybı bugünü bloklamamalı)
         if (
             self._kill_switch_level == KILL_SWITCH_L2
-            and self._kill_switch_details.get("reason") == "daily_loss"
+            and self._kill_switch_details.get("reason")
+            in ("daily_loss", "consecutive_loss")
         ):
             self._clear_kill_switch("Günlük sıfırlama — L2 kaldırıldı")
+
+        # Yeni gün: üst üste kayıp sayacını ve cooldown'u sıfırla
+        # (önceki günün consecutive loss'u bugünü engellemesini önle)
+        self._risk_state["consecutive_losses"] = 0
+        self._risk_state["cooldown_until"] = None
+        self._risk_state["last_cooldown_end"] = (
+            datetime.now().isoformat(timespec="seconds")
+        )
 
         # Snapshot'tan yeni günün equity bazını ayarla
         if snap:
@@ -1163,7 +1188,7 @@ class Baba:
         # Baseline: eski veriler risk hesabını etkilemesin
         since_str = max(
             f"{monday.isoformat()}T00:00:00",
-            f"{self._risk_baseline_date}T00:00:00",
+            _baseline_to_iso(self._risk_baseline_date),
         )
         snapshots = self._db.get_risk_snapshots(
             since=since_str, limit=500,
@@ -1216,7 +1241,7 @@ class Baba:
         # Baseline: eski veriler risk hesabını etkilemesin
         since_str = max(
             f"{month_start.isoformat()}T00:00:00",
-            f"{self._risk_baseline_date}T00:00:00",
+            _baseline_to_iso(self._risk_baseline_date),
         )
         snapshots = self._db.get_risk_snapshots(
             since=since_str, limit=1000,
@@ -1316,7 +1341,7 @@ class Baba:
         sonsuz döngüsünü önler.
         """
         # Cooldown sonrası veya baseline sonrası (hangisi yeniyse)
-        since = self._risk_state.get("last_cooldown_end") or f"{self._risk_baseline_date}T00:00:00"
+        since = self._risk_state.get("last_cooldown_end") or _baseline_to_iso(self._risk_baseline_date)
         trades = self._db.get_trades(limit=10, since=since)
         closed = [
             t for t in trades

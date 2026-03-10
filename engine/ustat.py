@@ -450,6 +450,8 @@ class Ustat:
         Top 5 listesinde kontrat var, OĞUL sinyal üretti ama işlem
         açılmadıysa → neden açılmadı ve parametre düzeltme önerisi.
 
+        Öğle arası ve işlem saatleri dışında çalışmaz (gereksiz log kirliliği).
+
         Args:
             baba: BABA instance (okuma).
             ogul: OĞUL instance (okuma).
@@ -457,6 +459,12 @@ class Ustat:
         """
         if not ogul:
             return
+
+        # İşlem saatleri dışında UNOPENED kontrolü yapma
+        from datetime import time as _time
+        current_time = now.time()
+        if current_time < _time(9, 45) or current_time > _time(17, 45):
+            return  # işlem saatleri dışı
 
         top5 = getattr(ogul, "_current_top5", [])
         active_symbols = set(getattr(ogul, "active_trades", {}).keys())
@@ -522,8 +530,18 @@ class Ustat:
         if daily_count >= max_daily:
             reasons.append(f"Günlük işlem limiti ({daily_count}/{max_daily})")
 
+        # Üst üste kayıp (consecutive_losses) — cooldown tetiklememiş olsa bile bilgi ver
+        consec = risk_state.get("consecutive_losses", 0)
+        if consec >= 2:
+            reasons.append(f"Üst üste {consec} kayıp")
+
         if not reasons:
-            reasons.append("Parametre/sinyal eşiği karşılanmadı")
+            from datetime import time as _time
+            now_t = datetime.now().time()
+            if now_t < _time(9, 45) or now_t > _time(17, 45):
+                reasons.append("İşlem saatleri dışı")
+            else:
+                reasons.append("M15 mum kapanışı bekleniyor veya sinyal eşiği karşılanmadı")
 
         return "; ".join(reasons)
 
