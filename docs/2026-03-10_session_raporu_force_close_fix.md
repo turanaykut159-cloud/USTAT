@@ -40,8 +40,13 @@
 | desktop/src/components/AutoTrading.jsx | Aktif pozisyon tablosu |
 | 40 dosya | v5.3 → v5.4 versiyon guncellemesi |
 
+### Bug Fix #43: OGUL Manuel/Hibrit Pozisyon Sahiplenme
+- **Semptom:** Manuel (F_AKBNK) ve hibrit (F_KONTR) pozisyonlar OGUL tarafindan "yetim" olarak sahiplenilip pullback_tolerance/signal_loss ile kapatiliyor.
+- **Kok Neden:** `ogul.py:restore_active_trades()` DB eslemesi olmayan pozisyonlari yetim olarak sahipleniyor. ManuelMotor ve H-Engine kontrolu yok. Restore sirasi yanlis (OGUL once calisiyordu).
+- **Cozum:** 4 katmanli koruma: (1) ManuelMotor active_trades, (2) H-Engine hybrid_positions, (3) DB strategy="manual", (4) DB hybrid_positions tablosu. Restore sirasi: ManuelMotor → H-Engine → OGUL. _manage_position'a manuel+hibrit guard eklendi.
+
 ## Teknik Detaylar
-- **Etkilenen motorlar:** ManuelMotor, BABA
+- **Etkilenen motorlar:** ManuelMotor, BABA, OGUL, H-Engine
 - **Etkilenen UI:** ManualTrade, AutoTrading, Settings, TopBar, LockScreen
 - **GCM VIOP SLTP kisiti:** TRADE_ACTION_SLTP retcode=10035 (desteklenmiyor). Bu bilinen bir kisit (#1 gelisim tarihcesi).
 
@@ -53,7 +58,9 @@
 ## Commit
 - `8cd3c04` — fix: Manuel Islem force-close bugu + aktif pozisyon kartlari
 - `cc9b7b3` — feat: versiyon yukseltme v5.3 → v5.4
+- `0866dc5` — fix: OGUL manuel pozisyon sahiplenme bugu — 3 katmanli koruma
+- `9c948db` — fix: OGUL hibrit pozisyon sahiplenme korumasi + restore sirasi
 
 ## Build Sonucu
-- `npm run build` → 0 hata, 717 modul, 2.31s
+- `npm run build` → 0 hata, 717 modul, 2.34s
 - Chunk uyarisi (764kB > 500kB) — bilinen durum, code-split onerisi
