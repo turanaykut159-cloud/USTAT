@@ -62,6 +62,7 @@ MARGIN_RESERVE_PCT: float = 0.20
 MAX_CONCURRENT_MANUAL: int = 3
 TRADING_OPEN: time = time(9, 45)
 TRADING_CLOSE: time = time(17, 45)
+SENT_EXPIRE_SEC: float = 30.0    # SENT → MT5'te yoksa 30 sn sonra temizle
 
 # ── Risk Skor Eşikleri ──────────────────────────────────────────────
 SL_ATR_GREEN: float = 1.5      # SL mesafesi / ATR > 1.5 → yeşil
@@ -374,13 +375,17 @@ class ManuelMotor:
         )
 
         # 5. MARKET emir gönder
+        # SL/TP: MT5'e gönderilMEZ (GCM VİOP TRADE_ACTION_SLTP desteklemiyor,
+        # 3 başarısız denemeden sonra send_order pozisyonu force-close eder).
+        # ManuelMotor tasarımı: kullanıcı açar, kullanıcı kapatır.
+        # SL/TP değerleri sadece risk göstergesi olarak bellekte tutulur.
         order_result = self.mt5.send_order(
             symbol=symbol,
             direction=direction,
             lot=lot,
             price=price,
-            sl=sl,
-            tp=tp,
+            sl=0,
+            tp=0,
             order_type="market",
         )
 
@@ -408,7 +413,16 @@ class ManuelMotor:
             )
             return result
 
-        # 6. Başarılı → state güncelle
+        # 6. Force-close kontrolü (savunma katmanı)
+        if order_result.get("force_closed"):
+            logger.error(
+                f"Manuel emir force-closed [{symbol}]: "
+                f"MT5 SL/TP ekleyemedi, pozisyon kapatıldı"
+            )
+            result["message"] = "Emir gönderildi ama SL/TP hatası nedeniyle kapatıldı"
+            return result
+
+        # 7. Başarılı → state güncelle
         trade.state = TradeState.SENT
         trade.order_ticket = order_result.get("order", 0)
         trade.sent_at = now
@@ -513,6 +527,18 @@ class ManuelMotor:
                             "entry_price": trade.entry_price,
                             "lot": trade.volume,
                         })
+                elif trade.sent_at and (
+                    (datetime.now() - trade.sent_at).total_seconds()
+                    > SENT_EXPIRE_SEC
+                ):
+                    # SENT ama MT5'te yok ve süre doldu →
+                    # pozisyon açılıp harici kapatılmış veya emir reddedilmiş
+                    logger.warning(
+                        f"Manuel pozisyon SENT ama MT5'te yok [{symbol}]: "
+                        f"order_ticket={trade.order_ticket} "
+                        f"— {SENT_EXPIRE_SEC}s aşıldı, external_close"
+                    )
+                    self._handle_closed_trade(symbol, trade, "external_close")
                 continue
 
             # FILLED pozisyon: ticket bazlı kontrol (sembol değil!)

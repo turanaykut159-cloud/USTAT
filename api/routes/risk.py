@@ -49,7 +49,8 @@ async def get_risk():
             # Baseline tarih (Baba'dan al, yoksa fallback)
             baseline_iso = ""
             if baba and hasattr(baba, "_risk_baseline_date"):
-                baseline_iso = f"{baba._risk_baseline_date}T00:00:00"
+                from engine.baba import _baseline_to_iso
+                baseline_iso = _baseline_to_iso(baba._risk_baseline_date)
 
             # weekly_drawdown_pct: hafta başı equity'den anlık hesapla (baseline filtreli)
             today = date.today()

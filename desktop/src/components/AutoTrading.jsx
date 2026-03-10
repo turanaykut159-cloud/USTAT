@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.3 — Otomatik İşlem Paneli.
+ * ÜSTAT v5.4 — Otomatik İşlem Paneli.
  *
  * Layout:
  *   Üst:    4 stat kartı (Durum, Aktif Rejim, Lot Çarpanı, Oto. İşlem)
@@ -15,7 +15,7 @@ import {
   getStatus, getTop5, getPositions, getTrades, reactivateSymbols,
   getOgulActivity,
 } from '../services/api';
-import { formatMoney, formatPrice, pnlClass } from '../utils/formatters';
+import { formatMoney, formatPrice, pnlClass, elapsed } from '../utils/formatters';
 
 // ── Yardımcılar ──────────────────────────────────────────────────
 
@@ -262,46 +262,85 @@ export default function AutoTrading() {
           </div>
         </div>
 
-        {/* ── Sağ: Otomatik Pozisyonlar ─────────────────────────── */}
+        {/* ── Sağ: Otomatik Pozisyon Özeti ─────────────────────── */}
         <div className="auto-card">
           <h3>Otomatik Pozisyonlar</h3>
-          {autoPositions.length > 0 ? (
-            <table className="auto-table">
-              <thead>
-                <tr>
-                  <th>Sembol</th>
-                  <th>Yön</th>
-                  <th>Strateji</th>
-                  <th>Lot</th>
-                  <th>Giriş</th>
-                  <th>Anlık</th>
-                  <th>K/Z</th>
-                </tr>
-              </thead>
-              <tbody>
-                {autoPositions.map((pos) => (
-                  <tr key={pos.ticket}>
-                    <td className="mono">{pos.symbol}</td>
+          <div className="auto-empty-msg">
+            Açık poz: {autoPositions.length} | Toplam K/Z:{' '}
+            <span className={pnlClass(autoPositions.reduce((s, p) => s + (p.pnl || 0), 0))}>
+              {formatMoney(autoPositions.reduce((s, p) => s + (p.pnl || 0), 0))}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* ═══ AKTİF OTOMATİK POZİSYONLAR (tam genişlik) ═══════════ */}
+      <div className="op-table-wrap" style={{ marginTop: '20px' }}>
+        <h3 style={{ margin: '0 0 8px', fontSize: '14px', fontWeight: 600 }}>
+          Aktif Otomatik Pozisyonlar
+        </h3>
+        {autoPositions.length === 0 ? (
+          <div className="op-empty">
+            <span className="op-empty-icon">🤖</span>
+            <span>Açık otomatik pozisyon yok</span>
+          </div>
+        ) : (
+          <table className="op-table">
+            <thead>
+              <tr>
+                <th>Sembol</th>
+                <th>Yön</th>
+                <th>Strateji</th>
+                <th>Lot</th>
+                <th>Giriş Fiy.</th>
+                <th>Anlık Fiy.</th>
+                <th>SL</th>
+                <th>TP</th>
+                <th>K/Z</th>
+                <th>Oy</th>
+                <th>Süre</th>
+              </tr>
+            </thead>
+            <tbody>
+              {autoPositions.map((pos) => {
+                const posPnl = pos.pnl || 0;
+                const rowCls = posPnl > 0 ? 'op-row-profit' : posPnl < 0 ? 'op-row-loss' : '';
+                return (
+                  <tr key={pos.ticket} className={rowCls}>
+                    <td className="mono op-symbol">{pos.symbol}</td>
                     <td>
                       <span className={`dir-badge dir-badge--${(pos.direction || '').toLowerCase()}`}>
                         {pos.direction}
                       </span>
                     </td>
-                    <td className="text-dim">{pos.strategy || '—'}</td>
-                    <td className="mono">{pos.volume?.toFixed(2) ?? '—'}</td>
+                    <td className="text-dim">{pos.strategy || '\u2014'}</td>
+                    <td className="mono">{pos.volume?.toFixed(2) ?? '\u2014'}</td>
                     <td className="mono">{formatPrice(pos.entry_price)}</td>
                     <td className="mono">{formatPrice(pos.current_price)}</td>
-                    <td className={`mono ${pnlClass(pos.pnl)}`}>
-                      <b>{formatMoney(pos.pnl)}</b>
+                    <td className="mono text-dim">{pos.sl > 0 ? formatPrice(pos.sl) : '\u2014'}</td>
+                    <td className="mono text-dim">{pos.tp > 0 ? formatPrice(pos.tp) : '\u2014'}</td>
+                    <td className={`mono op-pnl-cell ${pnlClass(posPnl)}`}>
+                      <b>{formatMoney(posPnl)}</b>
                     </td>
+                    <td className="mono text-dim">{pos.voting_score || 0}/4</td>
+                    <td className="text-dim">{elapsed(pos.open_time)}</td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <div className="auto-empty-msg">Açık otomatik pozisyon yok</div>
-          )}
-        </div>
+                );
+              })}
+            </tbody>
+            {autoPositions.length > 1 && (
+              <tfoot>
+                <tr className="op-footer-row">
+                  <td colSpan={8}><b>TOPLAM</b></td>
+                  <td className={`mono ${pnlClass(autoPositions.reduce((s, p) => s + (p.pnl || 0), 0))}`}>
+                    <b>{formatMoney(autoPositions.reduce((s, p) => s + (p.pnl || 0), 0))}</b>
+                  </td>
+                  <td colSpan={2}></td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        )}
       </div>
 
       {/* ═══ ALT: Son Otomatik İşlemler ════════════════════════════ */}

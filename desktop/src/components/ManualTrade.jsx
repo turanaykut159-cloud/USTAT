@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.3 — Manuel İşlem Paneli (ManuelMotor).
+ * ÜSTAT v5.4 — Manuel İşlem Paneli (ManuelMotor).
  *
  * Kullanıcı sembol + yön + lot seçerek manuel işlem açar.
  * BABA risk kontrolü yapılır, kullanıcı pozisyonu yönetir.
@@ -13,8 +13,8 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { checkManualTrade, executeManualTrade, getTrades, getManualRiskScores } from '../services/api';
-import { formatMoney, formatPrice } from '../utils/formatters';
+import { checkManualTrade, executeManualTrade, getTrades, getManualRiskScores, getPositions, closePosition } from '../services/api';
+import { formatMoney, formatPrice, pnlClass, elapsed } from '../utils/formatters';
 
 // ── 15 VİOP Kontratı ────────────────────────────────────────────
 
@@ -49,6 +49,10 @@ export default function ManualTrade() {
   // ── Açık manuel pozisyon risk skorları ──────────────────────
   const [riskScores, setRiskScores] = useState({});
 
+  // ── Aktif manuel pozisyonlar (canlı) ──────────────────────
+  const [activePositions, setActivePositions] = useState([]);
+  const [closingTicket, setClosingTicket] = useState(null);
+
   // Son manuel işlemleri çek
   const fetchRecentTrades = useCallback(async () => {
     const res = await getTrades({ strategy: 'manual', limit: 10 });
@@ -61,12 +65,29 @@ export default function ManualTrade() {
     setRiskScores(res.scores || {});
   }, []);
 
+  // Aktif manuel pozisyonları çek
+  const fetchActivePositions = useCallback(async () => {
+    const res = await getPositions();
+    const manual = (res.positions || []).filter((p) => p.tur === 'Manuel');
+    setActivePositions(manual);
+  }, []);
+
+  // Pozisyon kapat
+  const handleClosePosition = useCallback(async (ticket) => {
+    setClosingTicket(ticket);
+    await closePosition(ticket);
+    setClosingTicket(null);
+    fetchActivePositions();
+    fetchRecentTrades();
+  }, [fetchActivePositions, fetchRecentTrades]);
+
   useEffect(() => {
     fetchRecentTrades();
     fetchRiskScores();
-    const iv = setInterval(() => { fetchRecentTrades(); fetchRiskScores(); }, 10000);
+    fetchActivePositions();
+    const iv = setInterval(() => { fetchRecentTrades(); fetchRiskScores(); fetchActivePositions(); }, 10000);
     return () => clearInterval(iv);
-  }, [fetchRecentTrades, fetchRiskScores]);
+  }, [fetchRecentTrades, fetchRiskScores, fetchActivePositions]);
 
   // ── Kontrol Et ───────────────────────────────────────────────
   const handleCheck = useCallback(async () => {
@@ -318,6 +339,79 @@ export default function ManualTrade() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* ═══ AKTİF MANUEL POZİSYONLAR ══════════════════════════════ */}
+      <div className="op-table-wrap" style={{ marginTop: '20px' }}>
+        <h3 style={{ margin: '0 0 8px', fontSize: '14px', fontWeight: 600 }}>
+          Aktif Manuel Pozisyonlar
+        </h3>
+        {activePositions.length === 0 ? (
+          <div className="op-empty">
+            <span className="op-empty-icon">📋</span>
+            <span>Açık manuel pozisyon yok</span>
+          </div>
+        ) : (
+          <table className="op-table">
+            <thead>
+              <tr>
+                <th>Sembol</th>
+                <th>Yön</th>
+                <th>Lot</th>
+                <th>Giriş Fiy.</th>
+                <th>Anlık Fiy.</th>
+                <th>K/Z</th>
+                <th>Süre</th>
+                <th>İşlem</th>
+              </tr>
+            </thead>
+            <tbody>
+              {activePositions.map((pos) => {
+                const posPnl = pos.pnl || 0;
+                const rowCls = posPnl > 0 ? 'op-row-profit' : posPnl < 0 ? 'op-row-loss' : '';
+                return (
+                  <tr key={pos.ticket} className={rowCls}>
+                    <td className="mono op-symbol">{pos.symbol}</td>
+                    <td>
+                      <span className={`dir-badge dir-badge--${(pos.direction || '').toLowerCase()}`}>
+                        {pos.direction}
+                      </span>
+                    </td>
+                    <td className="mono">{pos.volume?.toFixed(2) ?? '\u2014'}</td>
+                    <td className="mono">{formatPrice(pos.entry_price)}</td>
+                    <td className="mono">{formatPrice(pos.current_price)}</td>
+                    <td className={`mono op-pnl-cell ${pnlClass(posPnl)}`}>
+                      <b>{formatMoney(posPnl)}</b>
+                    </td>
+                    <td className="text-dim">{elapsed(pos.open_time)}</td>
+                    <td className="op-action-cell">
+                      <button
+                        type="button"
+                        className="op-close-btn"
+                        onClick={() => handleClosePosition(pos.ticket)}
+                        disabled={closingTicket === pos.ticket}
+                        title="Pozisyonu kapat"
+                      >
+                        {closingTicket === pos.ticket ? 'Kapatılıyor...' : 'Kapat'}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            {activePositions.length > 1 && (
+              <tfoot>
+                <tr className="op-footer-row">
+                  <td colSpan={5}><b>TOPLAM</b></td>
+                  <td className={`mono ${pnlClass(activePositions.reduce((s, p) => s + (p.pnl || 0), 0))}`}>
+                    <b>{formatMoney(activePositions.reduce((s, p) => s + (p.pnl || 0), 0))}</b>
+                  </td>
+                  <td colSpan={2}></td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        )}
       </div>
 
       {/* ── AÇIK MANUEL POZİSYON RİSK GÖSTERGELERİ ──────────────── */}

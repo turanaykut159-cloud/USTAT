@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.3 — Ayarlar ekranı.
+ * ÜSTAT v5.4 — Ayarlar ekranı.
  *
  * Bölümler:
  *   1. MT5 Bağlantı Bilgileri (sunucu, hesap, şifre maskeli)
@@ -19,8 +19,8 @@ import { getAccount, getStatus, getEvents, getRiskBaseline, updateRiskBaseline }
 
 // ── Sabitler ──────────────────────────────────────────────────────
 
-const VERSION = '5.3';
-const BUILD_DATE = '2026-03-08';
+const VERSION = '5.4';
+const BUILD_DATE = '2026-03-10';
 
 const DEFAULT_PREFS = {
   soundEnabled: true,
@@ -88,9 +88,10 @@ export default function Settings() {
   // MT5 şifre göster/gizle
   const [showLogin, setShowLogin] = useState(false);
 
-  // Risk Baseline Date — iki aşamalı doğrulama
-  const [baselineDate, setBaselineDate] = useState('');
+  // Risk Baseline Date+Time — iki aşamalı doğrulama
+  const [baselineDate, setBaselineDate] = useState('');       // "YYYY-MM-DD HH:MM" veya "YYYY-MM-DD"
   const [baselineDateInput, setBaselineDateInput] = useState('');
+  const [baselineTimeInput, setBaselineTimeInput] = useState('00:00');
   const [baselineStep, setBaselineStep] = useState('idle'); // idle | confirm | saving
   const [baselineMsg, setBaselineMsg] = useState('');
 
@@ -124,7 +125,10 @@ export default function Settings() {
     setEvents(evt.events || []);
     if (bl.baseline_date) {
       setBaselineDate(bl.baseline_date);
-      setBaselineDateInput(bl.baseline_date);
+      // "YYYY-MM-DD HH:MM" → date + time parçala
+      const parts = bl.baseline_date.split(' ');
+      setBaselineDateInput(parts[0] || '');
+      setBaselineTimeInput(parts[1] || '00:00');
     }
     setLoading(false);
   }, [logLimit]);
@@ -154,37 +158,45 @@ export default function Settings() {
   // ── Risk Baseline handlers ─────────────────────────────────────
 
   const handleBaselineChange = useCallback(() => {
-    const val = baselineDateInput.trim();
-    if (!val || val === baselineDate) {
-      setBaselineMsg('Tarih değişmedi.');
+    const datePart = baselineDateInput.trim();
+    const timePart = baselineTimeInput.trim() || '00:00';
+    const combined = datePart + ' ' + timePart;  // "YYYY-MM-DD HH:MM"
+    if (!datePart || combined === baselineDate) {
+      setBaselineMsg('Tarih/saat değişmedi.');
       return;
     }
     // Tarih formatı kontrolü
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(val)) {
-      setBaselineMsg('Geçersiz format. YYYY-MM-DD kullanın.');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+      setBaselineMsg('Geçersiz tarih formatı. YYYY-MM-DD kullanın.');
       return;
     }
-    // Geçerli tarih mi?
-    const d = new Date(val + 'T00:00:00');
+    // Saat formatı kontrolü
+    if (!/^\d{2}:\d{2}$/.test(timePart)) {
+      setBaselineMsg('Geçersiz saat formatı. HH:MM kullanın.');
+      return;
+    }
+    // Geçerli tarih+saat mi?
+    const d = new Date(datePart + 'T' + timePart + ':00');
     if (isNaN(d.getTime())) {
-      setBaselineMsg('Geçersiz tarih.');
+      setBaselineMsg('Geçersiz tarih/saat.');
       return;
     }
     // Gelecek tarih mi?
     if (d > new Date()) {
-      setBaselineMsg('Gelecek tarih kabul edilmez.');
+      setBaselineMsg('Gelecek tarih/saat kabul edilmez.');
       return;
     }
-    setBaselineMsg('Tarih ' + baselineDate + ' \u2192 ' + val + ' olarak de\u011fi\u015ftirilecek. Risk hesaplamalar\u0131 bu tarihten itibaren yeniden hesaplanacak.');
+    setBaselineMsg(baselineDate + ' \u2192 ' + combined + ' olarak de\u011fi\u015ftirilecek. Risk hesaplamalar\u0131 bu tarih/saatten itibaren yeniden hesaplanacak.');
     setBaselineStep('confirm');
-  }, [baselineDateInput, baselineDate]);
+  }, [baselineDateInput, baselineTimeInput, baselineDate]);
 
   const confirmBaselineChange = useCallback(async () => {
     setBaselineStep('saving');
     setBaselineMsg('Kaydediliyor...');
-    const result = await updateRiskBaseline(baselineDateInput);
+    const combined = baselineDateInput.trim() + ' ' + (baselineTimeInput.trim() || '00:00');
+    const result = await updateRiskBaseline(combined);
     if (result.success) {
-      setBaselineDate(baselineDateInput);
+      setBaselineDate(combined);
       setBaselineMsg('Ba\u015far\u0131l\u0131: ' + result.old_date + ' \u2192 ' + result.new_date);
       setBaselineStep('idle');
       setTimeout(() => setBaselineMsg(''), 4000);
@@ -192,10 +204,12 @@ export default function Settings() {
       setBaselineMsg('Hata: ' + result.message);
       setBaselineStep('idle');
     }
-  }, [baselineDateInput]);
+  }, [baselineDateInput, baselineTimeInput]);
 
   const cancelBaselineChange = useCallback(() => {
-    setBaselineDateInput(baselineDate);
+    const parts = baselineDate.split(' ');
+    setBaselineDateInput(parts[0] || '');
+    setBaselineTimeInput(parts[1] || '00:00');
     setBaselineStep('idle');
     setBaselineMsg('');
   }, [baselineDate]);
@@ -282,15 +296,25 @@ export default function Settings() {
                   setBaselineMsg('');
                 }}
               />
+              <input
+                type="time"
+                className="st-baseline-input st-baseline-time"
+                value={baselineTimeInput}
+                onChange={(e) => {
+                  setBaselineTimeInput(e.target.value);
+                  setBaselineStep('idle');
+                  setBaselineMsg('');
+                }}
+              />
             </div>
 
             {baselineStep === 'idle' && (
               <button
                 className="st-btn st-btn-primary"
                 onClick={handleBaselineChange}
-                disabled={!baselineDateInput || baselineDateInput === baselineDate}
+                disabled={!baselineDateInput || (baselineDateInput + ' ' + baselineTimeInput) === baselineDate}
               >
-                Tarihi Güncelle
+                Güncelle
               </button>
             )}
 

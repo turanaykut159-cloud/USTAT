@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import date
+from datetime import date, datetime
 
 from fastapi import APIRouter
 
-from api.deps import get_baba, get_engine
+from api.deps import get_baba, get_db, get_engine
 from api.schemas import (
     RiskBaselineGetResponse,
     RiskBaselineUpdateRequest,
@@ -62,23 +62,28 @@ async def update_risk_baseline(req: RiskBaselineUpdateRequest):
 
     new_date = req.new_date.strip()
 
-    # 1. Tarih formatı doğrula
-    if not re.match(r"^\d{4}-\d{2}-\d{2}$", new_date):
+    # 1. Tarih formatı doğrula: "YYYY-MM-DD" veya "YYYY-MM-DD HH:MM"
+    date_only = re.match(r"^\d{4}-\d{2}-\d{2}$", new_date)
+    date_time = re.match(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$", new_date)
+    if not date_only and not date_time:
         return RiskBaselineUpdateResponse(
-            message=f"Geçersiz tarih formatı: {new_date} (YYYY-MM-DD bekleniyor)"
+            message=f"Geçersiz format: {new_date} (YYYY-MM-DD veya YYYY-MM-DD HH:MM bekleniyor)"
         )
 
     try:
-        parsed = date.fromisoformat(new_date)
+        if date_time:
+            parsed_dt = datetime.strptime(new_date, "%Y-%m-%d %H:%M")
+        else:
+            parsed_dt = datetime.strptime(new_date, "%Y-%m-%d")
     except ValueError:
         return RiskBaselineUpdateResponse(
             message=f"Geçersiz tarih: {new_date}"
         )
 
     # Gelecek tarih kontrolü
-    if parsed > date.today():
+    if parsed_dt > datetime.now():
         return RiskBaselineUpdateResponse(
-            message=f"Gelecek tarih kabul edilmez: {new_date}"
+            message=f"Gelecek tarih/saat kabul edilmez: {new_date}"
         )
 
     # 2. Eski tarihi al
@@ -107,6 +112,17 @@ async def update_risk_baseline(req: RiskBaselineUpdateRequest):
         baba_module.RISK_BASELINE_DATE = new_date
     except Exception:
         pass
+
+    # 6. Peak equity sıfırla → drawdown mevcut equity'den yeniden başlasın
+    db = get_db()
+    if db:
+        snap = db.get_latest_risk_snapshot()
+        current_equity = snap.get("equity", 0.0) if snap else 0.0
+        if current_equity > 0:
+            db.set_state("peak_equity", str(current_equity))
+            logger.info(
+                f"Peak equity sıfırlandı: {current_equity:.2f} (baseline reset)"
+            )
 
     logger.info(
         f"Risk baseline tarihi güncellendi: {old_date} → {new_date}"

@@ -1,4 +1,4 @@
-/* ÜSTAT v5.3 — Tema Değişkenleri */
+/* ÜSTAT v5.4 — Tema Değişkenleri */
 
 /* ── Koyu Tema (varsayılan) ──────────────────────────────────── */
 :root {
@@ -3800,7 +3800,7 @@ h2 {
 .st-baseline-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
   margin-bottom: 12px;
 }
 
@@ -3813,6 +3813,10 @@ h2 {
   font-size: 13px;
   font-family: inherit;
   width: 160px;
+}
+
+.st-baseline-time {
+  width: 100px;
 }
 
 .st-baseline-input:focus {

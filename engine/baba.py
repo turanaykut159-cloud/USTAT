@@ -309,6 +309,9 @@ class Baba:
         # ── Cycle sayacı (fake analiz frekansı için) ──────────────────
         self._cycle_count: int = 0
 
+        # ── Cross-motor referansı (fake sinyal koruması) ─────────────
+        self.manuel_motor: Any | None = None  # main.py tarafından atanır
+
         # ── Kill-switch durumu ───────────────────────────────────────
         self._kill_switch_level: int = KILL_SWITCH_NONE
         self._kill_switch_details: dict[str, Any] = {}
@@ -1858,6 +1861,13 @@ class Baba:
         if not positions:
             return []
 
+        # Manuel pozisyon ticket'ları — fake sinyalden muaf
+        manual_tickets: set[int] = set()
+        if self.manuel_motor:
+            for t in self.manuel_motor.active_trades.values():
+                if t.ticket:
+                    manual_tickets.add(t.ticket)
+
         results: list[FakeAnalysis] = []
 
         for pos in positions:
@@ -1866,6 +1876,13 @@ class Baba:
             ticket = pos.get("ticket", 0)
 
             if not symbol or not direction:
+                continue
+
+            # Manuel pozisyonları atla — kullanıcı açar, kullanıcı kapatır
+            if ticket in manual_tickets:
+                logger.debug(
+                    f"Fake analiz: {symbol} ticket={ticket} manuel — atlanıyor"
+                )
                 continue
 
             analysis = self._analyze_fake_signal(symbol, direction, ticket)
