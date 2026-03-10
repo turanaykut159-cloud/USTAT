@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.2 — MT5 Yönetim Modülü (Main Process).
+ * ÜSTAT v5.3 — MT5 Yönetim Modülü (Main Process).
  *
  * Sorumluluklar:
  *   1. MT5 terminal64.exe spawn (normal kullanıcı, fire-and-forget)
@@ -281,44 +281,29 @@ async function launchMT5(options = {}) {
  * @returns {Promise<{ connected: boolean, account?: object, message: string }>}
  */
 function verifyMT5Connection() {
+  // API server üzerinden doğrulama (Electron child process'te mt5.initialize() askıda kalıyordu)
+  const http = require('http');
+
   return new Promise((resolve) => {
-    const script = [
-      'import json, sys',
-      'try:',
-      '    import MetaTrader5 as mt5',
-      '    if not mt5.initialize():',
-      '        print(json.dumps({"connected":False,"message":"mt5.initialize() basarisiz: "+str(mt5.last_error())}))',
-      '        sys.exit(0)',
-      '    info = mt5.account_info()',
-      '    if info is None:',
-      '        mt5.shutdown()',
-      '        print(json.dumps({"connected":False,"message":"account_info() None dondu"}))',
-      '        sys.exit(0)',
-      '    print(json.dumps({"connected":True,"message":"Baglanti basarili","account":{"login":info.login,"server":info.server,"balance":info.balance,"name":info.name}}))',
-      '    mt5.shutdown()',
-      'except Exception as e:',
-      '    print(json.dumps({"connected":False,"message":str(e)}))',
-    ].join('\n');
+    const req = http.get('http://127.0.0.1:8000/api/mt5/verify', { timeout: 10000 }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(data));
+        } catch {
+          resolve({ connected: false, message: 'API yanıtı okunamadı.' });
+        }
+      });
+    });
 
-    execFile(PYTHON_PATH, ['-c', script], {
-      timeout: 15000,
-      encoding: 'utf-8',
-    }, (error, stdout) => {
-      if (error) {
-        resolve({
-          connected: false,
-          message: error.code === 'ENOENT'
-            ? `Python bulunamadi: ${PYTHON_PATH}`
-            : `Dogrulama hatasi: ${error.message}`,
-        });
-        return;
-      }
+    req.on('error', (err) => {
+      resolve({ connected: false, message: `API erişim hatası: ${err.message}` });
+    });
 
-      try {
-        resolve(JSON.parse(stdout.trim()));
-      } catch {
-        resolve({ connected: false, message: 'Dogrulama sonucu okunamadi.' });
-      }
+    req.on('timeout', () => {
+      req.destroy();
+      resolve({ connected: false, message: 'API zaman aşımı (10sn).' });
     });
   });
 }

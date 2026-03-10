@@ -6,13 +6,16 @@ Sharpe ratio, max drawdown, equity eğrisi.
 
 from __future__ import annotations
 
+import logging
 import math
 from collections import defaultdict
 
 from fastapi import APIRouter, Query
 
 from api.constants import STATS_BASELINE
-from api.deps import get_db, get_engine
+from api.deps import get_db
+
+logger = logging.getLogger("ustat.api.routes.performance")
 from api.schemas import EquityPoint, PerformanceResponse
 
 router = APIRouter()
@@ -22,13 +25,10 @@ router = APIRouter()
 async def get_performance(
     days: int = Query(30, ge=1, le=365, description="Performans penceresi (gün)"),
 ):
-    """Performans metriklerini hesapla. MT5'te değişim olduğunda anlık: önce son 3 gün sync."""
-    engine = get_engine()
-    if engine and getattr(engine.mt5, "_connected", False):
-        try:
-            engine.sync_mt5_history_recent(3)
-        except Exception:
-            pass
+    """Performans metriklerini hesapla.
+
+    Sync, engine cycle'ında event-driven yapılır (_check_position_closures).
+    """
     db = get_db()
     if not db:
         return PerformanceResponse()

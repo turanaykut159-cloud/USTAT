@@ -8,12 +8,15 @@ POST /api/trades/sync   — MT5 işlem geçmişi senkronizasyonu
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Query
 
 from api.constants import STATS_BASELINE
 from api.deps import get_db, get_engine
+
+logger = logging.getLogger("ustat.api.routes.trades")
 from api.schemas import (
     ApproveRequest,
     ApproveResponse,
@@ -72,8 +75,8 @@ def _duration_minutes(entry: str | None, exit_: str | None) -> float | None:
                 continue
         if t_in and t_out:
             return (t_out - t_in).total_seconds() / 60.0
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Duration hesaplama hatası: %s", e)
     return None
 
 
@@ -88,13 +91,10 @@ async def get_trades(
     since: str | None = Query(None, description="Başlangıç tarihi (YYYY-MM-DD)"),
     limit: int = Query(100, ge=1, le=1000, description="Maks kayıt"),
 ):
-    """İşlem geçmişini filtreli olarak döndür. MT5'te değişim olduğunda anlık: önce son 3 gün sync."""
-    engine = get_engine()
-    if engine and getattr(engine.mt5, "_connected", False):
-        try:
-            engine.sync_mt5_history_recent(3)
-        except Exception:
-            pass
+    """İşlem geçmişini filtreli olarak döndür.
+
+    Sync, engine cycle'ında event-driven yapılır (_check_position_closures).
+    """
     db = get_db()
     if not db:
         return TradesResponse()
@@ -121,14 +121,8 @@ async def get_trade_stats(
 
     En kârlı, en zararlı, en uzun, en kısa işlemler.
     Strateji ve sembol bazlı kırılımlar.
-    MT5'te değişim olduğunda anlık: önce son 3 gün sync.
+    Sync, engine cycle'ında event-driven yapılır (_check_position_closures).
     """
-    engine = get_engine()
-    if engine and getattr(engine.mt5, "_connected", False):
-        try:
-            engine.sync_mt5_history_recent(3)
-        except Exception:
-            pass
     db = get_db()
     if not db:
         return TradeStatsResponse()

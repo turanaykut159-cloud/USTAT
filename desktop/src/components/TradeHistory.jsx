@@ -48,7 +48,7 @@ const SORT_BUTTONS = [
 ];
 
 // Varsayılan filtre değerleri
-const DEFAULT_PERIOD = '1m';
+const DEFAULT_PERIOD = 'all';
 const DEFAULT_SYMBOL = 'all';
 const DEFAULT_DIR = 'all';
 const DEFAULT_RESULT = 'all';
@@ -659,11 +659,11 @@ export default function TradeHistory() {
 //  ALT BİLEŞEN: Panel satırı
 // ═══════════════════════════════════════════════════════════════════
 
-function PanelRow({ label, value, cls }) {
+const PanelRow = React.memo(function PanelRow({ label, value, cls }) {
   return (
     <div className="th-pr">
       <span className="th-pr-label">{label}</span>
       <span className={`th-pr-value ${cls || ''}`}>{value}</span>
     </div>
   );
-}
+});

@@ -588,7 +588,7 @@ export default function Dashboard() {
 //  ALT BİLEŞENLER
 // ═══════════════════════════════════════════════════════════════════
 
-function AccountItem({ label, value, cls }) {
+const AccountItem = React.memo(function AccountItem({ label, value, cls }) {
   return (
     <div className="dash-account-item">
       <span className="dash-account-label">{label}</span>
@@ -597,10 +597,10 @@ function AccountItem({ label, value, cls }) {
       </span>
     </div>
   );
-}
+});
 
 
-function StatCard({ label, sublabel, value, total, detail, icon, color }) {
+const StatCard = React.memo(function StatCard({ label, sublabel, value, total, detail, icon, color }) {
   return (
     <div className="dash-stat-card">
       <div className="dash-stat-top">
@@ -620,4 +620,4 @@ function StatCard({ label, sublabel, value, total, detail, icon, color }) {
       )}
     </div>
   );
-}
+});

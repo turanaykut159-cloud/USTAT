@@ -167,38 +167,6 @@ export async function verifyMT5Connection() {
   }
 }
 
-/**
- * MT5 pencere durumunu kontrol et.
- * OTP dialog'u açık mı?
- *
- * @returns {Promise<{ mt5_found: boolean, otp_dialog: boolean }>}
- */
-export async function checkMT5Window() {
-  const api = getAPI();
-  if (!api) return { mt5_found: false, otp_dialog: false };
-
-  try {
-    return await api.checkMT5Window();
-  } catch (err) {
-    console.error('[MT5Launcher] Pencere kontrol hatası:', err);
-    return { mt5_found: false, otp_dialog: false };
-  }
-}
-
-// ── MT5 Durum Dinleyicisi ────────────────────────────────────────
-
-/**
- * MT5 durum değişikliklerini dinle.
- *
- * @param {function} callback - ({ running: boolean }) => void
- */
-export function onMT5StatusChange(callback) {
-  const api = getAPI();
-  if (!api) return;
-
-  api.onMT5StatusChange(callback);
-}
-
 // ── Otomatik Başlatma Akışı ─────────────────────────────────────
 
 /**
