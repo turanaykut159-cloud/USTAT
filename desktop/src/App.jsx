@@ -6,7 +6,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { HashRouter, Routes, Route } from 'react-router-dom';
+import { HashRouter, Routes, Route, useLocation } from 'react-router-dom';
 import TopBar from './components/TopBar';
 import SideNav from './components/SideNav';
 import LockScreen from './components/LockScreen';
@@ -20,6 +20,16 @@ import AutoTrading from './components/AutoTrading';
 import Monitor from './components/Monitor';
 import Settings from './components/Settings';
 import ErrorBoundary from './components/ErrorBoundary';
+
+/** Her route'u ayri ErrorBoundary ile sarar — bir sayfa cokerse diger sayfalar etkilenmez. */
+function RouteBoundary({ label, children }) {
+  const { pathname } = useLocation();
+  return (
+    <ErrorBoundary resetKey={pathname} label={label}>
+      {children}
+    </ErrorBoundary>
+  );
+}
 
 export default function App() {
   const [isLocked, setIsLocked] = useState(true);
@@ -43,19 +53,17 @@ export default function App() {
         <div className="app-body">
           <SideNav />
           <main className="app-content">
-            <ErrorBoundary>
-              <Routes>
-                <Route path="/" element={<Dashboard />} />
-                <Route path="/manual" element={<ManualTrade />} />
-                <Route path="/hybrid" element={<HybridTrade />} />
-                <Route path="/auto" element={<AutoTrading />} />
-                <Route path="/trades" element={<TradeHistory />} />
-                <Route path="/performance" element={<Performance />} />
-                <Route path="/risk" element={<RiskManagement />} />
-                <Route path="/monitor" element={<Monitor />} />
-                <Route path="/settings" element={<Settings />} />
-              </Routes>
-            </ErrorBoundary>
+            <Routes>
+              <Route path="/" element={<RouteBoundary label="Dashboard"><Dashboard /></RouteBoundary>} />
+              <Route path="/manual" element={<RouteBoundary label="Manuel"><ManualTrade /></RouteBoundary>} />
+              <Route path="/hybrid" element={<RouteBoundary label="Hibrit"><HybridTrade /></RouteBoundary>} />
+              <Route path="/auto" element={<RouteBoundary label="Oto"><AutoTrading /></RouteBoundary>} />
+              <Route path="/trades" element={<RouteBoundary label="Islem Gecmisi"><TradeHistory /></RouteBoundary>} />
+              <Route path="/performance" element={<RouteBoundary label="Performans"><Performance /></RouteBoundary>} />
+              <Route path="/risk" element={<RouteBoundary label="Risk"><RiskManagement /></RouteBoundary>} />
+              <Route path="/monitor" element={<RouteBoundary label="Monitor"><Monitor /></RouteBoundary>} />
+              <Route path="/settings" element={<RouteBoundary label="Ayarlar"><Settings /></RouteBoundary>} />
+            </Routes>
           </main>
         </div>
       </div>

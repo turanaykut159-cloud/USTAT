@@ -49,10 +49,7 @@ logger = get_logger(__name__)
 # ═════════════════════════════════════════════════════════════════════
 
 CYCLE_INTERVAL: int = 10          # ana döngü aralığı (saniye)
-# MT5 kopma: heartbeat'ta tek reconnect (launch=False); çoklu deneme MT5Bridge içinde
-MAX_MT5_RECONNECT: int = 5        # Dokümantasyon / ileride kullanım için (heartbeat'ta kullanılmıyor)
 DB_ERROR_THRESHOLD: int = 3       # art arda DB hatası → sistem durdur
-SHUTDOWN_TIMEOUT: int = 30        # graceful shutdown bekleme (saniye)
 CLOSURE_SYNC_LOOKBACK_DAYS: int = 3  # kapanma sync lookback (gün)
 CLOSURE_RETRY_INTERVAL: int = 6   # pending ticket retry aralığı (cycle = 60sn)
 
@@ -206,14 +203,16 @@ class Engine:
         self._running = True
         self._main_loop()
 
-    def stop(self, reason: str = "kullanıcı isteği", close_positions: bool = False) -> None:
+    def stop(self, reason: str = "kullanıcı isteği", close_positions: bool | None = None) -> None:
         """Engine'i durdur — graceful shutdown.
 
         Args:
             reason: Durdurma nedeni (log için).
             close_positions: True ise MT5'teki tüm açık pozisyonlar
                              kapatılır (BABA mekanizması ile 3 retry).
-                             False (varsayılan) ise pozisyonlar açık kalır.
+                             False ise pozisyonlar açık kalır.
+                             None (varsayılan, auto mod) ise MT5 bağlantısı
+                             varsa kapatma denenir, yoksa sadece uyarı yazılır.
         """
         if not self._running:
             return
@@ -222,13 +221,39 @@ class Engine:
         self._running = False
         self._shutdown_requested = True
 
-        # Açık pozisyonları kapat (istenirse)
+        # Açık pozisyon sayıları
         active = len(self.ogul.active_trades)
         hybrid_count = len(self.h_engine.hybrid_positions)
+        manual_count = len(self.manuel_motor.active_trades)
+        total_open = active + hybrid_count + manual_count
 
-        if close_positions and (active > 0 or hybrid_count > 0):
+        # Auto mod: MT5 bağlantısı varsa ve açık pozisyon varsa kapatmayı dene
+        if close_positions is None:
+            if total_open > 0 and self.mt5.is_connected:
+                close_positions = True
+                logger.info(
+                    f"Otomatik kapatma aktif — MT5 bağlı, "
+                    f"{total_open} açık pozisyon ({active} aktif + "
+                    f"{hybrid_count} hibrit + {manual_count} manuel)"
+                )
+            elif total_open > 0:
+                close_positions = False
+                logger.warning(
+                    f"MT5 bağlantısı yok — {total_open} açık pozisyon "
+                    f"kapatılamıyor! Pozisyonlar MT5'te açık kalacak."
+                )
+                self._log_event_safe(
+                    "ENGINE_STOP",
+                    f"MT5 bağlantısız halt: {total_open} pozisyon açık kaldı",
+                    "CRITICAL",
+                )
+            else:
+                close_positions = False
+
+        if close_positions and total_open > 0:
             logger.info(
-                f"Pozisyonlar kapatılıyor: {active} aktif + {hybrid_count} hibrit"
+                f"Pozisyonlar kapatılıyor: {active} aktif + "
+                f"{hybrid_count} hibrit + {manual_count} manuel"
             )
             try:
                 failed = self.baba._close_all_positions("ENGINE_STOP")
@@ -245,17 +270,12 @@ class Engine:
                     logger.info("Tüm pozisyonlar başarıyla kapatıldı.")
             except Exception as exc:
                 logger.error(f"Pozisyon kapatma hatası: {exc}")
-        else:
-            if active > 0:
-                logger.warning(
-                    f"DİKKAT: {active} aktif işlem var — "
-                    f"pozisyonlar MT5'te açık kalacak!"
-                )
-            if hybrid_count > 0:
-                logger.warning(
-                    f"DİKKAT: {hybrid_count} hibrit pozisyon var — "
-                    f"pozisyonlar MT5'te açık kalacak!"
-                )
+        elif not close_positions and total_open > 0:
+            logger.warning(
+                f"DİKKAT: {total_open} açık pozisyon var — "
+                f"pozisyonlar MT5'te açık kalacak! "
+                f"({active} aktif + {hybrid_count} hibrit + {manual_count} manuel)"
+            )
 
         # MT5 bağlantısını kapat
         try:
@@ -643,10 +663,11 @@ class Engine:
         return self.mt5.connect(launch=True)
 
     def _heartbeat_mt5(self) -> bool:
-        """MT5 bağlantı kontrolü — kopmuşsa bir kez reconnect dener.
+        """MT5 bağlantı kontrolü — kopmuşsa 3 kez reconnect dener.
 
-        Heartbeat başarısızsa yalnızca bir kez connect(launch=False) çağrılır.
-        Çoklu reconnect denemesi MT5Bridge içinde yapılır; burada tek deneme.
+        Heartbeat başarısızsa connect(launch=False) ile 3 deneme yapılır.
+        Her deneme MT5Bridge içindeki MAX_RETRIES_RECONNECT (3) deneme ile
+        çarpılır — toplam 3×3=9 deneme, max ~42sn.
         MT5 kapalıysa açmaz, sadece çalışan MT5'e bağlanmaya çalışır.
 
         Returns:
@@ -658,16 +679,31 @@ class Engine:
         if self.mt5.heartbeat():
             return True
 
-        # Heartbeat başarısız — son kez reconnect dene (MT5 açmaz!)
-        logger.warning("MT5 heartbeat başarısız — reconnect deneniyor (launch=False)...")
-        if self.mt5.connect(launch=False):
-            logger.info("MT5 reconnect başarılı.")
-            self._log_event_safe(
-                "MT5_RECONNECT", "MT5 bağlantısı yeniden kuruldu", "WARNING"
+        # Heartbeat başarısız — 3 kez reconnect dene (MT5 açmaz!)
+        max_heartbeat_retries = 3
+        for attempt in range(1, max_heartbeat_retries + 1):
+            logger.warning(
+                f"MT5 heartbeat başarısız — reconnect deneniyor "
+                f"({attempt}/{max_heartbeat_retries}, launch=False)..."
             )
-            return True
+            if self.mt5.connect(launch=False):
+                logger.info(f"MT5 reconnect başarılı (deneme {attempt}).")
+                self._log_event_safe(
+                    "MT5_RECONNECT",
+                    f"MT5 bağlantısı yeniden kuruldu (deneme {attempt})",
+                    "WARNING",
+                )
+                return True
 
-        # Denemeler başarısız — MT5 kapalı veya erişilemez
+            # Son deneme değilse kısa bekle
+            if attempt < max_heartbeat_retries:
+                _time.sleep(2)
+
+        # Tüm denemeler başarısız — MT5 kapalı veya erişilemez
+        logger.critical(
+            f"MT5 reconnect {max_heartbeat_retries} denemede başarısız — "
+            f"sistem durduruluyor"
+        )
         return False
 
     # ═════════════════════════════════════════════════════════════════
@@ -847,35 +883,88 @@ class Engine:
     def _restore_state(self) -> None:
         """Engine restart: durumu geri yükle.
 
+        Kritik bileşenler (BABA) başarısız olursa diğer bileşenler de
+        sıfırdan başlar — partial restore (ör. risk limitleri eski,
+        trade'ler yeni) tutarsızlığını önlemek için.
+
         1. BABA risk state → kill-switch, cooldown, kayıp sayaçları
         2. OĞUL active trades → açık pozisyonları MT5'ten oku
+        3. H-Engine hibrit pozisyonlar → DB + MT5
+        4. ManuelMotor aktif işlemler → MT5
         """
+        restore_results: dict[str, bool] = {}
+
+        # ── BABA: Kritik — risk yönetimi durumu ─────────────────
         try:
             self.baba.restore_risk_state()
             logger.info("BABA risk durumu geri yüklendi.")
+            restore_results["baba"] = True
         except Exception as exc:
             logger.error(f"BABA restore hatası: {exc}")
+            restore_results["baba"] = False
 
+        # ── BABA başarısızsa diğer bileşenlerin restore'u tehlikeli
+        #    Risk limitleri bilinmeden trade yönetimi tutarsız olur
+        if not restore_results["baba"]:
+            logger.critical(
+                "BABA restore başarısız — risk state bilinmiyor. "
+                "Tüm bileşenler temiz başlatılacak (partial restore önlendi). "
+                "Engine güvenli modda çalışacak."
+            )
+            self._log_event_safe(
+                "RESTORE_PARTIAL_ABORT",
+                "BABA restore başarısız — partial restore önlendi, temiz başlangıç",
+                "CRITICAL",
+            )
+            # OĞUL/H-Engine/ManuelMotor restore atlanır, temiz başlarlar.
+            # MT5'te açık pozisyonlar sonraki cycle'da _check_position_closures
+            # ile tespit edilir ve sync edilir.
+            return
+
+        # ── OĞUL: Aktif trade'leri MT5'ten geri yükle ────────────
         try:
             self.ogul.restore_active_trades()
             active = len(self.ogul.active_trades)
             logger.info(f"OĞUL aktif işlemler geri yüklendi: {active} adet")
+            restore_results["ogul"] = True
         except Exception as exc:
             logger.error(f"OĞUL restore hatası: {exc}")
+            restore_results["ogul"] = False
 
+        # ── H-Engine: Hibrit pozisyonlar ─────────────────────────
         try:
             self.h_engine.restore_positions()
             hybrid_count = len(self.h_engine.hybrid_positions)
             logger.info(f"H-Engine hibrit pozisyonlar geri yüklendi: {hybrid_count} adet")
+            restore_results["h_engine"] = True
         except Exception as exc:
             logger.error(f"H-Engine restore hatası: {exc}")
+            restore_results["h_engine"] = False
 
+        # ── ManuelMotor: Manuel işlemler ─────────────────────────
         try:
             self.manuel_motor.restore_active_trades()
             manual_count = len(self.manuel_motor.active_trades)
             logger.info(f"ManuelMotor aktif işlemler geri yüklendi: {manual_count} adet")
+            restore_results["manuel"] = True
         except Exception as exc:
             logger.error(f"ManuelMotor restore hatası: {exc}")
+            restore_results["manuel"] = False
+
+        # ── Sonuç özeti ──────────────────────────────────────────
+        failed = [k for k, v in restore_results.items() if not v]
+        if failed:
+            logger.warning(
+                f"State restore kısmen başarılı — başarısız: {failed}. "
+                f"İlgili bileşenler temiz başlatıldı."
+            )
+            self._log_event_safe(
+                "RESTORE_PARTIAL",
+                f"Kısmi restore: başarısız bileşenler: {failed}",
+                "WARNING",
+            )
+        else:
+            logger.info("Tüm bileşenler başarıyla geri yüklendi.")
 
 
 # ═════════════════════════════════════════════════════════════════════

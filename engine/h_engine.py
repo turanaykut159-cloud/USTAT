@@ -29,8 +29,7 @@ Güvenlik:
 
 from __future__ import annotations
 
-import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, time as dtime, date
 from typing import Any, TYPE_CHECKING
 
@@ -123,6 +122,10 @@ class HEngine:
         # ── Günlük PnL takibi ─────────────────────────────────────
         self._daily_hybrid_pnl: float = 0.0
         self._daily_pnl_date: str = date.today().isoformat()
+
+        # ── Software SL/TP kapatma retry sayaçları ─────────────
+        self._close_retry_counts: dict[int, int] = {}  # ticket → retry sayısı
+        _MAX_CLOSE_RETRIES: int = 3  # max kapatma denemesi
 
         # ── Config parametreleri ──────────────────────────────────
         hybrid_cfg = config.get("hybrid", {})
@@ -586,18 +589,43 @@ class HEngine:
         reason = "SOFTWARE_SL" if sl_hit else "SOFTWARE_TP"
         triggered_level = hp.current_sl if sl_hit else hp.current_tp
 
+        # Retry limiti kontrolü — sonsuz döngüyü önle
+        retry_count = self._close_retry_counts.get(hp.ticket, 0)
+        if retry_count >= self._MAX_CLOSE_RETRIES:
+            if retry_count == self._MAX_CLOSE_RETRIES:
+                logger.critical(
+                    f"Software {reason} kapatma {self._MAX_CLOSE_RETRIES}x başarısız: "
+                    f"ticket={hp.ticket} {hp.symbol} — MANUEL KAPATMA GEREKLİ! "
+                    f"Daha fazla deneme yapılmayacak."
+                )
+                from engine.event_bus import emit as _emit
+                _emit("close_failed", {
+                    "ticket": hp.ticket,
+                    "symbol": hp.symbol,
+                    "reason": reason,
+                    "message": f"Pozisyon {self._MAX_CLOSE_RETRIES}x kapatılamadı — manuel müdahale gerekli",
+                })
+                self._close_retry_counts[hp.ticket] = retry_count + 1
+            return False
+
         logger.info(
             f"Software {reason}: ticket={hp.ticket} {hp.symbol} {hp.direction} "
             f"fiyat={current_price:.4f} seviye={triggered_level:.4f} — kapatılıyor"
+            f" (deneme {retry_count + 1}/{self._MAX_CLOSE_RETRIES})"
         )
 
         # TRADE_ACTION_DEAL ile kapat
         close_result = self.mt5.close_position(hp.ticket)
         if close_result is None:
+            self._close_retry_counts[hp.ticket] = retry_count + 1
             logger.error(
-                f"Software {reason} kapatma başarısız: ticket={hp.ticket} {hp.symbol}"
+                f"Software {reason} kapatma başarısız: ticket={hp.ticket} {hp.symbol} "
+                f"(deneme {retry_count + 1}/{self._MAX_CLOSE_RETRIES})"
             )
             return False
+
+        # Başarılı kapatma — retry sayacını temizle
+        self._close_retry_counts.pop(hp.ticket, None)
 
         total_pnl = profit + swap
         self._finalize_close(hp, reason, total_pnl, swap)

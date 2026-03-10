@@ -1,4 +1,4 @@
-# ÜSTAT v5.2 — Gelişim Tarihçesi
+# ÜSTAT v5.3 — Gelişim Tarihçesi
 
 ---
 
@@ -1190,3 +1190,132 @@ Bu düzeltmeler native SLTP çalışmadığı için sorunu çözmedi ama kod kal
 - desktop/src/components/LockScreen.jsx (splash ekrani)
 - desktop/src/styles/theme.css (CSS baslik yorumu)
 - 17 dosyada JSDoc yorum basliklari (v5.2 → v5.3)
+
+---
+
+## #14 — Ölü Kod Temizliği + Performans Optimizasyonu (2026-03-09)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-09 |
+| **Neden** | Kod tabanı analizi: ~1010 satır ölü kod, gereksiz per-request MT5 sync, aşırı agresif polling (3-5 sn), per-statement DB commit, React bileşenlerinde gereksiz re-render, MT5 verify race condition |
+| **Kök Neden** | Geliştirme sürecinde kullanılmayan kodlar birikmiş, performans optimizasyonları hiç yapılmamış |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `desktop/src/components/OpenPositions.jsx` | Silindi — Dashboard'a absorbe edilmiş, hiç import edilmiyordu (385 satır) |
+| `engine/utils/constants.py` | Silindi — tüm sabitleri başka dosyalarda tanımlı (75 satır) |
+| `desktop/src/services/storage.js` | Silindi — hiçbir bileşen kullanmıyordu (51 satır) |
+| `api/schemas.py` | Kullanılmayan `datetime` import kaldırıldı |
+| `api/routes/settings.py` | Kullanılmayan `datetime` import kaldırıldı |
+| `engine/h_engine.py` | Kullanılmayan `logging` ve `field` importları kaldırıldı |
+| `engine/data_pipeline.py` | Kullanılmayan `json` ve `field` importları kaldırıldı |
+| `engine/main.py` | Kullanılmayan `MAX_MT5_RECONNECT`, `SHUTDOWN_TIMEOUT` sabitleri kaldırıldı |
+| `engine/__init__.py` | Kullanılmayan `VERSION` sabiti kaldırıldı |
+| `engine/database.py` | 16 kullanılmayan DB metodu kaldırıldı (~292 satır): `delete_trade`, strategy CRUD (5 metot), `delete_top5`, config_history (3 metot), `get_interventions`, `delete_interventions`, `insert_liquidity`, `delete_liquidity`, `get_watched_symbols`, `table_counts` |
+| `engine/database.py` | `sync_mt5_trades()` batch transaction: per-statement commit → tek commit (I/O optimizasyonu) |
+| `engine/database.py` | `insert_bars()` df.iterrows() → df.itertuples() (~100x hız artışı) |
+| `desktop/preload.js` | 7 ölü IPC expose kaldırıldı: `checkMT5Window`, `getEngineStatus`, `startEngine`, `stopEngine`, `onTradeUpdate`, `onStatusChange`, `onMT5StatusChange` |
+| `desktop/main.js` | 5 ölü IPC handler + 1 ölü emit kaldırıldı |
+| `desktop/src/services/mt5Launcher.js` | Kullanılmayan `onMT5StatusChange` wrapper kaldırıldı |
+| `engine/utils/time_utils.py` | Kullanılmayan `is_lunch_break()`, `seconds_to_close()` ve ilgili sabitler kaldırıldı |
+| `engine/utils/indicators.py` | Kullanılmayan `normalized_atr()`, `adx_slope()`, `hurst_exponent()` kaldırıldı |
+| `engine/event_bus.py` | Kullanılmayan `on()`, `off()` fonksiyonları kaldırıldı |
+| `api/routes/trades.py` | GET /trades ve /trades/stats'tan per-request `sync_mt5_history_recent(3)` kaldırıldı |
+| `api/routes/performance.py` | GET /performance'tan per-request `sync_mt5_history_recent(3)` kaldırıldı, kullanılmayan `get_engine` import kaldırıldı |
+| `desktop/src/components/Monitor.jsx` | Poll aralığı 3s → 10s, alt bileşenler `React.memo` ile sarmalandı (Badge, StatCard, Arrow, ResponseBar) |
+| `desktop/src/components/RiskManagement.jsx` | Poll aralığı 5s → 10s, `RiskBar` bileşeni `React.memo` ile sarmalandı |
+| `desktop/src/components/Dashboard.jsx` | `AccountItem` ve `StatCard` alt bileşenleri `React.memo` ile sarmalandı |
+| `desktop/src/components/TradeHistory.jsx` | `PanelRow` alt bileşeni `React.memo` ile sarmalandı |
+| `api/routes/mt5_verify.py` | Race condition düzeltmesi: engine çalışırken `mt5.initialize()/shutdown()` yerine engine'in bağlantı durumu döndürülüyor |
+
+### Eklenen
+- `api/routes/mt5_verify.py` — Engine-aware verify mekanizması (race condition önleme)
+
+### Çıkartılan
+- 3 kullanılmayan dosya (511 satır)
+- 16 kullanılmayan DB metodu (292 satır)
+- 7 ölü IPC zinciri expose + 6 handler (43 satır)
+- 5 kullanılmayan Python fonksiyon + 3 kullanılmayan JS fonksiyon (~200 satır)
+- 6 kullanılmayan import + 3 kullanılmayan sabit
+- 3 × per-request MT5 sync çağrısı (Dashboard açılışında 3 paralel blok kaldırıldı)
+- **Toplam: ~1050+ satır ölü kod temizlendi**
+
+### Performans Kazanımları
+- API request latency: MT5 sync kaldırıldı → her GET isteği ~100-500ms daha hızlı
+- Monitor sayfası: 3s × 6 endpoint → 10s × 6 endpoint (%70 daha az backend yükü)
+- Risk sayfası: 5s → 10s (%50 daha az backend yükü)
+- sync_mt5_trades: N × commit → 1 commit (SQLite I/O azaltma)
+- insert_bars: iterrows → itertuples (~100x hız artışı)
+- React bileşenler: memo ile gereksiz re-render engellendi
+
+---
+
+## #38 — Kurumsal Değerlendirme Eleştiri Düzeltmeleri (2026-03-10)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-10 |
+| **Neden** | Kurumsal değerlendirme dokümanındaki eleştiriler kod tabanıyla doğrulandı. 9 eleştiriden 2'si tam doğru (halt pozisyon riski, OTP kırılganlığı), 3'ü kısmen doğru (lot çarpanı etiketi, hibrit olay formatı, TopBar terim belirsizliği), 4'ü yanlış/abartılı bulundu. Doğru ve kısmen doğru eleştiriler düzeltildi. |
+| **Kök Neden** | (1) stop() fonksiyonu tüm halt senaryolarında close_positions=False varsayılan — açık pozisyonlar MT5'te yetim kalıyordu. (2) UI'da iki farklı konsept aynı etiketle gösteriliyordu. (3) Hibrit olay detayları kısmen ham JSON gösteriliyordu. (4) ÜSTAT Analiz placeholder kartları backend veri hazır olmasına rağmen bağlanmamıştı. |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `engine/main.py` | stop() fonksiyonu: close_positions varsayılanı `False` → `None` (auto mod). MT5 bağlantısı varsa otomatik kapatma dener, yoksa sadece uyarı yazar. Manuel motor pozisyonları da sayılmaya başlandı. |
+| `desktop/src/components/RiskManagement.jsx` | Rejim kartında "Lot Çarpanı" → "Rejim Çarpanı" etiket düzeltmesi (risk_multiplier vs lot_multiplier karışıklığı giderildi) |
+| `desktop/src/components/TopBar.jsx` | Phase badge (AKTİF/PASIF) ve Kill-Switch badge (L1/L2/L3) için açıklayıcı tooltip eklendi |
+| `desktop/src/components/HybridTrade.jsx` | Olay detayları event türüne göre zengin format: TRANSFER (giriş/lot/SL/TP), BREAKEVEN, TRAILING_UPDATE, CLOSE (neden+K/Z+swap), REMOVE. Fallback ham string korundu. |
+| `desktop/src/components/Performance.jsx` | 3 placeholder kart ("Yakında") → veri varsa gerçek içerik gösterimi: Hata Atama Raporu, Ertesi Gün Analizi, Regülasyon Önerileri |
+| `desktop/src/styles/theme.css` | ÜSTAT beyin panelleri CSS sınıfları eklendi (.pf-brain-*) |
+
+### Eklenen
+- Auto mod halt pozisyon kapatma mantığı (engine/main.py)
+- TopBar tooltip açıklamaları (Phase + Kill-Switch)
+- Hibrit olay türüne göre 5 özel format (TRANSFER, BREAKEVEN, TRAILING_UPDATE, CLOSE, REMOVE)
+- ÜSTAT beyin panelleri gerçek veri binding (3 kart) + CSS
+
+### Yanlış Bulunan Eleştiriler (düzeltme gerekmedi)
+- "ÜSTAT Analiz olgunlaşmamış" → Kod hazır, veri yokluğundan boş görünüyordu
+- "Neden işlem yok açıklaması eksik" → "Açılamayan İşlemler" bölümünde mevcut
+- "EOD sadece OĞUL için" → OĞUL + Hibrit her ikisi için 17:45'te çalışıyor
+- "Lot çarpanı çelişkisi" → İki farklı konsept doğru gösteriliyordu, sadece etiket kafa karıştırıcıydı
+
+---
+
+## #39 — Sürdürülebilirlik ve Çökme Direnci İyileştirmeleri (2026-03-10)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-10 |
+| **Neden** | Performans ve Sürdürülebilirlik Raporu analizi sonucu 5 katmanda 80+ bulgu tespit edildi. En kritik 5 sorun (MT5 reconnect, state restore, DB integrity, Error Boundary, Engine watchdog) düzeltildi. |
+| **Kök Neden** | (1) MT5 heartbeat başarısız olursa tek reconnect denemesi → hızlı engine duruşu. (2) Partial state restore → risk limiti bypass riski. (3) Bozuk DB sessizce çalışıyordu. (4) Error Boundary tek bir wrapper'dı → route değişikliğinde reset olmuyordu. (5) Engine crash ederse API hayatta kalıp ölü veri sunuyordu. Ek olarak event_bus exception'ları yutuluyordu ve H-Engine SL/TP kapatma sonsuz döngü riski vardı. |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `engine/main.py` | `_heartbeat_mt5()`: 1 deneme → 3 deneme (2sn arayla), toplam max ~42sn reconnect |
+| `engine/main.py` | `_restore_state()`: BABA başarısız olursa tüm restore iptal (partial restore önlemi). Sonuç özeti loglama. |
+| `engine/database.py` | `_check_integrity()`: Başlangıçta `PRAGMA quick_check` ile bütünlük kontrolü |
+| `engine/database.py` | `backup()`: `shutil.copy2` → `sqlite3.backup()` API (WAL güvenli yedekleme + fallback) |
+| `engine/h_engine.py` | `_check_software_sltp()`: Retry limiti (max 3 deneme), başarısız → `close_failed` event + log, sonsuz döngü önlendi |
+| `engine/event_bus.py` | Listener exception loglama (sessiz `pass` kaldırıldı), backpressure mekanizması (max 500 pending event) |
+| `api/server.py` | Engine watchdog: Engine thread sonlanırsa → `os._exit(1)` ile API süreci de kapatılır |
+| `desktop/src/components/ErrorBoundary.jsx` | `resetKey` ve `label` prop desteği — route değişikliğinde otomatik reset |
+| `desktop/src/App.jsx` | Per-route `RouteBoundary` wrapper — her sayfa bağımsız hata izolasyonu |
+
+### Eklenen
+- `_check_integrity()` metodu (database.py)
+- `_close_retry_counts` sayacı ve `_MAX_CLOSE_RETRIES` sabiti (h_engine.py)
+- `close_failed` event tipi (h_engine.py → event_bus)
+- Backpressure mekanizması `_MAX_PENDING=500` (event_bus.py)
+- `RouteBoundary` wrapper bileşeni (App.jsx)
+- `resetKey` / `label` prop desteği (ErrorBoundary.jsx)
+
+### Çıkartılan
+- `shutil.copy2` birincil yedekleme yöntemi olarak (fallback olarak korundu)
+- Event bus sessiz `except: pass` bloğu

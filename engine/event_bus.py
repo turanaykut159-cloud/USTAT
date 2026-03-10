@@ -6,9 +6,12 @@ Kapanmış işlem gibi olayları gerçek zamanlı UI'a iletmek için kullanılı
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections import defaultdict
 from typing import Any, Callable
+
+_logger = logging.getLogger("ustat.event_bus")
 
 _listeners: dict[str, list[Callable]] = defaultdict(list)
 _lock = threading.Lock()
@@ -17,20 +20,8 @@ _lock = threading.Lock()
 _pending: list[dict[str, Any]] = []
 _pending_lock = threading.Lock()
 
-
-def on(event: str, callback: Callable) -> None:
-    """Event dinleyici ekle."""
-    with _lock:
-        _listeners[event].append(callback)
-
-
-def off(event: str, callback: Callable) -> None:
-    """Event dinleyici kaldır."""
-    with _lock:
-        try:
-            _listeners[event].remove(callback)
-        except ValueError:
-            pass
+# Backpressure: maksimum bekleyen event sayısı
+_MAX_PENDING = 500
 
 
 def emit(event: str, data: dict[str, Any] | None = None) -> None:
@@ -42,11 +33,21 @@ def emit(event: str, data: dict[str, Any] | None = None) -> None:
         for cb in _listeners.get(event, []):
             try:
                 cb(payload)
-            except Exception:
-                pass
+            except Exception as exc:
+                _logger.error(
+                    f"Event listener hatası [{event}]: {exc}"
+                )
 
     # Async taraf için kuyruğa ekle (WS broadcast)
     with _pending_lock:
+        if len(_pending) >= _MAX_PENDING:
+            # Backpressure: en eski event'leri at
+            dropped = len(_pending) - _MAX_PENDING + 1
+            del _pending[:dropped]
+            _logger.warning(
+                f"Event bus backpressure: {dropped} eski event silindi "
+                f"(kuyruk limiti: {_MAX_PENDING})"
+            )
         _pending.append(payload)
 
 

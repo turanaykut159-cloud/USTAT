@@ -1,4 +1,4 @@
-"""ÜSTAT v5.2 API — FastAPI Sunucu.
+"""ÜSTAT v5.3 API — FastAPI Sunucu.
 
 Desktop uygulamasına REST API + WebSocket köprüsü sağlar.
 
@@ -38,6 +38,7 @@ from api.routes import (
     killswitch,
     live,
     manual_trade,
+    mt5_verify,
     ogul_activity,
     performance,
     positions,
@@ -52,7 +53,7 @@ from api.routes import (
 logger = logging.getLogger("ustat.api")
 
 # Tek kaynak: OpenAPI ve root endpoint aynı versiyonu kullanır
-API_VERSION = "5.2.0"
+API_VERSION = "5.3.0"
 
 
 # ── Lifespan: Engine başlat / durdur ─────────────────────────────
@@ -98,12 +99,24 @@ async def lifespan(app: FastAPI):
         loop = asyncio.get_running_loop()
         engine_task = loop.run_in_executor(None, engine.start)
 
-        # Engine crash watchdog — thread sessizce ölürse logla
+        # Engine crash watchdog — thread sessizce ölürse API'yi de kapat
         async def _engine_watchdog():
             try:
                 await engine_task
+                # Engine.start() normal dönüş — MT5 bağlantı hatası vb.
+                logger.critical(
+                    "Engine thread sonlandı — API tek başına çalışamaz, "
+                    "süreç kapatılıyor."
+                )
             except Exception as exc:
-                logger.critical(f"Engine thread CRASHED: {exc}")
+                logger.critical(
+                    f"Engine thread CRASHED: {exc} — "
+                    f"API tek başına çalışamaz, süreç kapatılıyor."
+                )
+            # Engine yoksa API'nin çalışması anlamsız — süreci kapat
+            # Electron veya start_ustat.py yeniden başlatabilir
+            import os
+            os._exit(1)
 
         watchdog_task = asyncio.create_task(_engine_watchdog())
 
@@ -175,6 +188,7 @@ app.include_router(health.router, prefix="/api", tags=["health"])
 app.include_router(ogul_activity.router, prefix="/api", tags=["ogul"])
 app.include_router(live.router, tags=["websocket"])
 app.include_router(settings.router, prefix="/api", tags=["settings"])
+app.include_router(mt5_verify.router, prefix="/api", tags=["mt5"])
 
 
 @app.get("/")

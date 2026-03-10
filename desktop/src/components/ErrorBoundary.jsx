@@ -3,7 +3,10 @@
  *
  * Yakalanmamis React renderlamasi hatalarinda
  * uygulamanin tamamen cokmesini onler.
- * FAZ 2.9: Uzman raporu onerisi.
+ *
+ * resetKey prop'u degistiginde hata durumu otomatik resetlenir.
+ * Bu sayede route degisikliginde ErrorBoundary temizlenir ve
+ * kullanici baska sayfalara gecebilir.
  */
 
 import React from 'react';
@@ -16,6 +19,17 @@ export default class ErrorBoundary extends React.Component {
 
   static getDerivedStateFromError(error) {
     return { hasError: true, error };
+  }
+
+  static getDerivedStateFromProps(props, state) {
+    // resetKey degistiginde (ornegin route degisikligi) hata durumunu temizle
+    if (state.hasError && props.resetKey !== state.lastResetKey) {
+      return { hasError: false, error: null, lastResetKey: props.resetKey };
+    }
+    if (props.resetKey !== state.lastResetKey) {
+      return { lastResetKey: props.resetKey };
+    }
+    return null;
   }
 
   componentDidCatch(error, errorInfo) {
@@ -43,7 +57,9 @@ export default class ErrorBoundary extends React.Component {
             Beklenmeyen Hata
           </h2>
           <p style={{ marginBottom: '0.5rem', color: 'var(--text-secondary, #aaa)' }}>
-            Uygulama bir hatayla karsilasti.
+            {this.props.label
+              ? `${this.props.label} sayfasinda bir hata olustu.`
+              : 'Uygulama bir hatayla karsilasti.'}
           </p>
           <pre style={{
             maxWidth: '600px',

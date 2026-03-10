@@ -214,13 +214,41 @@ class Database:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
 
+        # Bütünlük kontrolü — bozuk DB erken tespit
+        self._check_integrity()
+
         self._create_tables()
         self._migrate_schema()
         logger.info(f"Veritabanı hazır: {self._db_path}")
 
+    # ── Bütünlük kontrolü ────────────────────────────────────────────
+    def _check_integrity(self) -> None:
+        """Veritabanı bütünlük kontrolü — başlatmada çağrılır.
+
+        PRAGMA quick_check ile hızlı kontrol yapar.
+        Başarısızsa kritik hata loglar ama engine'i durdurmaz
+        (yedekten geri yükleme operatörün sorumluluğundadır).
+        """
+        try:
+            result = self._conn.execute("PRAGMA quick_check").fetchone()
+            if result and result[0] == "ok":
+                logger.info("DB bütünlük kontrolü: OK")
+            else:
+                detail = result[0] if result else "sonuç alınamadı"
+                logger.critical(
+                    f"DB BÜTÜNLÜK HATASI: {detail}. "
+                    f"Veritabanı bozuk olabilir! Yedekten geri yüklemeyi düşünün. "
+                    f"Yedek dosyaları: {Path(self._db_path).parent / 'trades_backup_*.db'}"
+                )
+        except Exception as exc:
+            logger.error(f"DB bütünlük kontrolü yapılamadı: {exc}")
+
     # ── Yedekleme ──────────────────────────────────────────────────────
     def backup(self) -> str:
         """trades.db'nin tarihli yedeğini al. Son 5 yedeği tutar.
+
+        SQLite backup API ile güvenli yedek alır (WAL aktifken bile
+        tutarlı snapshot garantisi — shutil.copy2'den daha güvenli).
 
         Returns:
             Yedek dosya yolu.
@@ -229,11 +257,20 @@ class Database:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_path = db_path.parent / f"trades_backup_{ts}.db"
         try:
-            shutil.copy2(str(db_path), str(backup_path))
-            logger.info(f"DB yedekleme tamamlandı: {backup_path}")
+            backup_conn = sqlite3.connect(str(backup_path))
+            with self._lock:
+                self._conn.backup(backup_conn)
+            backup_conn.close()
+            logger.info(f"DB yedekleme tamamlandı (sqlite3.backup): {backup_path}")
         except Exception as exc:
             logger.error(f"DB yedekleme hatası: {exc}")
-            return ""
+            # Fallback: shutil ile kopyalama dene
+            try:
+                shutil.copy2(str(db_path), str(backup_path))
+                logger.warning(f"DB yedekleme fallback (shutil.copy2): {backup_path}")
+            except Exception as exc2:
+                logger.error(f"DB yedekleme fallback da başarısız: {exc2}")
+                return ""
         # Eski yedekleri temizle — son 5 tane tut
         backups = sorted(db_path.parent.glob("trades_backup_*.db"))
         for old in backups[:-5]:
@@ -430,9 +467,9 @@ class Database:
         vol_col = "tick_volume" if "tick_volume" in df.columns else "volume"
 
         rows = [
-            (symbol, timeframe, str(r[ts_col]),
-             r["open"], r["high"], r["low"], r["close"], r[vol_col])
-            for _, r in df.iterrows()
+            (symbol, timeframe, str(getattr(r, ts_col)),
+             r.open, r.high, r.low, r.close, getattr(r, vol_col))
+            for r in df.itertuples(index=False)
         ]
         self._executemany(
             """INSERT OR REPLACE INTO bars
@@ -562,6 +599,7 @@ class Database:
                     hp_row = self._execute(
                         "SELECT 1 FROM hybrid_positions WHERE ticket=?",
                         (pos_id,),
+                        commit=False,
                     ).fetchone()
                     strategy_update = ", strategy='hibrit'" if hp_row else ""
                     # MT5 verisiyle commission/swap/pnl güncelle (eksikse veya her zaman)
@@ -575,6 +613,7 @@ class Database:
                             t.get("exit_time"), t.get("exit_price"),
                             existing["id"],
                         ),
+                        commit=False,
                     )
                     updated += 1
                     continue
@@ -629,6 +668,7 @@ class Database:
                         t.get("entry_price"), t["lot"],
                         ogul_match["id"],
                     ),
+                    commit=False,
                 )
                 updated += 1
                 logger.debug(
@@ -642,6 +682,7 @@ class Database:
                     hp_row = self._execute(
                         "SELECT 1 FROM hybrid_positions WHERE ticket=?",
                         (pos_id,),
+                        commit=False,
                     ).fetchone()
                     if hp_row:
                         strategy = "hibrit"
@@ -662,10 +703,14 @@ class Database:
                         t.get("regime"), t.get("fake_score"),
                         t.get("exit_reason"), pos_id,
                     ),
+                    commit=False,
                 )
                 added += 1
 
+        # Tüm değişiklikleri tek commit ile yaz (I/O optimizasyonu)
         if added or updated:
+            with self._lock:
+                self._conn.commit()
             logger.info(
                 f"MT5 sync: {added} yeni eklendi, "
                 f"{updated} mevcut kayıt güncellendi"
@@ -846,121 +891,6 @@ class Database:
             f"SELECT * FROM trades {where} ORDER BY {order} LIMIT ?",
             tuple(params),
         )
-
-    def delete_trade(self, trade_id: int) -> bool:
-        """İşlem kaydını sil.
-
-        Args:
-            trade_id: Silinecek işlem id'si.
-
-        Returns:
-            Silme başarılıysa True.
-        """
-        cur = self._execute("DELETE FROM trades WHERE id=?", (trade_id,))
-        logger.debug(f"Trade delete id={trade_id}: rowcount={cur.rowcount}")
-        return cur.rowcount > 0
-
-    # ═════════════════════════════════════════════════════════════════
-    #  STRATEGIES
-    # ═════════════════════════════════════════════════════════════════
-    def insert_strategy(
-        self,
-        name: str,
-        signal_type: str,
-        parameters: dict | None = None,
-        status: str = "active",
-    ) -> int:
-        """Yeni strateji ekle.
-
-        Args:
-            name: Strateji adı (unique).
-            signal_type: Sinyal tipi (ör. "ema_cross", "macd").
-            parameters: Strateji parametreleri (JSON olarak saklanır).
-            status: Durum ("active" / "paused" / "disabled").
-
-        Returns:
-            Oluşturulan satırın id'si.
-        """
-        cur = self._execute(
-            """INSERT INTO strategies (name, signal_type, parameters, status, metrics)
-               VALUES (?, ?, ?, ?, '{}')""",
-            (name, signal_type, json.dumps(parameters or {}), status),
-        )
-        logger.debug(f"Strategy insert id={cur.lastrowid}: {name}")
-        return cur.lastrowid
-
-    def update_strategy(self, strategy_id: int, fields: dict[str, Any]) -> bool:
-        """Strateji güncelle.
-
-        ``parameters`` veya ``metrics`` alanı dict ise otomatik JSON'a çevrilir.
-
-        Args:
-            strategy_id: Strateji id'si.
-            fields: Güncellenecek alan-değer çiftleri.
-
-        Returns:
-            Güncelleme başarılıysa True.
-        """
-        if not fields:
-            return False
-        for key in ("parameters", "metrics"):
-            if key in fields and isinstance(fields[key], dict):
-                fields[key] = json.dumps(fields[key])
-        set_clause = ", ".join(f"{k}=?" for k in fields)
-        values = tuple(fields.values()) + (strategy_id,)
-        cur = self._execute(
-            f"UPDATE strategies SET {set_clause} WHERE id=?", values
-        )
-        logger.debug(f"Strategy update id={strategy_id}: {list(fields.keys())}")
-        return cur.rowcount > 0
-
-    def get_strategy(self, name: str) -> dict[str, Any] | None:
-        """İsme göre strateji getir.
-
-        Args:
-            name: Strateji adı.
-
-        Returns:
-            Strateji sözlüğü (parameters/metrics JSON-parse'lı) veya None.
-        """
-        row = self._fetch_one("SELECT * FROM strategies WHERE name=?", (name,))
-        if row:
-            row["parameters"] = json.loads(row.get("parameters") or "{}")
-            row["metrics"] = json.loads(row.get("metrics") or "{}")
-        return row
-
-    def get_strategies(self, status: str | None = None) -> list[dict[str, Any]]:
-        """Tüm stratejileri getir.
-
-        Args:
-            status: Filtre: durum ("active", "paused", "disabled").
-
-        Returns:
-            Strateji sözlüklerinin listesi.
-        """
-        if status:
-            rows = self._fetch_all(
-                "SELECT * FROM strategies WHERE status=?", (status,)
-            )
-        else:
-            rows = self._fetch_all("SELECT * FROM strategies")
-        for r in rows:
-            r["parameters"] = json.loads(r.get("parameters") or "{}")
-            r["metrics"] = json.loads(r.get("metrics") or "{}")
-        return rows
-
-    def delete_strategy(self, strategy_id: int) -> bool:
-        """Strateji sil.
-
-        Args:
-            strategy_id: Silinecek strateji id'si.
-
-        Returns:
-            Silme başarılıysa True.
-        """
-        cur = self._execute("DELETE FROM strategies WHERE id=?", (strategy_id,))
-        logger.debug(f"Strategy delete id={strategy_id}: rowcount={cur.rowcount}")
-        return cur.rowcount > 0
 
     # ═════════════════════════════════════════════════════════════════
     #  RISK SNAPSHOTS
@@ -1226,90 +1156,6 @@ class Database:
             (limit,),
         )
 
-    def delete_top5(self, before_date: str) -> int:
-        """Eski Top-5 kayıtlarını sil.
-
-        Args:
-            before_date: Bu tarihten önceki kayıtları sil (YYYY-MM-DD).
-
-        Returns:
-            Silinen satır sayısı.
-        """
-        cur = self._execute(
-            "DELETE FROM top5_history WHERE date<?", (before_date,)
-        )
-        logger.debug(f"Top5 delete <{before_date}: {cur.rowcount}")
-        return cur.rowcount
-
-    # ═════════════════════════════════════════════════════════════════
-    #  CONFIG HISTORY
-    # ═════════════════════════════════════════════════════════════════
-    def insert_config_change(
-        self,
-        param: str,
-        old_value: Any,
-        new_value: Any,
-        changed_by: str = "system",
-    ) -> int:
-        """Konfigürasyon değişiklik kaydı ekle.
-
-        Args:
-            param: Değişen parametre adı.
-            old_value: Eski değer.
-            new_value: Yeni değer.
-            changed_by: Değişikliği yapan ("system", "user", "baba" vb.).
-
-        Returns:
-            Oluşturulan satırın id'si.
-        """
-        cur = self._execute(
-            """INSERT INTO config_history
-               (timestamp, param, old_value, new_value, changed_by)
-               VALUES (?,?,?,?,?)""",
-            (self._now(), param, str(old_value), str(new_value), changed_by),
-        )
-        logger.debug(f"Config değişikliği: {param} {old_value}→{new_value} by {changed_by}")
-        return cur.lastrowid
-
-    def get_config_history(
-        self,
-        param: str | None = None,
-        limit: int = 50,
-    ) -> list[dict[str, Any]]:
-        """Konfigürasyon değişiklik geçmişini getir.
-
-        Args:
-            param: Filtre: parametre adı.
-            limit: Maksimum satır.
-
-        Returns:
-            Config değişiklik sözlüklerinin listesi.
-        """
-        if param:
-            return self._fetch_all(
-                """SELECT * FROM config_history
-                   WHERE param=? ORDER BY id DESC LIMIT ?""",
-                (param, limit),
-            )
-        return self._fetch_all(
-            "SELECT * FROM config_history ORDER BY id DESC LIMIT ?",
-            (limit,),
-        )
-
-    def delete_config_history(self, before: str) -> int:
-        """Eski konfigürasyon kayıtlarını sil.
-
-        Args:
-            before: Bu tarihten önceki kayıtları sil (ISO-8601).
-
-        Returns:
-            Silinen satır sayısı.
-        """
-        cur = self._execute(
-            "DELETE FROM config_history WHERE timestamp<?", (before,)
-        )
-        return cur.rowcount
-
     # ═════════════════════════════════════════════════════════════════
     #  MANUAL INTERVENTIONS
     # ═════════════════════════════════════════════════════════════════
@@ -1337,59 +1183,9 @@ class Database:
         logger.info(f"Manuel müdahale: {action} by {user} — {reason}")
         return cur.lastrowid
 
-    def get_interventions(self, limit: int = 50) -> list[dict[str, Any]]:
-        """Manuel müdahale geçmişini getir.
-
-        Args:
-            limit: Maksimum satır.
-
-        Returns:
-            Müdahale sözlüklerinin listesi.
-        """
-        return self._fetch_all(
-            "SELECT * FROM manual_interventions ORDER BY id DESC LIMIT ?",
-            (limit,),
-        )
-
-    def delete_interventions(self, before: str) -> int:
-        """Eski müdahale kayıtlarını sil.
-
-        Args:
-            before: Bu tarihten önceki kayıtları sil (ISO-8601).
-
-        Returns:
-            Silinen satır sayısı.
-        """
-        cur = self._execute(
-            "DELETE FROM manual_interventions WHERE timestamp<?", (before,)
-        )
-        return cur.rowcount
-
     # ═════════════════════════════════════════════════════════════════
     #  LIQUIDITY CLASSES
     # ═════════════════════════════════════════════════════════════════
-    def insert_liquidity(self, entries: list[dict[str, Any]]) -> None:
-        """Günlük likidite sınıflandırması kaydet.
-
-        Args:
-            entries: Her biri → date, symbol, avg_volume, avg_spread, class
-                     içeren sözlük listesi.
-        """
-        rows = [
-            (
-                e["date"], e["symbol"],
-                e.get("avg_volume"), e.get("avg_spread"), e.get("class"),
-            )
-            for e in entries
-        ]
-        self._executemany(
-            """INSERT OR REPLACE INTO liquidity_classes
-               (date, symbol, avg_volume, avg_spread, class)
-               VALUES (?,?,?,?,?)""",
-            rows,
-        )
-        logger.debug(f"Likidite sınıfları kaydedildi: {len(rows)} sembol")
-
     def get_liquidity(
         self,
         target_date: str | None = None,
@@ -1418,21 +1214,6 @@ class Database:
             f"SELECT * FROM liquidity_classes {where} ORDER BY date DESC, symbol",
             tuple(params),
         )
-
-    def delete_liquidity(self, before_date: str) -> int:
-        """Eski likidite kayıtlarını sil.
-
-        Args:
-            before_date: Bu tarihten önceki kayıtları sil (YYYY-MM-DD).
-
-        Returns:
-            Silinen satır sayısı.
-        """
-        cur = self._execute(
-            "DELETE FROM liquidity_classes WHERE date<?", (before_date,)
-        )
-        logger.debug(f"Liquidity delete <{before_date}: {cur.rowcount}")
-        return cur.rowcount
 
     # ═════════════════════════════════════════════════════════════════
     #  HİBRİT POZİSYONLAR
@@ -1582,31 +1363,3 @@ class Database:
             (limit,),
         )
 
-    # ═════════════════════════════════════════════════════════════════
-    #  YARDIMCI
-    # ═════════════════════════════════════════════════════════════════
-    def get_watched_symbols(self) -> list[str]:
-        """İzlenen kontrat sembollerini getir.
-
-        Returns:
-            Sembol listesi (mt5_bridge.WATCHED_SYMBOLS).
-        """
-        from engine.mt5_bridge import WATCHED_SYMBOLS
-        return list(WATCHED_SYMBOLS)
-
-    def table_counts(self) -> dict[str, int]:
-        """Her tablodaki satır sayısını getir (debug/monitoring).
-
-        Returns:
-            Tablo adı → satır sayısı sözlüğü.
-        """
-        tables = [
-            "bars", "trades", "strategies", "risk_snapshots",
-            "events", "top5_history", "config_history",
-            "manual_interventions", "liquidity_classes",
-        ]
-        counts: dict[str, int] = {}
-        for t in tables:
-            row = self._fetch_one(f"SELECT COUNT(*) as cnt FROM {t}")
-            counts[t] = row["cnt"] if row else 0
-        return counts
