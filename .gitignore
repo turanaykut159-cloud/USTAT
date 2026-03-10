@@ -75,6 +75,12 @@ test_trade.py
 # Claude (yerel context)
 .claude/
 
+# Cursor (IDE context)
+.cursor/
+
+# Handover (proje dokümantasyon paketi)
+USTAT_HANDOVER/
+
 # Görev dosyaları (tamamlanmış)
 CLAUDE_CODE_GOREV_*.md
 
