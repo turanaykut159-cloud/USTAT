@@ -2013,6 +2013,15 @@ class Ogul:
         if current_price <= 0:
             return
 
+        # ── Manuel pozisyon güvenlik kontrolü ─────────────────────
+        if self.manuel_motor:
+            mt = self.manuel_motor.active_trades.get(symbol)
+            if mt and mt.ticket and mt.ticket == trade.ticket:
+                logger.debug(
+                    f"Manage: {symbol} ticket={trade.ticket} manuel — atlanıyor"
+                )
+                return
+
         # ── Gösterge verileri (tek seferde al) ─────────────────────
         df = self.db.get_bars(symbol, "M15", limit=MIN_BARS_M15)
         if df is None or df.empty or len(df) < 30:
@@ -3050,6 +3059,16 @@ class Ogul:
         restored_count = 0
         orphan_count = 0
 
+        # Manuel pozisyon ticket'larını topla — yetim sahiplenmesini engelle
+        # (1) ManuelMotor active_trades (restore sonrası dolu olabilir)
+        manual_tickets: set[int] = set()
+        manual_symbols: set[str] = set()
+        if self.manuel_motor:
+            for s, t in self.manuel_motor.active_trades.items():
+                if t.ticket:
+                    manual_tickets.add(t.ticket)
+                manual_symbols.add(s)
+
         for pos in positions:
             symbol = pos.get("symbol", "")
             ticket = pos.get("ticket", 0)
@@ -3058,8 +3077,27 @@ class Ogul:
             if not symbol or not ticket:
                 continue
 
+            # Manuel pozisyon kontrolü — OĞUL sahiplenmez
+            # (1) ManuelMotor active_trades kontrolü
+            if ticket in manual_tickets or symbol in manual_symbols:
+                logger.debug(
+                    f"Restore: {symbol} ticket={ticket} manuel (active_trades) — atlanıyor"
+                )
+                continue
+
             # DB'de eşleşen aktif trade ara
             trades = self.db.get_trades(symbol=symbol, limit=10)
+
+            # (2) DB'de strategy="manual" + exit_time=None → ManuelMotor'a ait
+            is_manual_in_db = any(
+                t.get("exit_time") is None and t.get("strategy") == "manual"
+                for t in trades
+            )
+            if is_manual_in_db:
+                logger.debug(
+                    f"Restore: {symbol} ticket={ticket} manuel (DB) — atlanıyor"
+                )
+                continue
             db_trade = next(
                 (
                     t for t in trades

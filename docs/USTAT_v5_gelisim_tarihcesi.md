@@ -2,6 +2,31 @@
 
 ---
 
+## #43 — OĞUL Manuel Pozisyon Sahiplenme Bugu (2026-03-10)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-10 |
+| **Neden** | Manuel İşlem Paneli'nden açılan F_AKBNK pozisyonları OĞUL tarafından "yetim" olarak sahiplenilip kendi kurallarıyla (signal_loss, pullback_tolerance) kapatılıyor. |
+| **Kök Neden** | (1) `ogul.py:restore_active_trades()` DB eşleşmesi olmayan pozisyonları "yetim" olarak sahipleniyor — `strategy == "manual"` kontrolü sadece DB eşleşmesi olan trade'ler için çalışıyor. (2) Restore sırası: OĞUL → ManuelMotor. ManuelMotor henüz restore olmadığından `manual_tickets` boş. (3) `_manage_position()` manuel pozisyon kontrolü yok. |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `engine/ogul.py` | `restore_active_trades()`: (1) ManuelMotor `active_trades` ticket/sembol kontrolü eklendi, (2) DB'de `strategy="manual"` + `exit_time=None` kontrolü eklendi — yetim pozisyon olsa bile DB'den manuel olduğu tespit edilir |
+| `engine/ogul.py` | `_manage_position()`: Manuel pozisyon güvenlik katmanı — ManuelMotor ticket eşleşmesi varsa pozisyon yönetimi atlanır |
+| `engine/main.py` | Restore sırası değişti: ManuelMotor → OĞUL → H-Engine (önceki: OĞUL → H-Engine → ManuelMotor) |
+
+### Eklenen
+- OĞUL restore: 3 katmanlı manuel pozisyon koruması (active_trades + DB + manage_position)
+- ManuelMotor-first restore sırası
+
+### Çıkartılan
+- (yok)
+
+---
+
 ## Versiyon Geçişi: v5.3 → v5.4 (2026-03-10)
 
 - **Oran:** %10.47 (4887 satır değişiklik / 46669 toplam satır)
