@@ -922,7 +922,7 @@ class Engine:
             # ile tespit edilir ve sync edilir.
             return
 
-        # ── ManuelMotor: Manuel işlemler (ÖNCE — OĞUL yetim sahiplenmesini önler)
+        # ── ManuelMotor: Manuel işlemler (1. — OĞUL yetim sahiplenmesini önler)
         try:
             self.manuel_motor.restore_active_trades()
             manual_count = len(self.manuel_motor.active_trades)
@@ -932,17 +932,7 @@ class Engine:
             logger.error(f"ManuelMotor restore hatası: {exc}")
             restore_results["manuel"] = False
 
-        # ── OĞUL: Aktif trade'leri MT5'ten geri yükle ────────────
-        try:
-            self.ogul.restore_active_trades()
-            active = len(self.ogul.active_trades)
-            logger.info(f"OĞUL aktif işlemler geri yüklendi: {active} adet")
-            restore_results["ogul"] = True
-        except Exception as exc:
-            logger.error(f"OĞUL restore hatası: {exc}")
-            restore_results["ogul"] = False
-
-        # ── H-Engine: Hibrit pozisyonlar ─────────────────────────
+        # ── H-Engine: Hibrit pozisyonlar (2. — OĞUL yetim sahiplenmesini önler)
         try:
             self.h_engine.restore_positions()
             hybrid_count = len(self.h_engine.hybrid_positions)
@@ -951,6 +941,16 @@ class Engine:
         except Exception as exc:
             logger.error(f"H-Engine restore hatası: {exc}")
             restore_results["h_engine"] = False
+
+        # ── OĞUL: Aktif trade'leri MT5'ten geri yükle (3. — EN SON)
+        try:
+            self.ogul.restore_active_trades()
+            active = len(self.ogul.active_trades)
+            logger.info(f"OĞUL aktif işlemler geri yüklendi: {active} adet")
+            restore_results["ogul"] = True
+        except Exception as exc:
+            logger.error(f"OĞUL restore hatası: {exc}")
+            restore_results["ogul"] = False
 
         # ── Sonuç özeti ──────────────────────────────────────────
         failed = [k for k, v in restore_results.items() if not v]

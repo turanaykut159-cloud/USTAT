@@ -2013,7 +2013,7 @@ class Ogul:
         if current_price <= 0:
             return
 
-        # ── Manuel pozisyon güvenlik kontrolü ─────────────────────
+        # ── Manuel/Hibrit pozisyon güvenlik kontrolü ────────────────
         if self.manuel_motor:
             mt = self.manuel_motor.active_trades.get(symbol)
             if mt and mt.ticket and mt.ticket == trade.ticket:
@@ -2021,6 +2021,12 @@ class Ogul:
                     f"Manage: {symbol} ticket={trade.ticket} manuel — atlanıyor"
                 )
                 return
+
+        if self.h_engine and trade.ticket in self.h_engine.hybrid_positions:
+            logger.debug(
+                f"Manage: {symbol} ticket={trade.ticket} hibrit — atlanıyor"
+            )
+            return
 
         # ── Gösterge verileri (tek seferde al) ─────────────────────
         df = self.db.get_bars(symbol, "M15", limit=MIN_BARS_M15)
@@ -3059,7 +3065,7 @@ class Ogul:
         restored_count = 0
         orphan_count = 0
 
-        # Manuel pozisyon ticket'larını topla — yetim sahiplenmesini engelle
+        # Manuel + Hibrit pozisyon ticket'larını topla — yetim sahiplenmesini engelle
         # (1) ManuelMotor active_trades (restore sonrası dolu olabilir)
         manual_tickets: set[int] = set()
         manual_symbols: set[str] = set()
@@ -3069,6 +3075,14 @@ class Ogul:
                     manual_tickets.add(t.ticket)
                 manual_symbols.add(s)
 
+        # (2) H-Engine hybrid_positions (restore sonrası dolu olabilir)
+        hybrid_tickets: set[int] = set()
+        hybrid_symbols: set[str] = set()
+        if self.h_engine:
+            for tk, hp in self.h_engine.hybrid_positions.items():
+                hybrid_tickets.add(tk)
+                hybrid_symbols.add(hp.symbol)
+
         for pos in positions:
             symbol = pos.get("symbol", "")
             ticket = pos.get("ticket", 0)
@@ -3077,7 +3091,7 @@ class Ogul:
             if not symbol or not ticket:
                 continue
 
-            # Manuel pozisyon kontrolü — OĞUL sahiplenmez
+            # Manuel/Hibrit pozisyon kontrolü — OĞUL sahiplenmez
             # (1) ManuelMotor active_trades kontrolü
             if ticket in manual_tickets or symbol in manual_symbols:
                 logger.debug(
@@ -3085,10 +3099,17 @@ class Ogul:
                 )
                 continue
 
+            # (2) H-Engine hybrid_positions kontrolü
+            if ticket in hybrid_tickets or symbol in hybrid_symbols:
+                logger.debug(
+                    f"Restore: {symbol} ticket={ticket} hibrit (H-Engine) — atlanıyor"
+                )
+                continue
+
             # DB'de eşleşen aktif trade ara
             trades = self.db.get_trades(symbol=symbol, limit=10)
 
-            # (2) DB'de strategy="manual" + exit_time=None → ManuelMotor'a ait
+            # (3) DB'de strategy="manual" + exit_time=None → ManuelMotor'a ait
             is_manual_in_db = any(
                 t.get("exit_time") is None and t.get("strategy") == "manual"
                 for t in trades
@@ -3098,6 +3119,18 @@ class Ogul:
                     f"Restore: {symbol} ticket={ticket} manuel (DB) — atlanıyor"
                 )
                 continue
+
+            # (4) DB'de hybrid_positions tablosunda aktif → H-Engine'e ait
+            if self.db:
+                active_hybrids = self.db.get_active_hybrid_positions()
+                is_hybrid_in_db = any(
+                    h.get("ticket") == ticket for h in active_hybrids
+                )
+                if is_hybrid_in_db:
+                    logger.debug(
+                        f"Restore: {symbol} ticket={ticket} hibrit (DB) — atlanıyor"
+                    )
+                    continue
             db_trade = next(
                 (
                     t for t in trades

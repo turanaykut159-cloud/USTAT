@@ -2,25 +2,26 @@
 
 ---
 
-## #43 — OĞUL Manuel Pozisyon Sahiplenme Bugu (2026-03-10)
+## #43 — OĞUL Manuel/Hibrit Pozisyon Sahiplenme Bugu (2026-03-10)
 
 | Alan | Detay |
 |------|-------|
 | **Tarih** | 2026-03-10 |
-| **Neden** | Manuel İşlem Paneli'nden açılan F_AKBNK pozisyonları OĞUL tarafından "yetim" olarak sahiplenilip kendi kurallarıyla (signal_loss, pullback_tolerance) kapatılıyor. |
-| **Kök Neden** | (1) `ogul.py:restore_active_trades()` DB eşleşmesi olmayan pozisyonları "yetim" olarak sahipleniyor — `strategy == "manual"` kontrolü sadece DB eşleşmesi olan trade'ler için çalışıyor. (2) Restore sırası: OĞUL → ManuelMotor. ManuelMotor henüz restore olmadığından `manual_tickets` boş. (3) `_manage_position()` manuel pozisyon kontrolü yok. |
+| **Neden** | Manuel (F_AKBNK) ve hibrit (F_KONTR) pozisyonlar OĞUL tarafından "yetim" olarak sahiplenilip kendi kurallarıyla (signal_loss, pullback_tolerance) kapatılıyor. |
+| **Kök Neden** | (1) `ogul.py:restore_active_trades()` DB eşleşmesi olmayan pozisyonları "yetim" olarak sahipleniyor — `strategy == "manual"` kontrolü sadece DB eşleşmesi olan trade'ler için çalışıyor; H-Engine kontrolü hiç yok. (2) Restore sırası: OĞUL → H-Engine → ManuelMotor. Her iki motor da henüz restore olmadığından kontrol set'leri boş. (3) `_manage_position()` manuel/hibrit pozisyon kontrolü yok. |
 
 ### Değişiklikler
 
 | Dosya | Ne Değişti |
 |-------|-----------|
-| `engine/ogul.py` | `restore_active_trades()`: (1) ManuelMotor `active_trades` ticket/sembol kontrolü eklendi, (2) DB'de `strategy="manual"` + `exit_time=None` kontrolü eklendi — yetim pozisyon olsa bile DB'den manuel olduğu tespit edilir |
-| `engine/ogul.py` | `_manage_position()`: Manuel pozisyon güvenlik katmanı — ManuelMotor ticket eşleşmesi varsa pozisyon yönetimi atlanır |
-| `engine/main.py` | Restore sırası değişti: ManuelMotor → OĞUL → H-Engine (önceki: OĞUL → H-Engine → ManuelMotor) |
+| `engine/ogul.py` | `restore_active_trades()`: 4 katmanlı koruma — (1) ManuelMotor `active_trades` ticket/sembol, (2) H-Engine `hybrid_positions` ticket/sembol, (3) DB `strategy="manual"` kontrolü, (4) DB `hybrid_positions` tablosu kontrolü |
+| `engine/ogul.py` | `_manage_position()`: Manuel + Hibrit güvenlik katmanı — ManuelMotor ticket veya H-Engine ticket eşleşmesi varsa pozisyon yönetimi atlanır |
+| `engine/main.py` | Restore sırası değişti: ManuelMotor → H-Engine → OĞUL (önceki: OĞUL → H-Engine → ManuelMotor). OĞUL en son çalışır, diğer motorlar dolu olur |
 
 ### Eklenen
-- OĞUL restore: 3 katmanlı manuel pozisyon koruması (active_trades + DB + manage_position)
-- ManuelMotor-first restore sırası
+- OĞUL restore: 4 katmanlı manuel+hibrit pozisyon koruması
+- OĞUL _manage_position: H-Engine ticket guard
+- Restore sırası: ManuelMotor(1.) → H-Engine(2.) → OĞUL(3.)
 
 ### Çıkartılan
 - (yok)
