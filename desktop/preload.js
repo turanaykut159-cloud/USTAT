@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.2 Desktop — Electron preload script.
+ * ÜSTAT v5.3 Desktop — Electron preload script.
  * Güvenli IPC köprüsü sağlar (contextIsolation + sandbox).
  *
  * Renderer tarafında window.electronAPI üzerinden erişilir.
@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ── Pencere işlemleri ──────────────────────────────────────────
   toggleAlwaysOnTop: () => ipcRenderer.invoke('window:toggleAlwaysOnTop'),
   getAlwaysOnTop: () => ipcRenderer.invoke('window:getAlwaysOnTop'),
+  setAlwaysOnTop: (value) => ipcRenderer.invoke('window:setAlwaysOnTop', !!value),
 
   // ── MT5 Başlatma & Durum ───────────────────────────────────────
   /**
@@ -53,17 +54,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
    */
   verifyMT5Connection: () => ipcRenderer.invoke('mt5:verify'),
 
-  /**
-   * MT5 pencere durumunu kontrol et.
-   * @returns {Promise<{ mt5_found: boolean, otp_dialog: boolean }>}
-   */
-  checkMT5Window: () => ipcRenderer.invoke('mt5:checkWindow'),
-
-  // ── Engine işlemleri ───────────────────────────────────────────
-  getEngineStatus: () => ipcRenderer.invoke('engine:status'),
-  startEngine: () => ipcRenderer.invoke('engine:start'),
-  stopEngine: () => ipcRenderer.invoke('engine:stop'),
-
   // ── Güvenli kapat (doğrulama sonrası renderer'dan çağrılır) ───────
   /**
    * Uygulamayı tamamen kapatır (pencere + tray + API process).
@@ -71,14 +61,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
    */
   safeQuit: () => ipcRenderer.invoke('app:safeQuit'),
 
-  // ── Event dinleyicileri ────────────────────────────────────────
-  onTradeUpdate: (callback) => {
-    ipcRenderer.on('trade:update', (_, data) => callback(data));
-  },
-  onStatusChange: (callback) => {
-    ipcRenderer.on('status:change', (_, data) => callback(data));
-  },
-  onMT5StatusChange: (callback) => {
-    ipcRenderer.on('mt5:statusChange', (_, data) => callback(data));
+  /**
+   * Pencere öne getirildiğinde OTP alanına focus verilsin diye main'den gönderilir.
+   * Sadece LockScreen (WAITING adımında) dinler; callback'te otpInputRef.current.focus() yapılır.
+   * @param {() => void} callback
+   * @returns {() => void} Listener'ı kaldırmak için çağrılacak fonksiyon
+   */
+  onFocusOTPInputRequested: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on('window:focusOTPInput', handler);
+    return () => ipcRenderer.removeListener('window:focusOTPInput', handler);
   },
 });

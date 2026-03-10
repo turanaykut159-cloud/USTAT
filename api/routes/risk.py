@@ -6,11 +6,14 @@ daily_drawdown_pct ve weekly_drawdown_pct anlık hesaplanır (DB şemasına doku
 
 from __future__ import annotations
 
+import logging
 from datetime import date, timedelta
 
 from fastapi import APIRouter
 
 from api.deps import get_baba, get_db, get_engine, get_mt5
+
+logger = logging.getLogger("ustat.api.routes.risk")
 from api.schemas import RiskResponse
 
 router = APIRouter()
@@ -43,11 +46,17 @@ async def get_risk():
             else:
                 resp.daily_drawdown_pct = 0.0
 
-            # weekly_drawdown_pct: hafta başı equity'den anlık hesapla
+            # Baseline tarih (Baba'dan al, yoksa fallback)
+            baseline_iso = ""
+            if baba and hasattr(baba, "_risk_baseline_date"):
+                baseline_iso = f"{baba._risk_baseline_date}T00:00:00"
+
+            # weekly_drawdown_pct: hafta başı equity'den anlık hesapla (baseline filtreli)
             today = date.today()
             monday = today - timedelta(days=today.weekday())
             week_start_iso = f"{monday.isoformat()}T00:00:00"
-            snapshots = db.get_risk_snapshots(since=week_start_iso, limit=500)
+            week_since = max(week_start_iso, baseline_iso) if baseline_iso else week_start_iso
+            snapshots = db.get_risk_snapshots(since=week_since, limit=500)
             if snapshots and equity > 0:
                 week_start_equity = snapshots[-1].get("equity", 0.0) or 0.0
                 if week_start_equity > 0 and equity < week_start_equity:
@@ -56,6 +65,20 @@ async def get_risk():
                     resp.weekly_drawdown_pct = 0.0
             else:
                 resp.weekly_drawdown_pct = 0.0
+
+            # monthly_drawdown_pct: ay başı equity'den anlık hesapla (baseline filtreli)
+            month_start = today.replace(day=1)
+            month_start_iso = f"{month_start.isoformat()}T00:00:00"
+            month_since = max(month_start_iso, baseline_iso) if baseline_iso else month_start_iso
+            m_snapshots = db.get_risk_snapshots(since=month_since, limit=1000)
+            if m_snapshots and equity > 0:
+                month_start_equity = m_snapshots[-1].get("equity", 0.0) or 0.0
+                if month_start_equity > 0 and equity < month_start_equity:
+                    resp.monthly_drawdown_pct = (month_start_equity - equity) / month_start_equity
+                else:
+                    resp.monthly_drawdown_pct = 0.0
+            else:
+                resp.monthly_drawdown_pct = 0.0
 
             resp.equity = equity
             resp.balance = snap.get("balance", 0.0) or 0.0
@@ -105,8 +128,8 @@ async def get_risk():
                 if verdict.blocked_symbols:
                     combined = set(resp.blocked_symbols) | set(verdict.blocked_symbols)
                     resp.blocked_symbols = list(combined)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.exception("Risk limitleri kontrolü HATASI: %s", e)
 
     # ── MT5'ten açık pozisyon sayısı ──────────────────────────────
     if mt5 and mt5.is_connected:

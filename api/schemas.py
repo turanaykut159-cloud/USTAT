@@ -7,8 +7,6 @@ dönüşümü bu şemalar aracılığıyla yapılır.
 
 from __future__ import annotations
 
-from datetime import datetime
-
 from pydantic import BaseModel, Field
 
 
@@ -200,6 +198,7 @@ class RiskResponse(BaseModel):
     daily_pnl: float = 0.0
     daily_drawdown_pct: float = 0.0
     weekly_drawdown_pct: float = 0.0
+    monthly_drawdown_pct: float = 0.0
     total_drawdown_pct: float = 0.0
     floating_pnl: float = 0.0
     equity: float = 0.0  # Snapshot equity (floating kayıp oranı hesabı için)

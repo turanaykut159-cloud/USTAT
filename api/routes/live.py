@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -34,6 +35,11 @@ _active_connections: list[WebSocket] = []
 
 PUSH_INTERVAL = 2.0  # saniye
 EVENT_DRAIN_INTERVAL = 1.0  # saniye — event bus kontrol sıklığı
+
+# Risk snapshot cache — sync DB sorgusunun event loop'u bloklamasını önler
+_risk_snapshot_cache: dict | None = None
+_risk_snapshot_ts: float = 0.0
+_RISK_CACHE_TTL: float = 5.0  # saniye
 
 # Global event drain task referansı
 _event_drain_task: asyncio.Task | None = None
@@ -98,17 +104,26 @@ async def _event_drain_loop():
 
 async def _push_loop(ws: WebSocket):
     """Her PUSH_INTERVAL saniyede veri gönder."""
+    _consecutive_errors = 0
+    _MAX_LOGGED_ERRORS = 5  # ilk 5 hata loglanır, sonra her 60.'da bir
+
     while True:
         try:
             await asyncio.sleep(PUSH_INTERVAL)
             await _send_all_updates(ws)
+            _consecutive_errors = 0  # başarılı gönderimde sıfırla
         except asyncio.CancelledError:
             break
         except WebSocketDisconnect:
             break
         except Exception as e:
-            logger.warning(f"WebSocket push hatası: {e}")
-            await asyncio.sleep(5)  # Hata sonrası kısa bekleme
+            _consecutive_errors += 1
+            if _consecutive_errors <= _MAX_LOGGED_ERRORS or _consecutive_errors % 60 == 0:
+                logger.warning(
+                    f"WebSocket push hatası ({_consecutive_errors}x): {e}"
+                )
+            # Artan backoff: 5s → 10s → 15s → ... → max 30s
+            await asyncio.sleep(min(5 * _consecutive_errors, 30))
 
 
 async def _send_all_updates(ws: WebSocket):
@@ -149,9 +164,16 @@ async def _send_all_updates(ws: WebSocket):
         info = pipeline.latest_account
         daily_pnl = 0.0
         if db:
-            snap = db.get_latest_risk_snapshot()
-            if snap:
-                daily_pnl = snap.get("daily_pnl", 0.0)
+            global _risk_snapshot_cache, _risk_snapshot_ts
+            now = time.time()
+            if _risk_snapshot_cache is None or (now - _risk_snapshot_ts) > _RISK_CACHE_TTL:
+                try:
+                    _risk_snapshot_cache = await asyncio.to_thread(db.get_latest_risk_snapshot)
+                    _risk_snapshot_ts = now
+                except Exception:
+                    pass  # Cache'deki eski değeri kullan
+            if _risk_snapshot_cache:
+                daily_pnl = _risk_snapshot_cache.get("daily_pnl", 0.0)
 
         messages.append({
             "type": "equity",
@@ -159,6 +181,9 @@ async def _send_all_updates(ws: WebSocket):
             "balance": info.balance,
             "floating_pnl": info.equity - info.balance,
             "daily_pnl": daily_pnl,
+            "margin": info.margin,
+            "free_margin": info.free_margin,
+            "ts": time.time(),
         })
 
     # ── 3. Pozisyon güncellemesi (cache'den, strateji OĞUL'dan) ───
@@ -311,4 +336,5 @@ async def broadcast(message: dict) -> None:
             disconnected.append(ws)
 
     for ws in disconnected:
-        _active_connections.remove(ws)
+        if ws in _active_connections:
+            _active_connections.remove(ws)

@@ -109,8 +109,7 @@ class Config:
         try:
             with open(self._path, "w", encoding="utf-8") as f:
                 json.dump(self._data, f, indent=2, ensure_ascii=False)
-                f.write("
-")
+                f.write("\n")
             logger.info(f"Config dosyaya kaydedildi: {self._path}")
         except OSError as exc:
             logger.error(f"Config kayıt hatası: {self._path} — {exc}")

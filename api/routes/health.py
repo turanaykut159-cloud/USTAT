@@ -16,9 +16,12 @@ Veri kaynakları:
 
 from __future__ import annotations
 
+import logging
 import os
 
 from fastapi import APIRouter
+
+logger = logging.getLogger("ustat.api.routes.health")
 
 from api.deps import (
     get_baba,
@@ -161,8 +164,8 @@ def _build_system_info() -> dict:
     if db and hasattr(db, "_db_path"):
         try:
             db_size_mb = round(os.path.getsize(db._db_path) / (1024 * 1024), 2)
-        except OSError:
-            pass
+        except OSError as e:
+            logger.debug("DB dosya boyutu okunamadı: %s", e)
 
     # Cycle sayısı
     cycle_count = 0
@@ -174,8 +177,8 @@ def _build_system_info() -> dict:
     if pipeline:
         try:
             cache_stale = pipeline.is_cache_stale()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Cache staleness kontrolü hatası: %s", e)
 
     return {
         "engine_uptime_seconds": get_uptime(),
