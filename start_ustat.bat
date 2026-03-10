@@ -1,5 +1,5 @@
 @echo off
-:: USTAT v5.2 — Tek tikla baslatici
+:: USTAT v5.3 — Tek tikla baslatici
 :: API ve Vite arka planda, Electron gorunur baslar.
 
 :: 1. API sunucusunu gizli baslat

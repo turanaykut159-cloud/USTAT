@@ -1,5 +1,5 @@
 """
-USTAT v5.2 - Baslatici
+USTAT v5.3 - Baslatici
 
 API + Vite + Electron baslatir.
 Her adimi PORT KONTROLU ile dogrulayarak ilerler.
@@ -301,7 +301,7 @@ def main():
         f.write("")
 
     is_prod = "--prod" in sys.argv
-    log(f"=== USTAT v5.2 Baslatici {'(PRODUCTION)' if is_prod else '(DEVELOPMENT)'} ===")
+    log(f"=== USTAT v5.3 Baslatici {'(PRODUCTION)' if is_prod else '(DEVELOPMENT)'} ===")
     log(f"Python: {sys.executable}")
 
     # 0. Hizli temizlik (minimum bekleme)
