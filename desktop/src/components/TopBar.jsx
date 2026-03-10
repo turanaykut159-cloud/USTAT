@@ -98,7 +98,16 @@ export default function TopBar() {
         <h1>ÜSTAT <span className="version">v5.3</span></h1>
         {initialLoading && <span className="tb-loading">Yükleniyor...</span>}
 
-        <span className={`tb-phase tb-phase--${phase}`}>
+        <span
+          className={`tb-phase tb-phase--${phase}`}
+          title={
+            phase === 'running' ? 'Engine çalışıyor — sinyal üretimi ve risk kontrolü aktif' :
+            phase === 'stopped' ? 'Engine durdurulmuş — işlem yapılmıyor' :
+            phase === 'killed' ? 'Kill-Switch ile durdurulmuş — sıfırlama gerekli' :
+            phase === 'error' ? 'Engine hata durumunda' :
+            phase === 'idle' ? 'Engine hazırlanıyor' : ''
+          }
+        >
           {phaseLabel}
         </span>
 
@@ -113,11 +122,24 @@ export default function TopBar() {
           </button>
         )}
 
-        <span className={`tb-faz tb-faz--level${killLevel}`}>
+        <span
+          className={`tb-faz tb-faz--level${killLevel}`}
+          title={
+            killLevel === 0 ? 'Kill-Switch aktif değil' :
+            killLevel === 1 ? 'L1 — Kontrat Durdurma: Anomali tespit edilen kontratta işlem engeli' :
+            killLevel === 2 ? 'L2 — Sistem Pause: Yeni işlem açılamaz, mevcut pozisyonlar korunur' :
+            killLevel === 3 ? 'L3 — Tam Kapanış: Tüm pozisyonlar kapatılır, sistem durur' : ''
+          }
+        >
           {fazLabel}
         </span>
 
-        <span className={`tb-conn ${isConnected ? 'tb-conn--on' : 'tb-conn--off'}`}>
+        <span
+          className={`tb-conn ${isConnected ? 'tb-conn--on' : 'tb-conn--off'}`}
+          title={isConnected
+            ? 'MT5 bağlantısı aktif — piyasa verisi ve emir iletimi çalışıyor'
+            : 'MT5 bağlantısı kopuk — veri akışı ve emir iletimi durmuş'}
+        >
           <span className="tb-conn-dot" />
           {isConnected ? 'MT5' : 'Bağlantı Yok'}
         </span>

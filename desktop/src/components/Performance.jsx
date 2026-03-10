@@ -676,35 +676,108 @@ export default function Performance() {
             ) : <div className="pf-empty">Rejim verisi yok</div>}
           </div>
 
-          {/* ═══ F) PLACEHOLDER PANELLER ═══════════════════════════════ */}
-          <div className="pf-placeholder-grid">
-            <div className="pf-placeholder-card">
-              <span className="pf-placeholder-icon">&#x1F50D;</span>
-              <span className="pf-placeholder-title">Hata Atama Raporu</span>
-              <span className="pf-placeholder-desc">
-                Kim hata yapti? BABA veya OGUL sorumluluk atamasi.
-                USTAT beyin motoru aktif oldugunda dolacak.
-              </span>
-              <span className="pf-placeholder-badge">Yakinda</span>
-            </div>
-            <div className="pf-placeholder-card">
-              <span className="pf-placeholder-icon">&#x1F4CA;</span>
-              <span className="pf-placeholder-title">Ertesi Gun Analizi</span>
-              <span className="pf-placeholder-desc">
-                Kapanan islemler icin islem gununun ertesi gunu otomatik analiz.
-                Bu islem su kadar olabilirdi, neden bu kadar?
-              </span>
-              <span className="pf-placeholder-badge">Yakinda</span>
-            </div>
-            <div className="pf-placeholder-card">
-              <span className="pf-placeholder-icon">&#x2699;</span>
-              <span className="pf-placeholder-title">Regulasyon Onerileri</span>
-              <span className="pf-placeholder-desc">
-                BABA/OGUL parametre duzeltme onerileri.
-                Raporlar tetikler, parametreler gozden gecirilir.
-              </span>
-              <span className="pf-placeholder-badge">Yakinda</span>
-            </div>
+          {/* ═══ F) ÜSTAT BEYİN PANELLERİ ═══════════════════════════════ */}
+          <div className="pf-brain-grid">
+
+            {/* ── Hata Atama Raporu ─────────────────────────────────── */}
+            {(brain?.error_attributions || []).length > 0 ? (
+              <div className="pf-chart-card">
+                <div className="pf-chart-header"><h3>Hata Atama Raporu</h3></div>
+                <div className="pf-brain-list">
+                  {brain.error_attributions.slice(0, 10).map((ea, i) => (
+                    <div key={i} className="pf-brain-row">
+                      <span className={`pf-brain-badge pf-brain--${ea.responsible.toLowerCase()}`}>
+                        {ea.responsible}
+                      </span>
+                      <span className="pf-brain-type">{ea.error_type}</span>
+                      <span className="pf-brain-desc">{ea.description}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="pf-placeholder-card">
+                <span className="pf-placeholder-icon">&#x1F50D;</span>
+                <span className="pf-placeholder-title">Hata Atama Raporu</span>
+                <span className="pf-placeholder-desc">
+                  Kim hata yapti? BABA veya OGUL sorumluluk atamasi.
+                  USTAT beyin motoru aktif oldugunda dolacak.
+                </span>
+                <span className="pf-placeholder-badge">Veri bekleniyor</span>
+              </div>
+            )}
+
+            {/* ── Ertesi Gün Analizi ───────────────────────────────── */}
+            {(brain?.next_day_analyses || []).length > 0 ? (
+              <div className="pf-chart-card">
+                <div className="pf-chart-header"><h3>Ertesi Gun Analizi</h3></div>
+                <div className="pf-brain-list">
+                  {brain.next_day_analyses.slice(0, 10).map((nda, i) => (
+                    <div key={i} className="pf-brain-row pf-nda-row">
+                      <span className="pf-brain-symbol">{nda.symbol}</span>
+                      <span className={`pf-brain-pnl ${nda.actual_pnl >= 0 ? 'pf-green' : 'pf-red'}`}>
+                        {fmt(nda.actual_pnl)}
+                      </span>
+                      <span className="pf-brain-dim">
+                        Potansiyel: {fmt(nda.potential_pnl)} | Kacirilan: {fmt(nda.missed_profit)}
+                      </span>
+                      <div className="pf-nda-scores">
+                        <span title="Sinyal puani">S:{Math.round(nda.signal_score)}</span>
+                        <span title="Yonetim puani">Y:{Math.round(nda.management_score)}</span>
+                        <span title="Kar puani">K:{Math.round(nda.profit_score)}</span>
+                        <span title="Risk puani">R:{Math.round(nda.risk_score)}</span>
+                        <span className="pf-nda-total" title="Toplam puan">
+                          {Math.round(nda.total_score)}/100
+                        </span>
+                      </div>
+                      {nda.summary && <span className="pf-brain-desc">{nda.summary}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="pf-placeholder-card">
+                <span className="pf-placeholder-icon">&#x1F4CA;</span>
+                <span className="pf-placeholder-title">Ertesi Gun Analizi</span>
+                <span className="pf-placeholder-desc">
+                  Kapanan islemler icin islem gununun ertesi gunu otomatik analiz.
+                  Her sabah 09:30'da bir onceki gunun islemleri puanlanir.
+                </span>
+                <span className="pf-placeholder-badge">Veri bekleniyor</span>
+              </div>
+            )}
+
+            {/* ── Regülasyon Önerileri ─────────────────────────────── */}
+            {(brain?.regulation_suggestions || []).length > 0 ? (
+              <div className="pf-chart-card">
+                <div className="pf-chart-header"><h3>Regulasyon Onerileri</h3></div>
+                <div className="pf-brain-list">
+                  {brain.regulation_suggestions.slice(0, 10).map((rs, i) => (
+                    <div key={i} className="pf-brain-row pf-reg-row">
+                      <span className={`pf-brain-badge pf-brain--${rs.priority.toLowerCase()}`}>
+                        {rs.priority}
+                      </span>
+                      <span className="pf-brain-type">{rs.parameter}</span>
+                      <span className="pf-brain-dim">
+                        {rs.current_value} &rarr; {rs.suggested_value}
+                      </span>
+                      <span className="pf-brain-desc">{rs.reason}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="pf-placeholder-card">
+                <span className="pf-placeholder-icon">&#x2699;</span>
+                <span className="pf-placeholder-title">Regulasyon Onerileri</span>
+                <span className="pf-placeholder-desc">
+                  BABA/OGUL parametre duzeltme onerileri.
+                  Her aksam 18:00'da gunluk rapor uretilir.
+                </span>
+                <span className="pf-placeholder-badge">Veri bekleniyor</span>
+              </div>
+            )}
+
           </div>
         </>
       )}

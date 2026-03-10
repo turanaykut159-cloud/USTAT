@@ -22,7 +22,7 @@ function pct(val) {
 
 // ── Progress Bar bileşeni ────────────────────────────────────────
 
-function RiskBar({ label, current, limit, unit = '%', danger = false }) {
+const RiskBar = React.memo(function RiskBar({ label, current, limit, unit = '%', danger = false }) {
   const currentPct = limit > 0 ? Math.min(Math.abs(current) / limit, 1) : 0;
   const fillPct = (currentPct * 100).toFixed(1);
   const isHigh = currentPct >= 0.7;
@@ -48,7 +48,7 @@ function RiskBar({ label, current, limit, unit = '%', danger = false }) {
       </div>
     </div>
   );
-}
+});
 
 // ── Kill-switch seviye etiketi ───────────────────────────────────
 
@@ -80,7 +80,7 @@ export default function RiskManagement() {
 
   useEffect(() => {
     fetchData();
-    const iv = setInterval(fetchData, 5000);
+    const iv = setInterval(fetchData, 10000);
     return () => clearInterval(iv);
   }, [fetchData]);
 
@@ -125,7 +125,7 @@ export default function RiskManagement() {
           <span className="risk-status-label">Rejim</span>
           <span className={`risk-status-value ${reg.cls}`}>{reg.text}</span>
           <span className="risk-status-reason">
-            Lot Çarpanı: x{risk.risk_multiplier?.toFixed(2) ?? '—'}
+            Rejim Çarpanı: x{risk.risk_multiplier?.toFixed(2) ?? '—'}
           </span>
         </div>
 
@@ -153,7 +153,7 @@ export default function RiskManagement() {
           />
           <RiskBar
             label="Aylık Kayıp"
-            current={risk.total_drawdown_pct || 0}
+            current={risk.monthly_drawdown_pct ?? risk.total_drawdown_pct ?? 0}
             limit={risk.max_monthly_loss}
           />
           <RiskBar

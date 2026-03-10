@@ -499,6 +499,33 @@ export default function HybridTrade() {
                     {(() => {
                       try {
                         const d = JSON.parse(evt.details || '{}');
+                        const evtType = (evt.event || '').toUpperCase();
+
+                        if (evtType === 'TRANSFER') {
+                          const parts = [];
+                          if (d.entry_price) parts.push(`Giriş: ${formatPrice(d.entry_price)}`);
+                          if (d.volume) parts.push(`Lot: ${d.volume}`);
+                          if (d.sl) parts.push(`SL: ${formatPrice(d.sl)}`);
+                          if (d.tp) parts.push(`TP: ${formatPrice(d.tp)}`);
+                          return parts.length > 0 ? parts.join(' | ') : 'Hibrite devredildi';
+                        }
+                        if (evtType === 'BREAKEVEN' && d.new_sl) {
+                          return `Breakeven: SL ${formatPrice(d.old_sl)} → ${formatPrice(d.new_sl)}`;
+                        }
+                        if (evtType === 'TRAILING_UPDATE' && d.new_sl) {
+                          return `Trailing SL: ${formatPrice(d.old_sl)} → ${formatPrice(d.new_sl)}`;
+                        }
+                        if (evtType === 'CLOSE') {
+                          const parts = [];
+                          if (d.reason) parts.push(d.reason);
+                          if (d.pnl != null) parts.push(`K/Z: ${formatMoney(d.pnl)}`);
+                          if (d.swap) parts.push(`Swap: ${formatMoney(d.swap)}`);
+                          return parts.join(' | ') || 'Kapandı';
+                        }
+                        if (evtType === 'REMOVE') {
+                          return d.reason || 'Hibritten çıkarıldı';
+                        }
+
                         if (d.new_sl) return `SL: ${formatPrice(d.old_sl)} → ${formatPrice(d.new_sl)}`;
                         if (d.reason) return d.reason;
                         if (d.pnl != null) return `K/Z: ${formatMoney(d.pnl)}`;
