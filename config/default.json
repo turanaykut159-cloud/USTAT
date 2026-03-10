@@ -1,5 +1,5 @@
 {
-  "version": "5.3.0",
+  "version": "5.4.0",
   "engine": {
     "cycle_interval": 10,
     "data_lookback_bars": 500,
@@ -23,7 +23,7 @@
     "consecutive_loss_limit": 3,
     "cooldown_hours": 4,
     "fake_signal_threshold": 5,
-    "baseline_date": "2026-03-10",
+    "baseline_date": "2026-03-10 13:01",
     "sltp_max_retries": 3,
     "close_max_retries": 3
   },

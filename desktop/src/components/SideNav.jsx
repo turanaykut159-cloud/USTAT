@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.3 — Sol dikey navigasyon menüsü.
+ * ÜSTAT v5.4 — Sol dikey navigasyon menüsü.
  *
  * 6 sayfa linki (ikonlu) + Güvenli Kapat (2 adım doğrulama) + Kill-Switch (en altta, kırmızı, 2s basılı tutma).
  */

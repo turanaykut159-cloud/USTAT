@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 class StatusResponse(BaseModel):
     """GET /api/status — Sistem durumu."""
-    version: str = "5.3.0"
+    version: str = "5.4.0"
     engine_running: bool = False
     mt5_connected: bool = False
     regime: str = "TREND"          # TREND / RANGE / VOLATILE / OLAY
@@ -702,7 +702,7 @@ class RiskBaselineGetResponse(BaseModel):
 
 class RiskBaselineUpdateRequest(BaseModel):
     """POST /api/settings/risk-baseline — Baseline tarih güncelle."""
-    new_date: str = Field(..., description="Yeni baseline tarihi (YYYY-MM-DD)")
+    new_date: str = Field(..., description="Yeni baseline tarihi (YYYY-MM-DD veya YYYY-MM-DD HH:MM)")
 
 
 class RiskBaselineUpdateResponse(BaseModel):

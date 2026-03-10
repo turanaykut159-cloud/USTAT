@@ -1,4 +1,48 @@
-# ÜSTAT v5.3 — Gelişim Tarihçesi
+# ÜSTAT v5.4 — Gelişim Tarihçesi
+
+---
+
+## Versiyon Geçişi: v5.3 → v5.4 (2026-03-10)
+
+- **Oran:** %10.47 (4887 satır değişiklik / 46669 toplam satır)
+- **Kapsam:** #41 (Kill-Switch L2 döngü bugu) + #42 (Manuel işlem force-close bugu + aktif pozisyon kartları) + önceki session'lar
+- **40 dosyada** versiyon referansları güncellendi (fonksiyonel sabitler + UI + JSDoc + metadata)
+
+---
+
+## #42 — Manuel İşlem Force-Close Bugu + Aktif Pozisyon Kartları (2026-03-10)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-10 |
+| **Neden** | Manuel İşlem Paneli'nden açılan F_AKBNK ve F_HALKB pozisyonları açılır açılmaz (~1300ms) otomatik kapatılıyor. Panel hâlâ "açık pozisyon var" gösteriyor (hayalet pozisyon). |
+| **Kök Neden** | **Birincil:** `mt5_bridge.py` `send_order()` SL/TP'yi `TRADE_ACTION_SLTP` ile eklemeye çalışıyor. GCM VİOP bu action'ı desteklemiyor (retcode=10035). 3 başarısız denemeden sonra `close_position()` ile pozisyonu **force-close** ediyor. ManuelMotor `open_manual_trade()` ATR-bazlı SL/TP hesaplayıp `send_order(sl=X, tp=Y)` olarak gönderiyordu → her MARKET emri ~1300ms içinde açılıp kapatılıyordu. **İkincil:** (1) `baba.py` `analyze_fake_signals()` TÜM MT5 pozisyonlarını tarıyor, manuel/otomatik ayrımı yapmıyor. (2) `manuel_motor.py` `sync_positions()` SENT state'teki trade MT5'te yoksa `continue` ile atlıyor → hayalet pozisyon. |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `engine/manuel_motor.py` | `open_manual_trade()`: `send_order()` çağrısında `sl=0, tp=0` gönderiliyor (GCM VİOP SLTP desteklemiyor, ManuelMotor tasarımı SL/TP yönetmiyor). SL/TP değerleri sadece bellekte risk göstergesi olarak tutuluyor |
+| `engine/manuel_motor.py` | `open_manual_trade()`: `force_closed` kontrolü eklendi — send_order SL/TP nedeniyle kapatırsa temiz hata döndürülüyor |
+| `engine/manuel_motor.py` | `SENT_EXPIRE_SEC = 30.0` sabiti eklendi |
+| `engine/manuel_motor.py` | `sync_positions()`: SENT state + MT5'te yok + 30s aşıldı → `external_close` olarak işleme mantığı eklendi |
+| `engine/baba.py` | `__init__`: `self.manuel_motor = None` referansı eklendi |
+| `engine/baba.py` | `analyze_fake_signals()`: Manuel pozisyon ticket'larını toplayan set eklendi, `manual_tickets`'taki pozisyonlar fake analizden atlanıyor |
+| `engine/main.py` | Cross-motor referanslarına `self.baba.manuel_motor = self.manuel_motor` eklendi |
+| `desktop/src/components/ManualTrade.jsx` | "Aktif Manuel Pozisyonlar" kartı eklendi — tablo: Sembol, Yön, Lot, Giriş Fiy., Anlık Fiy., K/Z, Süre, İşlem (Kapat butonu). 10s auto-refresh, TOPLAM footer |
+| `desktop/src/components/AutoTrading.jsx` | "Aktif Otomatik Pozisyonlar" full-width tablosu eklendi — tablo: Sembol, Yön, Strateji, Lot, Giriş Fiy., Anlık Fiy., SL, TP, K/Z, Oy, Süre. Sağ kolondaki özet kart korundu |
+
+### Eklenen
+- Manuel emir: `sl=0, tp=0` ile gönderim (force-close önlemi)
+- `force_closed` güvenlik kontrolü (send_order cevabı)
+- ManuelMotor SENT state timeout mekanizması (30 saniye)
+- BABA fake sinyal analizinde `manual_tickets` ile manuel pozisyon koruması
+- BABA → ManuelMotor cross-motor referansı
+- Manuel İşlem Paneli: "Aktif Manuel Pozisyonlar" kartı (HybridTrade tablosu ile aynı stilde)
+- Otomatik İşlem Paneli: "Aktif Otomatik Pozisyonlar" kartı (strateji, oy bilgisi dahil)
+
+### Çıkartılan
+- ManuelMotor'un send_order'a SL/TP göndermesi (GCM VİOP'ta çalışmıyordu ve force-close tetikliyordu)
 
 ---
 

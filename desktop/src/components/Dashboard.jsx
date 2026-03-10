@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.3 — Ana Dashboard ekranı.
+ * ÜSTAT v5.4 — Ana Dashboard ekranı.
  *
  * Layout:
  *   Üst:    4 stat kartı (Günlük İşlem, Başarı Oranı, Net K/Z, Profit Factor)
