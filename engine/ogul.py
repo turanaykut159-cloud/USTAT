@@ -91,7 +91,7 @@ MIN_BARS_H1:     int = 30           # H1 onay için min bar
 CONTRACT_SIZE:   float = 100.0      # VİOP çarpanı (varsayılan)
 
 # ── State Machine ────────────────────────────────────────────────
-ORDER_TIMEOUT_SEC: int       = 5       # limit emir timeout (saniye)
+ORDER_TIMEOUT_SEC: int       = 15      # v14: 5→15 (C sınıfı düşük likidite)
 MAX_SLIPPAGE_ATR_MULT: float = 0.5     # max slippage = 0.5 × ATR
 MAX_LOT_PER_CONTRACT: float  = 1.0     # test süreci: kontrat başına max 1 lot
 MARGIN_RESERVE_PCT: float    = 0.20    # test süreci: %20 teminat ayırma
@@ -331,6 +331,7 @@ class Ogul:
         self.last_signals: dict[str, str] = {}  # symbol → "BUY"|"SELL"|"BEKLE"
         self.h_engine: Any | None = None  # HEngine referansı (main.py tarafından atanır)
         self.manuel_motor: Any | None = None  # ManuelMotor referansı (main.py tarafından atanır)
+        self.ustat: Any | None = None  # ÜSTAT referansı (main.py tarafından atanır)
 
         # ── Top 5 kontrat seçimi (v13.0: ÜSTAT'tan taşındı) ────────
         self._current_top5: list[str] = []
@@ -349,6 +350,51 @@ class Ogul:
         self._daily_loss_stop_date: date | None = None  # sıfırlama takibi
         self._symbol_loss_count: dict[str, int] = {}    # sembol bazlı ardışık zarar
         self._symbol_loss_date: date | None = None       # günlük sıfırlama
+
+    # ═════════════════════════════════════════════════════════════════
+    #  ÜSTAT ENTEGRASYONu — Dinamik Parametre Okuma
+    # ═════════════════════════════════════════════════════════════════
+
+    def _get_ustat_param(self, key: str, fallback: float) -> float:
+        """ÜSTAT strateji havuzundan parametre oku, yoksa fallback döndür.
+
+        ÜSTAT'ın rejime göre belirlediği aktif profil parametrelerini
+        kullanır. ÜSTAT erişilemezse veya parametre yoksa hardcoded
+        sabite geri döner.
+
+        Args:
+            key: Parametre adı (ör. "sl_atr_mult", "tp_atr_mult").
+            fallback: ÜSTAT erişilemezse kullanılacak varsayılan değer.
+
+        Returns:
+            Parametre değeri.
+        """
+        if self.ustat is None:
+            return fallback
+        try:
+            params = self.ustat.get_active_params()
+            return float(params.get(key, fallback))
+        except Exception:
+            return fallback
+
+    def _get_contract_profile(self, symbol: str) -> dict[str, Any] | None:
+        """ÜSTAT'tan kontrat davranış profilini oku.
+
+        Top 5 seçimi ve sinyal üretiminde kontratın geçmiş performansı,
+        yön tercihi ve win-rate bilgisi için kullanılır.
+
+        Args:
+            symbol: Kontrat sembolü.
+
+        Returns:
+            Kontrat profili dict veya None.
+        """
+        if self.ustat is None:
+            return None
+        try:
+            return self.ustat.get_contract_profile(symbol)
+        except Exception:
+            return None
 
     # ═════════════════════════════════════════════════════════════════
     #  ANA GİRİŞ
@@ -690,6 +736,18 @@ class Ogul:
         # En güçlü sinyali seç
         best = max(candidates, key=lambda s: s.strength)
 
+        # ÜSTAT signal_threshold — rejime göre minimum sinyal gücü filtresi
+        ustat_threshold = self._get_ustat_param("signal_threshold", 0)
+        if ustat_threshold > 0:
+            # ÜSTAT threshold 0-100 ölçeğinde, strength 0-1 ölçeğinde
+            min_strength = ustat_threshold / 100.0
+            if best.strength < min_strength:
+                logger.debug(
+                    f"[ÜSTAT] Sinyal gücü yetersiz [{symbol}]: "
+                    f"{best.strength:.2f} < {min_strength:.2f} (threshold={ustat_threshold})"
+                )
+                return None
+
         # C1: Seans zamanlama filtresi — açılış/kapanış volatilitesinde
         # strength düşürme (09:45-10:15 ve 17:15-17:45)
         now_time = datetime.now().time()
@@ -785,21 +843,24 @@ class Ogul:
             return None
         price = tick.ask if direction == SignalType.BUY else tick.bid
 
-        # SL hesaplama: swing low/high - 1 ATR veya fallback
+        # SL/TP hesaplama: ÜSTAT strateji havuzundan dinamik parametre
+        tf_sl_mult = self._get_ustat_param("sl_atr_mult", TF_SL_ATR_MULT)
+        tf_tp_mult = self._get_ustat_param("tp_atr_mult", TF_TP_ATR_MULT)
+
         if direction == SignalType.BUY:
             swing = _find_swing_low(low, SWING_LOOKBACK)
             if swing is not None and swing < price:
                 sl = swing - atr_val
             else:
-                sl = price - TF_SL_ATR_MULT * atr_val
-            tp = price + TF_TP_ATR_MULT * atr_val
+                sl = price - tf_sl_mult * atr_val
+            tp = price + tf_tp_mult * atr_val
         else:
             swing = _find_swing_high(high, SWING_LOOKBACK)
             if swing is not None and swing > price:
                 sl = swing + atr_val
             else:
-                sl = price + TF_SL_ATR_MULT * atr_val
-            tp = price - TF_TP_ATR_MULT * atr_val
+                sl = price + tf_sl_mult * atr_val
+            tp = price - tf_tp_mult * atr_val
 
         # Sinyal gücü: ADX (0-0.5) + MACD (0-0.3) + EMA mesafesi (0-0.2)
         adx_str = min((adx_val - TF_ADX_THRESHOLD) / 25.0, 0.5)
@@ -895,13 +956,16 @@ class Ogul:
             return None
         price = tick.ask if direction == SignalType.BUY else tick.bid
 
-        # SL / TP
+        # SL / TP — ÜSTAT strateji havuzundan dinamik parametre
+        mr_sl_mult = self._get_ustat_param("sl_atr_mult", MR_SL_ATR_MULT)
+
+        # v14: TP hedefi BB_mid + 0.3×ATR (BB_mid tek başına çok konservatif)
         if direction == SignalType.BUY:
-            sl = bb_low - MR_SL_ATR_MULT * atr_val
-            tp = bb_mid
+            sl = bb_low - mr_sl_mult * atr_val
+            tp = bb_mid + 0.3 * atr_val
         else:
-            sl = bb_up + MR_SL_ATR_MULT * atr_val
-            tp = bb_mid
+            sl = bb_up + mr_sl_mult * atr_val
+            tp = bb_mid - 0.3 * atr_val
 
         # Sinyal gücü: RSI aşırılık (0-0.5) + BB temas (0-0.3) + ADX zayıflık (0-0.2)
         if direction == SignalType.BUY:
@@ -1003,14 +1067,15 @@ class Ogul:
             return None
         price = tick.ask if direction == SignalType.BUY else tick.bid
 
-        # SL / TP
+        # SL / TP — ÜSTAT strateji havuzundan dinamik parametre
+        bo_sl_mult = self._get_ustat_param("sl_atr_mult", BO_SL_ATR_MULT)
         range_width = high_20 - low_20
 
         if direction == SignalType.BUY:
-            sl = last_close - BO_SL_ATR_MULT * atr_val
+            sl = last_close - bo_sl_mult * atr_val
             tp = price + range_width
         else:
-            sl = last_close + BO_SL_ATR_MULT * atr_val
+            sl = last_close + bo_sl_mult * atr_val
             tp = price - range_width
 
         # Sinyal gücü: hacim patlaması (0-0.5) + ATR genişleme (0-0.3) + kırılım büyüklüğü (0-0.2)
@@ -1178,6 +1243,16 @@ class Ogul:
 
         # Lot hesaplama (evrensel yönetimde yarım lot ile giriş)
         lot = self._calculate_lot(signal, regime, equity, self.risk_params)
+
+        # ÜSTAT lot_scale — rejime göre lot ölçekleme
+        ustat_lot_scale = self._get_ustat_param("lot_scale", 1.0)
+        if ustat_lot_scale != 1.0:
+            lot = lot * ustat_lot_scale
+            logger.debug(
+                f"[ÜSTAT] lot_scale={ustat_lot_scale:.2f} uygulandı: "
+                f"{signal.symbol} lot={lot:.2f}"
+            )
+
         if lot <= 0:
             trade.state = TradeState.CANCELLED
             trade.cancel_reason = "lot_zero"
@@ -1357,6 +1432,15 @@ class Ogul:
             logger.debug(
                 f"Bias-lot nötr [{signal.symbol}]: lot*0.85={lot:.2f}"
             )
+
+        # v14: Lot çarpan yığılması koruması — tüm çarpanlar sonrası
+        # lot hâlâ pozitifse minimum 1.0 lot (vol_min) uygula
+        if 0 < lot < 1.0:
+            logger.info(
+                f"Lot floor [{signal.symbol}]: {lot:.3f}→1.0 "
+                f"(çarpan yığılması koruması)"
+            )
+            lot = 1.0
 
         return min(lot, MAX_LOT_PER_CONTRACT)
 
@@ -1919,8 +2003,8 @@ class Ogul:
             p.get("symbol"): p for p in positions
         }
 
-        # VOLATILE / OLAY → FILLED pozisyonları kapat
-        if regime.regime_type in (RegimeType.VOLATILE, RegimeType.OLAY):
+        # OLAY → tüm FILLED pozisyonları kapat (tam dur)
+        if regime.regime_type == RegimeType.OLAY:
             for symbol in list(self.active_trades):
                 trade = self.active_trades[symbol]
                 if trade.state != TradeState.FILLED:
@@ -1930,12 +2014,44 @@ class Ogul:
                 except Exception as exc:
                     logger.error(f"close_position hatası [{symbol}] ticket={trade.ticket}: {exc}")
                     close_result = None
-                reason = f"regime_{regime.regime_type.value.lower()}"
+                reason = "regime_olay"
                 if close_result:
                     logger.warning(
                         f"Rejim değişimi kapanış [{symbol}]: {reason}"
                     )
                 self._handle_closed_trade(symbol, trade, reason)
+            return
+
+        # v14: VOLATILE → kârdaki pozisyonları koru, zarardakileri kapat
+        if regime.regime_type == RegimeType.VOLATILE:
+            for symbol in list(self.active_trades):
+                trade = self.active_trades[symbol]
+                if trade.state != TradeState.FILLED:
+                    continue
+                pos = pos_by_symbol.get(symbol)
+                if pos is None:
+                    self._handle_closed_trade(symbol, trade, "sl_tp")
+                    continue
+                current_profit = pos.get("profit", 0.0)
+                if current_profit < 0:
+                    # Zarardaki pozisyonu kapat
+                    try:
+                        close_result = self.mt5.close_position(trade.ticket)
+                    except Exception as exc:
+                        logger.error(f"close_position hatası [{symbol}] ticket={trade.ticket}: {exc}")
+                        close_result = None
+                    if close_result:
+                        logger.warning(
+                            f"VOLATILE kapanış [{symbol}]: zarar={current_profit:.2f}"
+                        )
+                    self._handle_closed_trade(symbol, trade, "regime_volatile_loss")
+                else:
+                    # Kârdaki pozisyonu koru — trailing stop ile yönetilmeye devam
+                    logger.info(
+                        f"VOLATILE koruma [{symbol}]: kâr={current_profit:.2f} — "
+                        f"trailing stop ile yönetilecek"
+                    )
+                    self._manage_position(symbol, trade, pos)
             return
 
         # Her aktif işlem için strateji bazlı kontrol (sadece FILLED)
@@ -3620,9 +3736,15 @@ class Ogul:
         """Tarihsel başarı puanı (ham 0-100).
 
         Son 30 gün bu kontrat + rejimde win rate ve ortalama PnL.
+        ÜSTAT kontrat profili varsa 90 günlük derin analizi de dahil eder.
         """
         trades = self.db.get_trades(symbol=symbol, limit=200)
         if not trades:
+            # ÜSTAT profili varsa onu kullan
+            profile = self._get_contract_profile(symbol)
+            if profile and profile.get("trade_count", 0) >= 5:
+                wr = profile.get("win_rate", 50)
+                return max(0.0, min(100.0, wr))
             return 50.0
 
         cutoff = (
@@ -3651,7 +3773,24 @@ class Ogul:
         wr_score = max(0.0, min(60.0, (win_rate - 0.3) / 0.4 * 60.0))
         pnl_score = 20.0 + min(20.0, max(-20.0, avg_pnl * 2.0))
 
-        return max(0.0, min(100.0, wr_score + pnl_score))
+        base_score = wr_score + pnl_score
+
+        # ÜSTAT kontrat profili bonus/penalty (90 günlük derin analiz)
+        profile = self._get_contract_profile(symbol)
+        if profile and profile.get("trade_count", 0) >= 5:
+            ustat_wr = profile.get("win_rate", 50)
+            # Win rate < %30 → ceza, > %60 → bonus
+            if ustat_wr < 30:
+                base_score -= 15  # düşük performans cezası
+            elif ustat_wr > 60:
+                base_score += 10  # yüksek performans bonusu
+
+            # Toplam K/Z negatifse ek ceza
+            total_pnl = profile.get("total_pnl", 0)
+            if total_pnl < -500:
+                base_score -= 10
+
+        return max(0.0, min(100.0, base_score))
 
     def _score_volatility_fit(self, symbol: str, regime: Regime) -> float:
         """Volatilite uyumu puanı (ham 0-100).

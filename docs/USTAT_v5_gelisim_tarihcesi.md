@@ -1418,3 +1418,45 @@ Bu düzeltmeler native SLTP çalışmadığı için sorunu çözmedi ama kod kal
 ### Çıkartılan
 - `shutil.copy2` birincil yedekleme yöntemi olarak (fallback olarak korundu)
 - Event bus sessiz `except: pass` bloğu
+
+---
+
+## #40 — v14 Production-Ready: Risk & Sinyal Motoru Tam Revizyon (2026-03-13)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-13 |
+| **Neden** | OĞUL Motor Analizi (8.0/10) ve BABA Risk Analizi (6.5/10) raporları sonucu tespit edilen tüm kritik iyileştirmelerin uygulanması. Sistem gerçek piyasa koşullarına (VİOP) hazır hale getirildi. |
+| **Kök Neden** | (1) BABA çok katı: günlük kayıp %1.8 ve 4 saat cooldown VİOP seans süresine uyumsuz. (2) OLAY rejimi tüm günü bloke ediyordu, sabah seansını gereksiz kapatıyordu. (3) VOLATILE rejimde kârlı pozisyonlar da kapatılıyordu. (4) OĞUL'da ORDER_TIMEOUT=5sn C sınıfı düşük likiditede yetersiz. (5) Mean Reversion TP hedefi (BB_mid) çok konservatif. (6) Lot çarpan yığılması (regime×graduated×bias×entry) lotu sıfıra yakın düşürüyordu. (7) TREND rejiminde BREAKOUT stratejisi devre dışıydı. (8) Fake sinyal threshold=5 çok hassas, erken kapatma yapıyordu. |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `engine/models/risk.py` | `max_daily_loss`: 0.018→0.025 (%2.5), `max_floating_loss`: 0.015→0.020 (%2.0), `max_daily_trades`: 5→8, `cooldown_hours`: 4→2 |
+| `engine/models/regime.py` | TREND stratejileri: `[TREND_FOLLOW]`→`[TREND_FOLLOW, BREAKOUT]`. Doküman v14.0'a güncellendi. |
+| `engine/baba.py` | Rejim eşikleri: `ATR_VOLATILE_MULT` 2.0→2.5, `SPREAD_VOLATILE_MULT` 3.0→4.0, `PRICE_MOVE_PCT` 2.0→2.5, `VOLATILE_VOTE_PCT` %30→%40 |
+| `engine/baba.py` | OLAY saatlik pencere: `OLAY_BLOCK_START=12:00`, `OLAY_BLOCK_END=15:30`. TCMB/FED günleri sadece 12:00-15:30 arası blok, sabah (09:45-12:00) ve karar sonrası (15:30+) işleme açık. `expiry` ve `usdtry` tam gün blok korundu. |
+| `engine/baba.py` | Risk sabitleri: `COOLDOWN_HOURS` 4→2, `MAX_FLOATING_LOSS_PCT` 0.015→0.020, `MAX_DAILY_TRADES` 5→8 |
+| `engine/baba.py` | Fake sinyal: `FAKE_SCORE_THRESHOLD` 5→6. Skor=5 için `FAKE_WARNING` event ile izleme mekanizması eklendi (kapatma yerine uyarı). |
+| `engine/ogul.py` | `ORDER_TIMEOUT_SEC`: 5→15 saniye (C sınıfı düşük likidite kontratları) |
+| `engine/ogul.py` | Mean Reversion TP: `bb_mid`→`bb_mid ± 0.3×ATR` (BUY: +0.3×ATR, SELL: -0.3×ATR) |
+| `engine/ogul.py` | Lot çarpan yığılma koruması: tüm çarpanlar sonrası lot 0<lot<1.0 ise minimum 1.0 lot floor uygulanır |
+| `engine/ogul.py` | VOLATILE rejim mantığı yeniden yazıldı: zarardaki pozisyonlar kapatılır, kârdaki pozisyonlar trailing stop ile korunmaya devam eder |
+
+### Eklenen
+- `OLAY_BLOCK_START`, `OLAY_BLOCK_END`, `OLAY_FULL_DAY_TRIGGERS` sabitleri (baba.py)
+- `VOLATILE_VOTE_PCT` sabiti (baba.py)
+- `FAKE_WARNING` event tipi — skor eşiğe yakın pozisyonlar için izleme (baba.py)
+- Lot floor mekanizması — çarpan yığılması koruması (ogul.py)
+- VOLATILE rejimde kâr/zarar ayrımı ile akıllı pozisyon yönetimi (ogul.py)
+
+### Kaldırılan / Değiştirilen Davranışlar
+- OLAY rejimi artık tüm günü bloke etmiyor (TCMB/FED sadece 12:00-15:30)
+- VOLATILE rejimi artık kârlı pozisyonları kapatmıyor (trailing stop ile koruma)
+- Fake sinyal skor=5 artık direkt kapatma tetiklemiyor (uyarı + izleme)
+- TREND rejiminde BREAKOUT stratejisi artık aktif
+
+### Analiz Raporları (bu oturumda oluşturuldu)
+- `OGUL_MOTOR_ANALIZI.md` — OĞUL sinyal motoru detaylı analiz raporu (8.0/10, "Porsche 911 GT3")
+- `BABA_RISK_ANALIZI.md` — BABA risk motoru detaylı analiz raporu (6.5/10→8.5/10 hedefi)

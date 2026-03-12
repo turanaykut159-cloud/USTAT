@@ -16,13 +16,13 @@ Erken uyarı tetikleyicileri (likidite sınıfına göre farklı eşik):
     USD/TRY şoku      — 5 dk'da %0.5+ hareket (tüm sınıflar)
 
 Risk yönetimi:
-    Günlük zarar %1.8 → tüm işlemler dur → ertesi gün 09:30 sıfırla
+    Günlük zarar %2.5 → tüm işlemler dur → ertesi gün 09:30 sıfırla
     Haftalık zarar %4 → lot %50 azalt → Pazartesi 09:30 sıfırla
     Aylık zarar %7    → sistem dur → manuel onay
     Max DD %10 / Hard DD %15 → tam kapanış → manuel onay
-    3 üst üste kayıp  → 4 saat cool-down
-    Floating loss %1.5 → yeni işlem engeli
-    Günlük max işlem 5 / Tek işlem max %2
+    3 üst üste kayıp  → 2 saat cool-down
+    Floating loss %2.0 → yeni işlem engeli
+    Günlük max işlem 8 / Tek işlem max %2
 
 Korelasyon:
     Max 3 aynı yön / Max 2 aynı sektör aynı yön
@@ -37,7 +37,7 @@ Kill-switch (3 seviye):
 from __future__ import annotations
 
 import math
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any
 
 import numpy as np
@@ -81,13 +81,21 @@ ADX_RANGE_THRESHOLD:   float = 20.0
 EMA_DIRECTION_BARS:    int   = 5
 EMA_DIRECTION_MIN:     int   = 4
 BB_WIDTH_RATIO:        float = 0.8
-ATR_VOLATILE_MULT:     float = 2.0
-SPREAD_VOLATILE_MULT:  float = 3.0
-PRICE_MOVE_PCT:        float = 2.0
+ATR_VOLATILE_MULT:     float = 2.5     # v14: 2.0→2.5 (VİOP normali daha volatil)
+SPREAD_VOLATILE_MULT:  float = 4.0     # v14: 3.0→4.0 (düşük likidite spread'i)
+PRICE_MOVE_PCT:        float = 2.5     # v14: 2.0→2.5 (VİOP haber odaklı piyasa)
+VOLATILE_VOTE_PCT:     float = 0.40    # v14: %30→%40 (VOLATILE için daha fazla oy)
 
 # ── OLAY eşikleri ───────────────────────────────────────────────────
 USDTRY_SHOCK_PCT:      float = 2.0
 EXPIRY_DAYS:           int   = 2
+
+# ── OLAY saatlik pencere (v14: tüm gün yerine zaman bazlı) ────────
+# TCMB PPK kararı genelde 14:00, FED kararı gece (TR saati).
+# Sabah (09:45-12:00) ve karar sonrası (15:30+) normal işlem mümkün.
+OLAY_BLOCK_START: time = time(12, 0)   # OLAY blok başlangıcı
+OLAY_BLOCK_END:   time = time(15, 30)  # OLAY blok bitişi
+OLAY_FULL_DAY_TRIGGERS: set = {"expiry", "usdtry"}  # Tam gün OLAY tetikleyicileri
 
 # ── Erken uyarı eşikleri ────────────────────────────────────────────
 SPREAD_SPIKE_MULT: dict[str, float] = {"A": 3.0, "B": 4.0, "C": 5.0}
@@ -109,9 +117,9 @@ MAX_WEEKLY_LOSS_PCT:     float = 0.04
 MAX_MONTHLY_LOSS_PCT:    float = 0.07
 HARD_DRAWDOWN_PCT:       float = 0.12
 CONSECUTIVE_LOSS_LIMIT:  int   = 3
-COOLDOWN_HOURS:          int   = 4
-MAX_FLOATING_LOSS_PCT:   float = 0.015
-MAX_DAILY_TRADES:        int   = 5
+COOLDOWN_HOURS:          int   = 2       # v14: 4→2 saat (VİOP seans süresi kısa)
+MAX_FLOATING_LOSS_PCT:   float = 0.020   # v14: %1.5→%2.0
+MAX_DAILY_TRADES:        int   = 8       # v14: 5→8 (VİOP fırsat sıklığı)
 MAX_RISK_PER_TRADE_HARD: float = 0.02
 
 # ── Korelasyon sabitleri ─────────────────────────────────────────────
@@ -146,7 +154,7 @@ KILL_SWITCH_L2:   int = 2   # sistem pause
 KILL_SWITCH_L3:   int = 3   # tam kapanış
 
 # ── Fake sinyal analiz sabitleri ───────────────────────────────────
-FAKE_SCORE_THRESHOLD:  int   = 5       # toplam >= 5 → pozisyon kapat (3→5 rapor önerisi)
+FAKE_SCORE_THRESHOLD:  int   = 6       # v14: 5→6 (max 6, tüm katmanlar tetiklenmeli)
 FAKE_VOLUME_RATIO_MIN: float = 0.7     # hacim / 20-bar ort. < 0.7 → FAKE
 FAKE_VOLUME_LOOKBACK:  int   = 20      # hacim ortalaması bar sayısı
 FAKE_SPREAD_MULT: dict[str, float] = {"A": 2.5, "B": 3.5, "C": 5.0}
@@ -415,13 +423,14 @@ class Baba:
         if total == 0:
             return Regime(regime_type=RegimeType.RANGE, confidence=0.0)
 
-        # VOLATILE ≥ %30 → tüm piyasa VOLATILE
-        if votes[RegimeType.VOLATILE] / total >= 0.30:
+        # v14: VOLATILE ≥ %40 → tüm piyasa VOLATILE (eskiden %30)
+        if votes[RegimeType.VOLATILE] / total >= VOLATILE_VOTE_PCT:
             winner = RegimeType.VOLATILE
         else:
             winner = max(votes, key=votes.get)
 
         # Fix 7: RANGE + yüksek ADX çelişkisi → TREND'e override
+        adx_override = False
         if winner == RegimeType.RANGE and adx_vals:
             avg_adx = float(np.mean(adx_vals))
             if avg_adx > ADX_TREND_THRESHOLD:
@@ -430,8 +439,14 @@ class Baba:
                     f"(avg_adx={avg_adx:.1f}>{ADX_TREND_THRESHOLD})"
                 )
                 winner = RegimeType.TREND
+                adx_override = True
 
-        confidence = round(votes[winner] / total, 3)
+        # Fix: ADX override sonrası confidence, override koşulundan hesaplansın
+        if adx_override:
+            # ADX override güvenilir bir karar — confidence ADX gücüne göre
+            confidence = round(min(avg_adx / 50.0, 1.0), 3)
+        else:
+            confidence = round(votes[winner] / total, 3)
 
         regime = Regime(
             regime_type=winner,
@@ -569,16 +584,28 @@ class Baba:
 
     # ── OLAY kontrolü ────────────────────────────────────────────────
     def _check_olay(self) -> dict[str, Any] | None:
-        """TCMB/FED günü, vade sonu, kur şoku.
+        """TCMB/FED günü (saatlik pencere), vade sonu, kur şoku.
+
+        v14 iyileştirmesi: Merkez bankası günlerinde tüm gün OLAY yerine
+        sadece 12:00-15:30 arası OLAY. Vade ve kur şoku tam gün kalır.
 
         Returns:
             Neden sözlüğü veya None.
         """
         today = date.today()
+        now_time = datetime.now().time()
 
+        # 1. TCMB/FED günü — v14: saatlik pencere (12:00-15:30)
         if today in CENTRAL_BANK_DATES:
-            return {"reason": "TCMB/FED toplantı günü", "trigger": "calendar"}
+            if OLAY_BLOCK_START <= now_time <= OLAY_BLOCK_END:
+                return {"reason": "TCMB/FED toplantı saati", "trigger": "calendar"}
+            # Pencere dışında → OLAY değil, normal rejim algılamaya devam
+            logger.debug(
+                f"TCMB/FED günü ama pencere dışı ({now_time}) — "
+                f"OLAY atlandı (pencere={OLAY_BLOCK_START}-{OLAY_BLOCK_END})"
+            )
 
+        # 2. Vade bitiş — tam gün OLAY (OLAY_FULL_DAY_TRIGGERS)
         for expiry in VIOP_EXPIRY_DATES:
             days = (expiry - today).days
             if 0 <= days <= EXPIRY_DAYS:
@@ -587,6 +614,7 @@ class Baba:
                     "trigger": "expiry",
                 }
 
+        # 3. USD/TRY şoku — tam gün OLAY
         usdtry_move = self._usdtry_5m_move_pct()
         if usdtry_move >= USDTRY_SHOCK_PCT:
             return {
@@ -1941,6 +1969,23 @@ class Baba:
                         f"Fake sinyal: DB'de aktif trade bulunamadı "
                         f"({symbol} {direction})"
                     )
+
+            elif analysis.total_score >= FAKE_SCORE_THRESHOLD - 1:
+                # v14: skor 5 → uyarı gönder, kapatma yapma
+                logger.warning(
+                    f"FAKE UYARI [{symbol}] ticket={ticket}: "
+                    f"skor={analysis.total_score}/{FAKE_SCORE_THRESHOLD} "
+                    f"— İZLEMEDE (kapatma eşiğine yakın)"
+                )
+                self._db.insert_event(
+                    event_type="FAKE_WARNING",
+                    message=(
+                        f"Fake uyarı: {symbol} {direction} ticket={ticket} "
+                        f"skor={analysis.total_score} — izlemede"
+                    ),
+                    severity="INFO",
+                    action="monitoring",
+                )
 
         return results
 

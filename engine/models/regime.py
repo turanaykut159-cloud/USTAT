@@ -1,17 +1,21 @@
-"""Piyasa rejim veri modeli — v12.0 spesifikasyonu.
+"""Piyasa rejim veri modeli — v14.0 spesifikasyonu.
 
 4 rejim:
     TREND    — ADX>25, EMA mesafesi artıyor, yön tutarlılığı
     RANGE    — ADX<20, BB dar, dar range
-    VOLATILE — ATR>ort×2 VEYA spread>3x VEYA %2+ hareket
-    OLAY     — TCMB/FED günü VEYA kur>%2 VEYA vade son 2 gün
+    VOLATILE — ATR>ort×2.5 VEYA spread>normal×4 VEYA %2.5+ hareket
+    OLAY     — TCMB/FED günü (12:00-15:30) VEYA kur>%2 VEYA vade son 2 gün
 
 Risk çarpanları:
     TREND=1.0, RANGE=0.7, VOLATILE=0.25, OLAY=0.0
 
 Rejim → aktif strateji eşleme:
-    TREND=[TREND_FOLLOW], RANGE=[MEAN_REVERSION, BREAKOUT],
+    TREND=[TREND_FOLLOW, BREAKOUT], RANGE=[MEAN_REVERSION, BREAKOUT],
     VOLATILE=[], OLAY=[]
+
+v14 değişiklikleri:
+    - TREND rejimine BREAKOUT eklendi (güçlü trend kırılımları)
+    - VOLATILE: yeni sinyal yok ama kârdaki pozisyonlar trailing ile korunur
 """
 
 from __future__ import annotations
@@ -24,7 +28,7 @@ from engine.models.signal import StrategyType
 
 
 class RegimeType(Enum):
-    """Piyasa rejim tipleri (v12.0)."""
+    """Piyasa rejim tipleri (v14.0)."""
     TREND    = "TREND"
     RANGE    = "RANGE"
     VOLATILE = "VOLATILE"
@@ -41,7 +45,7 @@ RISK_MULTIPLIERS: dict[RegimeType, float] = {
 
 # Rejim → izin verilen stratejiler (risk kararı — BABA otoritesi)
 REGIME_STRATEGIES: dict[RegimeType, list[StrategyType]] = {
-    RegimeType.TREND:    [StrategyType.TREND_FOLLOW],
+    RegimeType.TREND:    [StrategyType.TREND_FOLLOW, StrategyType.BREAKOUT],
     RegimeType.RANGE:    [StrategyType.MEAN_REVERSION, StrategyType.BREAKOUT],
     RegimeType.VOLATILE: [],    # tüm sinyaller durur
     RegimeType.OLAY:     [],    # sistem pause
