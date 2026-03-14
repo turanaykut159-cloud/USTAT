@@ -30,7 +30,7 @@
   },
   "build": {
     "appId": "com.ustat.trading",
-    "productName": "ÜSTAT",
+    "productName": "ÜSTAT v5.5 VİOP Algorithmic Trading",
     "directories": {
       "output": "release"
     },

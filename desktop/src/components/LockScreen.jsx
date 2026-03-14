@@ -370,7 +370,7 @@ export default function LockScreen({ onUnlock }) {
 
       {/* ── Logo ─────────────────────────────────────────────────── */}
       <div className="lock-logo">
-        <h1>ÜSTAT <span className="version">v5.4</span></h1>
+        <h1>ÜSTAT <span className="version">v5.5</span></h1>
         <p className="lock-tagline">VİOP Algorithmic Trading</p>
       </div>
 

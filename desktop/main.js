@@ -37,7 +37,7 @@ process.on('unhandledRejection', (reason) => {
 });
 
 // ── Sabitler ─────────────────────────────────────────────────────
-const APP_TITLE = 'ÜSTAT v5.5';
+const APP_TITLE = 'ÜSTAT v5.5 VİOP Algorithmic Trading';
 const MIN_WIDTH = 1400;
 const MIN_HEIGHT = 900;
 const BG_COLOR = '#0d1117';

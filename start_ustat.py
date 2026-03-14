@@ -401,7 +401,7 @@ def main():
 
     is_prod = "--prod" in sys.argv
     is_watchdog = "--no-watchdog" not in sys.argv  # v5.4.1
-    log(f"=== USTAT v5.4 Baslatici {'(PRODUCTION)' if is_prod else '(DEVELOPMENT)'} ===")
+    log(f"=== USTAT v5.5 Baslatici {'(PRODUCTION)' if is_prod else '(DEVELOPMENT)'} ===")
     log(f"Python: {sys.executable}")
     log(f"Watchdog: {'AKTIF' if is_watchdog else 'DEVRE DISI'}")
 
