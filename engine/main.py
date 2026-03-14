@@ -152,6 +152,8 @@ class Engine:
         # ── Hata Takip Motoru ─────────────────────────────────────
         from engine.error_tracker import ErrorTracker
         self.error_tracker = ErrorTracker(db=self.db)
+        # Baba'ya error_tracker referansı ver (kill-switch → hata havuzu entegrasyonu)
+        self.baba._error_tracker = self.error_tracker
 
         # ── Durum ───────────────────────────────────────────────────
         self._running: bool = False

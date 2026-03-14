@@ -277,10 +277,12 @@ class Baba:
         config: Config,
         db: Database,
         mt5: MT5Bridge | None = None,
+        error_tracker=None,
     ) -> None:
         self._config = config
         self._db = db
         self._mt5 = mt5
+        self._error_tracker = error_tracker
         self.current_regime: Regime = Regime(regime_type=RegimeType.TREND)
         self.active_warnings: list[EarlyWarning] = []
 
@@ -1576,6 +1578,25 @@ class Baba:
     #  KILL-SWITCH
     # ═════════════════════════════════════════════════════════════════
 
+    def _log_kill_event(
+        self, message: str, severity: str = "ERROR", action: str | None = None,
+    ) -> None:
+        """Kill-switch olayını ErrorTracker + DB'ye kaydet."""
+        if self._error_tracker:
+            self._error_tracker.record_error(
+                error_type="KILL_SWITCH",
+                message=message,
+                severity=severity,
+                action=action,
+            )
+        else:
+            self._db.insert_event(
+                event_type="KILL_SWITCH",
+                message=message,
+                severity=severity,
+                action=action,
+            )
+
     def _activate_kill_switch(
         self,
         level: int,
@@ -1614,12 +1635,7 @@ class Baba:
             f"KILL-SWITCH L{level} AKTİF: {message}",
         )
 
-        self._db.insert_event(
-            event_type="KILL_SWITCH",
-            message=message,
-            severity=severity,
-            action=f"LEVEL_{level}",
-        )
+        self._log_kill_event(message, severity, f"LEVEL_{level}")
 
         # L3: tüm pozisyonları kapat; başarısız ticket listesi saklanır
         if level == KILL_SWITCH_L3:
@@ -1637,11 +1653,8 @@ class Baba:
         self._killed_symbols.clear()
 
         logger.info(f"Kill-switch temizlendi (L{old_level}→L0): {reason}")
-        self._db.insert_event(
-            event_type="KILL_SWITCH",
-            message=f"Kill-switch temizlendi (L{old_level}): {reason}",
-            severity="INFO",
-            action="LEVEL_0",
+        self._log_kill_event(
+            f"Kill-switch temizlendi (L{old_level}): {reason}", "INFO", "LEVEL_0",
         )
 
     def acknowledge_kill_switch(self, user: str = "operator") -> bool:
@@ -1686,11 +1699,8 @@ class Baba:
         self._killed_symbols.add(symbol)
 
         logger.warning(f"KILL-SWITCH L1: {symbol} durduruldu — {reason}")
-        self._db.insert_event(
-            event_type="KILL_SWITCH",
-            message=f"L1 kontrat durdurma: {symbol} — {reason}",
-            severity="WARNING",
-            action="LEVEL_1",
+        self._log_kill_event(
+            f"L1 kontrat durdurma: {symbol} — {reason}", "WARNING", "LEVEL_1",
         )
 
     def activate_kill_switch_l3_manual(self, user: str = "operator") -> None:
@@ -1821,21 +1831,15 @@ class Baba:
             failed_tickets = still_failed
 
         if closed_count > 0:
-            self._db.insert_event(
-                event_type="KILL_SWITCH",
-                message=f"{closed_count} pozisyon kapatıldı ({reason})",
-                severity="CRITICAL",
-                action="positions_closed",
+            self._log_kill_event(
+                f"{closed_count} pozisyon kapatıldı ({reason})",
+                "CRITICAL", "positions_closed",
             )
         if failed_tickets:
-            self._db.insert_event(
-                event_type="KILL_SWITCH",
-                message=(
-                    f"KRİTİK: {len(failed_tickets)} pozisyon 10 denemede "
-                    f"kapatılamadı — MANUEL MÜDAHALE GEREKLİ: {failed_tickets}"
-                ),
-                severity="CRITICAL",
-                action="positions_close_failed_final",
+            self._log_kill_event(
+                f"KRİTİK: {len(failed_tickets)} pozisyon 10 denemede "
+                f"kapatılamadı — MANUEL MÜDAHALE GEREKLİ: {failed_tickets}",
+                "CRITICAL", "positions_close_failed_final",
             )
             # v5.4.1: Event bus üzerinden UI'a acil uyarı gönder
             try:

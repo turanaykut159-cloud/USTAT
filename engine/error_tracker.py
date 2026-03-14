@@ -212,7 +212,8 @@ class ErrorTracker:
                             pass
 
                     # Çözümlenmiş tip ise gruplara EKLEME
-                    if etype in self._resolved_types:
+                    # NOT: CRITICAL ve ERROR seviyesi asla bastırılmaz
+                    if etype in self._resolved_types and sev not in ("CRITICAL", "ERROR"):
                         continue
 
                     key = self._group_key(etype, msg)
@@ -256,7 +257,11 @@ class ErrorTracker:
         event_id = 0
 
         # Çözümlenmiş tip ise → DB'ye yaz ama dashboard'a ekleme
-        is_suppressed = error_type in self._resolved_types
+        # NOT: CRITICAL ve ERROR seviyesi asla bastırılmaz (risk olayları görünmeli)
+        is_suppressed = (
+            error_type in self._resolved_types
+            and severity not in ("CRITICAL", "ERROR")
+        )
 
         # DB'ye yaz (her zaman — loglama için)
         if self._db:
