@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.4 — Ana Dashboard ekranı.
+ * ÜSTAT v5.5 — Ana Dashboard ekranı.
  *
  * Layout:
  *   Üst:    4 stat kartı (Günlük İşlem, Başarı Oranı, Net K/Z, Profit Factor)
@@ -321,9 +321,13 @@ export default function Dashboard() {
       </div>
 
       {/* ═══ HESAP DURUMU (canlı) ═════════════════════════════════ */}
-      {(equityStale || wsState === 'reconnecting') && (
+      {(equityStale || wsState === 'reconnecting' || status.data_fresh === false || status.circuit_breaker_active) && (
         <div className="dash-stale-banner">
-          {wsState === 'reconnecting'
+          {status.circuit_breaker_active
+            ? '🔴 MT5 bağlantı krizi — circuit breaker aktif, otomatik yeniden deneme bekleniyor'
+            : status.data_fresh === false
+            ? '⚠ Engine verisi eski — son başarılı cycle 60+ saniye önce'
+            : wsState === 'reconnecting'
             ? '⚠ Bağlantı koptu — yeniden bağlanıyor...'
             : '⚠ Veri eski — son güncelleme 10+ saniye önce'}
         </div>

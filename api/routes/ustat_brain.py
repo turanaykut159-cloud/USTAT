@@ -17,11 +17,14 @@ Veriler iki kaynaktan gelir:
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Query
 
 from api.deps import get_baba, get_db, get_engine, get_ustat
+
+logger = logging.getLogger("ustat.api.routes.ustat_brain")
 from api.schemas import (
     CategoryGroup,
     ContractProfile,
@@ -172,6 +175,43 @@ def _build_contract_profiles(trades: list[dict]) -> list[ContractProfile]:
     return profiles
 
 
+@router.get("/ustat/brain-debug")
+async def get_ustat_brain_debug():
+    """Brain modülü debug — sorunu tespit etmek için."""
+    result = {"steps": []}
+    try:
+        db = get_db()
+        result["db_available"] = db is not None
+        result["steps"].append("db_check_ok")
+
+        if db:
+            since = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
+            trades = db.get_trades(since=since, limit=5000) or []
+            result["trade_count"] = len(trades)
+            result["steps"].append(f"trades_fetched: {len(trades)}")
+
+            if trades:
+                cats = _categorize_trades(trades)
+                result["categories_by_result"] = len(cats.by_result)
+                result["steps"].append("categorize_ok")
+
+                profiles = _build_contract_profiles(trades)
+                result["profile_count"] = len(profiles)
+                result["steps"].append("profiles_ok")
+
+        ustat = get_ustat()
+        result["ustat_available"] = ustat is not None
+        result["steps"].append("ustat_check_ok")
+
+    except Exception as exc:
+        result["error"] = str(exc)
+        result["error_type"] = type(exc).__name__
+        import traceback
+        result["traceback"] = traceback.format_exc()
+
+    return result
+
+
 @router.get("/ustat/brain", response_model=UstatBrainResponse)
 async def get_ustat_brain(
     days: int = Query(90, ge=1, le=365, description="Analiz periyodu (gün)"),
@@ -191,111 +231,120 @@ async def get_ustat_brain(
             pass
     db = get_db()
     if not db:
+        logger.warning("Brain: DB bağlantısı yok — boş yanıt dönülüyor")
         return UstatBrainResponse()
+    logger.info(f"Brain: DB bağlantısı OK, days={days}")
 
     # Tarih filtresi
     since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
-    # İşlemleri çek
-    trades = db.get_trades(since=since, limit=5000)
+    try:
+        # İşlemleri çek
+        trades = db.get_trades(since=since, limit=5000) or []
+        logger.info(f"Brain: {len(trades)} trade bulundu (since={since})")
 
-    # İşlem kategorizasyonu
-    trade_categories = _categorize_trades(trades)
+        # İşlem kategorizasyonu
+        trade_categories = _categorize_trades(trades)
 
-    # Kontrat profilleri
-    contract_profiles = _build_contract_profiles(trades)
+        # Kontrat profilleri
+        contract_profiles = _build_contract_profiles(trades)
 
-    # Son kararlar (events tablosundan)
-    events_raw = db.get_events(limit=50)
-    recent_decisions = [
-        EventItem(
-            id=e.get("id", 0),
-            timestamp=e.get("timestamp", ""),
-            type=e.get("type", ""),
-            severity=e.get("severity", "INFO"),
-            message=e.get("message", ""),
-            action=e.get("action", ""),
+        # Son kararlar (events tablosundan)
+        events_raw = db.get_events(limit=50) or []
+        recent_decisions = []
+        for e in events_raw:
+            try:
+                recent_decisions.append(EventItem(
+                    id=e.get("id") or 0,
+                    timestamp=str(e.get("timestamp") or ""),
+                    type=str(e.get("type") or ""),
+                    severity=str(e.get("severity") or "INFO"),
+                    message=str(e.get("message") or ""),
+                    action=str(e.get("action") or ""),
+                ))
+            except Exception:
+                continue  # Hatalı event kaydını atla, diğerlerine devam
+
+        # Rejim bazlı performans
+        regime_performance = trade_categories.by_regime
+
+        # ── ÜSTAT engine verileri ────────────────────────────────────
+        ustat = get_ustat()
+
+        # Hata atamaları (ÜSTAT brain cycle'dan)
+        error_attributions: list[ErrorAttribution] = []
+        if ustat:
+            for ea in (ustat.get_error_attributions() or []):
+                error_attributions.append(ErrorAttribution(
+                    trade_id=ea.get("trade_id", 0),
+                    error_type=ea.get("error_type", ""),
+                    responsible=ea.get("responsible", ""),
+                    description=ea.get("description", ""),
+                ))
+
+        # Ertesi gün analizleri (ÜSTAT brain cycle'dan)
+        next_day_analyses: list[NextDayAnalysis] = []
+        if ustat:
+            for nda in (ustat.get_next_day_analyses() or []):
+                next_day_analyses.append(NextDayAnalysis(
+                    trade_id=nda.get("trade_id", 0),
+                    symbol=nda.get("symbol", ""),
+                    actual_pnl=nda.get("actual_pnl", 0.0),
+                    potential_pnl=nda.get("potential_pnl", 0.0),
+                    missed_profit=nda.get("missed_profit", 0.0),
+                    signal_score=nda.get("signal_score", 0.0),
+                    management_score=nda.get("management_score", 0.0),
+                    profit_score=nda.get("profit_score", 0.0),
+                    risk_score=nda.get("risk_score", 0.0),
+                    total_score=nda.get("total_score", 0.0),
+                    summary=nda.get("summary", ""),
+                ))
+
+        # Strateji havuzu (ÜSTAT brain cycle'dan)
+        strategy_pool = StrategyPool()
+        if ustat:
+            sp = ustat.get_strategy_pool() or {}
+            strategy_pool = StrategyPool(
+                current_regime=sp.get("current_regime", ""),
+                active_profile=sp.get("active_profile", ""),
+                profiles=[
+                    StrategyProfile(
+                        name=p.get("name", ""),
+                        market_type=p.get("market_type", ""),
+                        parameters=p.get("parameters", {}),
+                        active=p.get("active", False),
+                    )
+                    for p in sp.get("profiles", [])
+                ],
+            )
+        else:
+            # Engine yoksa sadece rejim bilgisini al
+            baba = get_baba()
+            if baba and baba.current_regime:
+                strategy_pool.current_regime = baba.current_regime.regime_type.value
+
+        # Regülasyon önerileri (ÜSTAT brain cycle'dan)
+        regulation_suggestions: list[RegulationSuggestion] = []
+        if ustat:
+            for rs in (ustat.get_regulation_suggestions() or []):
+                regulation_suggestions.append(RegulationSuggestion(
+                    parameter=rs.get("parameter", ""),
+                    current_value=rs.get("current_value", ""),
+                    suggested_value=rs.get("suggested_value", ""),
+                    reason=rs.get("reason", ""),
+                    priority=rs.get("priority", "MEDIUM"),
+                ))
+
+        return UstatBrainResponse(
+            trade_categories=trade_categories,
+            contract_profiles=contract_profiles,
+            recent_decisions=recent_decisions,
+            regime_performance=regime_performance,
+            error_attributions=error_attributions,
+            next_day_analyses=next_day_analyses,
+            strategy_pool=strategy_pool,
+            regulation_suggestions=regulation_suggestions,
         )
-        for e in events_raw
-    ]
-
-    # Rejim bazlı performans
-    regime_performance = trade_categories.by_regime
-
-    # ── ÜSTAT engine verileri ────────────────────────────────────
-    ustat = get_ustat()
-
-    # Hata atamaları (ÜSTAT brain cycle'dan)
-    error_attributions: list[ErrorAttribution] = []
-    if ustat:
-        for ea in ustat.get_error_attributions():
-            error_attributions.append(ErrorAttribution(
-                trade_id=ea.get("trade_id", 0),
-                error_type=ea.get("error_type", ""),
-                responsible=ea.get("responsible", ""),
-                description=ea.get("description", ""),
-            ))
-
-    # Ertesi gün analizleri (ÜSTAT brain cycle'dan)
-    next_day_analyses: list[NextDayAnalysis] = []
-    if ustat:
-        for nda in ustat.get_next_day_analyses():
-            next_day_analyses.append(NextDayAnalysis(
-                trade_id=nda.get("trade_id", 0),
-                symbol=nda.get("symbol", ""),
-                actual_pnl=nda.get("actual_pnl", 0.0),
-                potential_pnl=nda.get("potential_pnl", 0.0),
-                missed_profit=nda.get("missed_profit", 0.0),
-                signal_score=nda.get("signal_score", 0.0),
-                management_score=nda.get("management_score", 0.0),
-                profit_score=nda.get("profit_score", 0.0),
-                risk_score=nda.get("risk_score", 0.0),
-                total_score=nda.get("total_score", 0.0),
-                summary=nda.get("summary", ""),
-            ))
-
-    # Strateji havuzu (ÜSTAT brain cycle'dan)
-    strategy_pool = StrategyPool()
-    if ustat:
-        sp = ustat.get_strategy_pool()
-        strategy_pool = StrategyPool(
-            current_regime=sp.get("current_regime", ""),
-            active_profile=sp.get("active_profile", ""),
-            profiles=[
-                StrategyProfile(
-                    name=p.get("name", ""),
-                    market_type=p.get("market_type", ""),
-                    parameters=p.get("parameters", {}),
-                    active=p.get("active", False),
-                )
-                for p in sp.get("profiles", [])
-            ],
-        )
-    else:
-        # Engine yoksa sadece rejim bilgisini al
-        baba = get_baba()
-        if baba and baba.current_regime:
-            strategy_pool.current_regime = baba.current_regime.regime_type.value
-
-    # Regülasyon önerileri (ÜSTAT brain cycle'dan)
-    regulation_suggestions: list[RegulationSuggestion] = []
-    if ustat:
-        for rs in ustat.get_regulation_suggestions():
-            regulation_suggestions.append(RegulationSuggestion(
-                parameter=rs.get("parameter", ""),
-                current_value=rs.get("current_value", ""),
-                suggested_value=rs.get("suggested_value", ""),
-                reason=rs.get("reason", ""),
-                priority=rs.get("priority", "MEDIUM"),
-            ))
-
-    return UstatBrainResponse(
-        trade_categories=trade_categories,
-        contract_profiles=contract_profiles,
-        recent_decisions=recent_decisions,
-        regime_performance=regime_performance,
-        error_attributions=error_attributions,
-        next_day_analyses=next_day_analyses,
-        strategy_pool=strategy_pool,
-        regulation_suggestions=regulation_suggestions,
-    )
+    except Exception as exc:
+        logger.exception("ustat/brain endpoint HATASI: %s", exc)
+        return UstatBrainResponse()

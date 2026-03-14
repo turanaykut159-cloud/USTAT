@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.4 — MT5 Launcher Service (Renderer tarafı).
+ * ÜSTAT v5.5 — MT5 Launcher Service (Renderer tarafı).
  *
  * Electron preload IPC köprüsü üzerinden main process ile iletişim kurar.
  * State machine: IDLE → CHECKING → CREDENTIALS → LAUNCHING → WAITING → CONNECTED

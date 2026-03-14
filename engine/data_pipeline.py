@@ -16,6 +16,7 @@ Temizleme kuralları:
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -31,6 +32,10 @@ from engine.mt5_bridge import MT5Bridge, WATCHED_SYMBOLS, Tick
 from engine.utils.indicators import calculate_indicators
 
 logger = get_logger(__name__)
+
+# ── Paralel çekme ayarları ─────────────────────────────────────────
+MAX_WORKERS: int = 4          # MT5 thread-safe değil ama GIL altında 4 iş parçacığı güvenli
+CYCLE_TIMEOUT_SEC: float = 8.0  # run_cycle maksimum süresi (spike koruması)
 
 # ── MT5 timeframe → etiket eşlemesi ─────────────────────────────────
 TIMEFRAMES: dict[str, int] = {
@@ -105,6 +110,11 @@ class DataPipeline:
         self.latest_positions: list[dict] = []   # Pozisyon dict listesi
         self._cache_time: datetime | None = None  # Son cache güncelleme zamanı
 
+        # DATA_GAP spam throttle: sembol başına son event zamanı
+        # Aynı sembol/timeframe için 5 dakikada en fazla 1 DB event yazılır
+        self._last_gap_event: dict[str, datetime] = {}
+        _GAP_EVENT_COOLDOWN_SEC: float = 300.0  # 5 dakika
+
         # Peak equity baseline doğrulaması
         self._validate_peak_equity()
 
@@ -127,13 +137,32 @@ class DataPipeline:
         """10 saniyelik ana döngüden çağrılır.
 
         Sırasıyla:
-            1. Tüm semboller için tick/spread verisi çek
-            2. OHLCV barlarını güncelle (M1, M5, M15, H1)
+            1. Tüm semboller için tick/spread verisi çek  (paralel)
+            2. OHLCV barlarını güncelle (M1, M5, M15, H1) (paralel)
             3. Risk snapshot kaydet
+
+        Spike koruması: toplam süre CYCLE_TIMEOUT_SEC'i aşarsa
+        kalan görevler iptal edilir ve loglanır.
         """
-        self.fetch_all_ticks()
-        self.fetch_all_symbols()
+        t_start = datetime.now()
+
+        self.fetch_all_ticks_parallel()
+        self.fetch_all_symbols_parallel()
+
+        # Spike kontrolü — OHLCV uzadıysa risk snapshot'ı atla
+        elapsed = (datetime.now() - t_start).total_seconds()
+        if elapsed > CYCLE_TIMEOUT_SEC:
+            logger.warning(
+                f"Cycle timeout: {elapsed:.1f}s > {CYCLE_TIMEOUT_SEC}s — "
+                f"risk snapshot atlandı"
+            )
+            return
+
         self.update_risk_snapshot()
+
+        total = (datetime.now() - t_start).total_seconds()
+        if total > 3.0:
+            logger.info(f"run_cycle yavaş: {total:.1f}s")
 
     # ═════════════════════════════════════════════════════════════════
     #  OHLCV
@@ -188,7 +217,7 @@ class DataPipeline:
             return pd.DataFrame()
 
     def fetch_all_symbols(self) -> dict[str, dict[str, int]]:
-        """15 kontratın tümü için tüm timeframe'lerde veri çek.
+        """15 kontratın tümü için tüm timeframe'lerde veri çek (sıralı — eski).
 
         Returns:
             {symbol: {timeframe: bar_sayısı}} istatistik sözlüğü.
@@ -208,6 +237,51 @@ class DataPipeline:
         logger.info(
             f"OHLCV güncelleme tamamlandı: "
             f"{active} aktif / {len(self._deactivated)} deaktif kontrat"
+        )
+        return stats
+
+    def fetch_all_symbols_parallel(self) -> dict[str, dict[str, int]]:
+        """15 kontratın tümü için tüm timeframe'lerde veri çek (paralel).
+
+        Semboller ThreadPoolExecutor ile paralel çekilir.
+        Her sembol içinde timeframe'ler sıralı kalır (DB yazma güvenliği).
+
+        Returns:
+            {symbol: {timeframe: bar_sayısı}} istatistik sözlüğü.
+        """
+        active_symbols = [s for s in WATCHED_SYMBOLS if s not in self._deactivated]
+
+        if not active_symbols:
+            return {}
+
+        stats: dict[str, dict[str, int]] = {}
+
+        def _fetch_symbol(symbol: str) -> tuple[str, dict[str, int]]:
+            """Tek sembol için tüm timeframe'leri çek."""
+            sym_stats: dict[str, int] = {}
+            for tf_label in TIMEFRAMES:
+                df = self.fetch_bars(symbol, tf_label)
+                sym_stats[tf_label] = len(df)
+            return symbol, sym_stats
+
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            futures = {
+                executor.submit(_fetch_symbol, sym): sym
+                for sym in active_symbols
+            }
+            for future in as_completed(futures, timeout=CYCLE_TIMEOUT_SEC):
+                try:
+                    sym, sym_stats = future.result(timeout=2.0)
+                    stats[sym] = sym_stats
+                except Exception as exc:
+                    sym = futures[future]
+                    logger.error(f"Paralel OHLCV hatası [{sym}]: {exc}")
+
+        active = len(active_symbols)
+        fetched = len(stats)
+        logger.info(
+            f"OHLCV paralel güncelleme: "
+            f"{fetched}/{active} sembol tamamlandı"
         )
         return stats
 
@@ -297,23 +371,37 @@ class DataPipeline:
         gaps = diffs[diffs > threshold_sec]
 
         if len(gaps) > 0:
+            # Piyasa kapalı saatlerindeki gap'leri filtrele (normal boşluklar)
+            real_gaps = []
             for idx in gaps.index:
                 gap_start = df.loc[idx - 1, "time"]
                 gap_end = df.loc[idx, "time"]
-                gap_sec = gaps[idx]
-                logger.warning(
+                if not self._is_market_hours_gap(gap_start, gap_end):
+                    real_gaps.append((idx, gap_start, gap_end, gaps[idx]))
+
+            # Sadece gerçek (piyasa saatleri içi) gap'leri logla
+            for idx, gap_start, gap_end, gap_sec in real_gaps:
+                logger.debug(
                     f"Gap [{symbol}/{timeframe}]: "
                     f"{gap_start} → {gap_end} ({gap_sec:.0f}s, "
                     f"beklenen {expected_sec}s)"
                 )
 
-            self._db.insert_event(
-                event_type="DATA_GAP",
-                message=(
-                    f"{symbol}/{timeframe}: {len(gaps)} gap tespit edildi"
-                ),
-                severity="WARNING",
-            )
+            # DB event throttle: aynı sembol/tf için 5 dakikada 1 kez
+            if real_gaps:
+                throttle_key = f"{symbol}/{timeframe}"
+                now = datetime.now()
+                last = self._last_gap_event.get(throttle_key)
+                if last is None or (now - last).total_seconds() > 300.0:
+                    self._last_gap_event[throttle_key] = now
+                    self._db.insert_event(
+                        event_type="DATA_GAP",
+                        message=(
+                            f"{symbol}/{timeframe}: {len(real_gaps)} gap "
+                            f"tespit edildi (piyasa saati içi)"
+                        ),
+                        severity="WARNING",
+                    )
 
         return len(gaps)
 
@@ -489,7 +577,7 @@ class DataPipeline:
             return None
 
     def fetch_all_ticks(self) -> dict[str, TickSnapshot]:
-        """15 kontratın tümü için tick/spread verisi çek (her 10 sn).
+        """15 kontratın tümü için tick/spread verisi çek — sıralı (eski).
 
         Returns:
             {symbol: TickSnapshot} sözlüğü.
@@ -504,6 +592,35 @@ class DataPipeline:
                 result[symbol] = snap
 
         logger.debug(f"Tick güncelleme: {len(result)}/{len(WATCHED_SYMBOLS)} sembol")
+        return result
+
+    def fetch_all_ticks_parallel(self) -> dict[str, TickSnapshot]:
+        """15 kontratın tümü için tick/spread verisi çek (paralel).
+
+        Returns:
+            {symbol: TickSnapshot} sözlüğü.
+        """
+        active_symbols = [s for s in WATCHED_SYMBOLS if s not in self._deactivated]
+        result: dict[str, TickSnapshot] = {}
+
+        if not active_symbols:
+            return result
+
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            futures = {
+                executor.submit(self.fetch_tick_data, sym): sym
+                for sym in active_symbols
+            }
+            for future in as_completed(futures, timeout=5.0):
+                try:
+                    snap = future.result(timeout=1.0)
+                    if snap:
+                        result[snap.symbol] = snap
+                except Exception as exc:
+                    sym = futures[future]
+                    logger.error(f"Paralel tick hatası [{sym}]: {exc}")
+
+        logger.debug(f"Tick paralel güncelleme: {len(result)}/{len(active_symbols)} sembol")
         return result
 
     # ═════════════════════════════════════════════════════════════════

@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.4 — Üstat & Performans ekranı.
+ * ÜSTAT v5.5 — Üstat & Performans ekranı.
  *
  * İki sekme:
  *   A) Performans — Klasik performans metrikleri (9 bölüm)

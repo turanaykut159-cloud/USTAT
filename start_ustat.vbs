@@ -1,4 +1,4 @@
-' USTAT v5.4 — Baslatici (Admin Elevated)
+' USTAT v5.5 — Baslatici (Admin Elevated)
 '
 ' NEDEN ADMIN (RUNAS):
 '   MT5 admin olarak calisiyor (C:\Program Files altinda).
@@ -20,8 +20,14 @@
 Dim pythonExe
 pythonExe = "C:\Users\pc\AppData\Local\Programs\Python\Python314\python.exe"
 
+' Otomatik: VBS dosyasinin bulundugu klasoru USTAT_DIR olarak kullan
+Dim scriptDir
+scriptDir = CreateObject("Scripting.FileSystemObject").GetParentFolderName(WScript.ScriptFullName)
+Dim startScript
+startScript = scriptDir & "\start_ustat.py"
+
 ' Admin olarak Python launcher'i baslat
 ' "runas" verb -> UAC prompt cikar, kullanici "Evet" tiklar
 ' 0 = gizli pencere (SW_HIDE), Python arka planda calisir
 Set appShell = CreateObject("Shell.Application")
-appShell.ShellExecute pythonExe, """C:\USTAT\start_ustat.py""", "C:\USTAT", "runas", 0
+appShell.ShellExecute pythonExe, """" & startScript & """", scriptDir, "runas", 0

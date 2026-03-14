@@ -2,7 +2,8 @@
 
 TA-Lib bağımlılığı olmadan, yalnızca numpy kullanarak
 EMA, SMA, RSI, MACD, ADX, Bollinger Bands, ATR,
-Keltner Channel, Williams %R ve BB/KC Squeeze hesaplar.
+Keltner Channel, Williams %R, BB/KC Squeeze,
+VWAP, Ichimoku Cloud, KAMA ve Multi-Divergence hesaplar.
 
 Tüm fonksiyonlar ``np.ndarray`` kabul eder ve ``np.ndarray`` döndürür.
 İlk ``period-1`` eleman ``np.nan`` olabilir (warm-up dönemi).
@@ -529,6 +530,645 @@ def williams_r(
             out[i] = 0.0
 
     return out
+
+
+# ═════════════════════════════════════════════════════════════════════
+#  RATE OF CHANGE (ROC) — Saf momentum (EMA bağımsız)
+# ═════════════════════════════════════════════════════════════════════
+
+def roc(data: np.ndarray, period: int = 12) -> np.ndarray:
+    """Rate of Change — yüzdesel fiyat değişimi.
+
+    ``ROC = (close - close[n-period]) / close[n-period] * 100``
+
+    EMA'dan bağımsız, saf momentum ölçüsü. Pozitif = yükseliş momentumu,
+    negatif = düşüş momentumu.
+
+    Args:
+        data: Kapanış fiyat serisi (1-D).
+        period: Geriye bakış periyodu (varsayılan 12).
+
+    Returns:
+        ROC dizisi (%).  İlk ``period`` eleman ``np.nan``.
+    """
+    data = np.asarray(data, dtype=np.float64)
+    n = len(data)
+    out = np.full(n, np.nan, dtype=np.float64)
+    if n <= period:
+        return out
+
+    for i in range(period, n):
+        if data[i - period] != 0:
+            out[i] = (data[i] - data[i - period]) / data[i - period] * 100.0
+        else:
+            out[i] = 0.0
+
+    return out
+
+
+# ═════════════════════════════════════════════════════════════════════
+#  STOCHASTIC RSI — Hızlı momentum osilatörü (RSI'dan bağımsız tepki)
+# ═════════════════════════════════════════════════════════════════════
+
+def stochastic_rsi(
+    data: np.ndarray,
+    rsi_period: int = 14,
+    stoch_period: int = 14,
+    k_smooth: int = 3,
+    d_smooth: int = 3,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Stochastic RSI — RSI'ın stokastik normalizasyonu.
+
+    ``StochRSI = (RSI - RSI_min) / (RSI_max - RSI_min)``
+    RSI'dan daha hızlı tepki verir (0-100 aralığında tam salınım).
+    RSI 30-70 arasında yatay seyrederken StochRSI hâlâ sinyal üretir.
+
+    Args:
+        data: Kapanış fiyat serisi.
+        rsi_period: RSI periyodu.
+        stoch_period: Stokastik pencere.
+        k_smooth: %K düzleştirme.
+        d_smooth: %D düzleştirme (sinyal hattı).
+
+    Returns:
+        (%K, %D) tuple'ı.  0-100 aralığında.
+    """
+    data = np.asarray(data, dtype=np.float64)
+    n = len(data)
+
+    k_out = np.full(n, np.nan, dtype=np.float64)
+    d_out = np.full(n, np.nan, dtype=np.float64)
+
+    rsi_arr = rsi(data, rsi_period)
+
+    # StochRSI hesapla
+    stoch_raw = np.full(n, np.nan, dtype=np.float64)
+    for i in range(rsi_period + stoch_period, n):
+        window = rsi_arr[i - stoch_period + 1: i + 1]
+        valid = window[~np.isnan(window)]
+        if len(valid) < 2:
+            continue
+        rsi_min = np.min(valid)
+        rsi_max = np.max(valid)
+        rng = rsi_max - rsi_min
+        if rng > 0:
+            stoch_raw[i] = (rsi_arr[i] - rsi_min) / rng * 100.0
+        else:
+            stoch_raw[i] = 50.0
+
+    # %K = SMA(stoch_raw, k_smooth)
+    k_out = sma(stoch_raw, k_smooth) if k_smooth > 1 else stoch_raw.copy()
+    # %D = SMA(%K, d_smooth)
+    d_out = sma(k_out, d_smooth) if d_smooth > 1 else k_out.copy()
+
+    return k_out, d_out
+
+
+# ═════════════════════════════════════════════════════════════════════
+#  OBV — On Balance Volume (akıllı para akışı)
+# ═════════════════════════════════════════════════════════════════════
+
+def obv(close: np.ndarray, volume: np.ndarray) -> np.ndarray:
+    """On Balance Volume — kümülatif hacim akışı.
+
+    Fiyat yükseldiğinde hacmi ekler, düştüğünde çıkarır.
+    OBV yükselirken fiyat düşüyorsa = birikim (akıllı para alıyor).
+    OBV düşerken fiyat yükseliyorsa = dağıtım (akıllı para satıyor).
+
+    Args:
+        close: Kapanış fiyat serisi.
+        volume: Hacim serisi.
+
+    Returns:
+        OBV dizisi.
+    """
+    close = np.asarray(close, dtype=np.float64)
+    volume = np.asarray(volume, dtype=np.float64)
+    n = len(close)
+    out = np.zeros(n, dtype=np.float64)
+    if n == 0:
+        return out
+
+    out[0] = volume[0]
+    for i in range(1, n):
+        if np.isnan(close[i]) or np.isnan(close[i - 1]) or np.isnan(volume[i]):
+            out[i] = out[i - 1]
+        elif close[i] > close[i - 1]:
+            out[i] = out[i - 1] + volume[i]
+        elif close[i] < close[i - 1]:
+            out[i] = out[i - 1] - volume[i]
+        else:
+            out[i] = out[i - 1]
+
+    return out
+
+
+def obv_divergence(
+    close: np.ndarray,
+    volume: np.ndarray,
+    lookback: int = 20,
+) -> np.ndarray:
+    """OBV ile fiyat arasındaki divergence tespiti.
+
+    Pozitif divergence: Fiyat düşerken OBV yükseliyor (boğa sinyali).
+    Negatif divergence: Fiyat yükselirken OBV düşüyor (ayı sinyali).
+
+    Returns:
+        Divergence skoru dizisi. +1.0=boğa div, -1.0=ayı div, 0=yok.
+    """
+    close = np.asarray(close, dtype=np.float64)
+    n = len(close)
+    out = np.full(n, 0.0, dtype=np.float64)
+
+    obv_arr = obv(close, volume)
+
+    if n < lookback + 1:
+        return out
+
+    for i in range(lookback, n):
+        price_change = close[i] - close[i - lookback]
+        obv_change = obv_arr[i] - obv_arr[i - lookback]
+
+        # Normalize
+        price_pct = price_change / close[i - lookback] if close[i - lookback] != 0 else 0
+        obv_range = np.max(obv_arr[i - lookback:i + 1]) - np.min(obv_arr[i - lookback:i + 1])
+        obv_pct = obv_change / obv_range if obv_range > 0 else 0
+
+        # Divergence: yönler zıtsa
+        if price_pct < -0.005 and obv_pct > 0.1:
+            out[i] = min(abs(obv_pct), 1.0)   # Bullish divergence
+        elif price_pct > 0.005 and obv_pct < -0.1:
+            out[i] = -min(abs(obv_pct), 1.0)  # Bearish divergence
+
+    return out
+
+
+# ═════════════════════════════════════════════════════════════════════
+#  VOLUME MOMENTUM — Hacim-ağırlıklı momentum
+# ═════════════════════════════════════════════════════════════════════
+
+def volume_momentum(
+    close: np.ndarray,
+    volume: np.ndarray,
+    period: int = 14,
+) -> np.ndarray:
+    """Volume-Weighted Momentum — hacim katılımıyla ağırlıklandırılmış momentum.
+
+    Normal ROC yüksek hacimli hareketlere extra ağırlık vermez.
+    Bu indikatör, yüksek hacimli fiyat hareketlerini daha güçlü sayar.
+
+    ``VM = Σ(price_change[i] * volume[i]) / Σ(volume[i])``
+
+    Args:
+        close: Kapanış fiyat serisi.
+        volume: Hacim serisi.
+        period: Pencere uzunluğu.
+
+    Returns:
+        Volume momentum dizisi. Pozitif = alım baskısı, negatif = satış baskısı.
+    """
+    close = np.asarray(close, dtype=np.float64)
+    volume = np.asarray(volume, dtype=np.float64)
+    n = len(close)
+    out = np.full(n, np.nan, dtype=np.float64)
+
+    if n < period + 1:
+        return out
+
+    for i in range(period, n):
+        changes = np.diff(close[i - period: i + 1])
+        vols = volume[i - period + 1: i + 1]
+
+        # NaN kontrolü
+        valid_mask = ~(np.isnan(changes) | np.isnan(vols))
+        if np.sum(valid_mask) == 0:
+            continue
+
+        vol_sum = np.sum(vols[valid_mask])
+        if vol_sum > 0:
+            out[i] = np.sum(changes[valid_mask] * vols[valid_mask]) / vol_sum
+        else:
+            out[i] = 0.0
+
+    return out
+
+
+# ═════════════════════════════════════════════════════════════════════
+#  COMPRESSION RATIO — Sıkışma tespiti
+# ═════════════════════════════════════════════════════════════════════
+
+def compression_ratio(
+    high: np.ndarray,
+    low: np.ndarray,
+    close: np.ndarray,
+    short_period: int = 5,
+    long_period: int = 20,
+) -> np.ndarray:
+    """Fiyat sıkışma oranı — yakın zamanlı range / uzun vadeli range.
+
+    Oran < 0.5 ise ciddi sıkışma var → patlama yakın.
+    Oran > 1.0 ise genişleme devam ediyor.
+
+    BB/KC squeeze'den farklı olarak, saf fiyat range'ini ölçer.
+    Daha basit, daha güvenilir.
+
+    Args:
+        high, low, close: OHLC verileri.
+        short_period: Kısa pencere (varsayılan 5 bar).
+        long_period: Uzun pencere (varsayılan 20 bar).
+
+    Returns:
+        Compression ratio dizisi. < 0.5 = sıkışma, > 1.0 = genişleme.
+    """
+    n = len(close)
+    out = np.full(n, np.nan, dtype=np.float64)
+
+    if n < long_period:
+        return out
+
+    for i in range(long_period - 1, n):
+        short_start = max(i - short_period + 1, 0)
+        short_range = np.max(high[short_start:i + 1]) - np.min(low[short_start:i + 1])
+        long_start = i - long_period + 1
+        long_range = np.max(high[long_start:i + 1]) - np.min(low[long_start:i + 1])
+
+        if long_range > 0:
+            out[i] = short_range / long_range
+        else:
+            out[i] = 1.0
+
+    return out
+
+
+# ═════════════════════════════════════════════════════════════════════
+#  VWAP (Volume Weighted Average Price)
+# ═════════════════════════════════════════════════════════════════════
+
+def vwap(high: np.ndarray, low: np.ndarray, close: np.ndarray,
+         volume: np.ndarray, session_bars: int = 78) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Seans bazlı VWAP + üst/alt bantlar (±1 std sapma).
+
+    Her ``session_bars`` barda (M15 = 78 bar ≈ 1 gün) sıfırlanır.
+
+    Args:
+        high, low, close: Fiyat serileri.
+        volume: Hacim serisi.
+        session_bars: Bir seans kaç bar (varsayılan M15 = 78).
+
+    Returns:
+        (vwap_line, upper_band, lower_band) — her biri np.ndarray.
+    """
+    n = len(close)
+    typical = (high + low + close) / 3.0
+    vwap_line = np.full(n, np.nan, dtype=np.float64)
+    upper_band = np.full(n, np.nan, dtype=np.float64)
+    lower_band = np.full(n, np.nan, dtype=np.float64)
+
+    for i in range(n):
+        session_start = (i // session_bars) * session_bars
+        seg_tp = typical[session_start:i + 1]
+        seg_vol = volume[session_start:i + 1]
+        total_vol = np.sum(seg_vol)
+        if total_vol > 0:
+            vw = np.sum(seg_tp * seg_vol) / total_vol
+            vwap_line[i] = vw
+            variance = np.sum(seg_vol * (seg_tp - vw) ** 2) / total_vol
+            std = np.sqrt(variance)
+            upper_band[i] = vw + std
+            lower_band[i] = vw - std
+
+    return vwap_line, upper_band, lower_band
+
+
+def vwap_distance(close: np.ndarray, vwap_line: np.ndarray,
+                  atr_vals: np.ndarray) -> np.ndarray:
+    """VWAP'tan ATR-normalize uzaklık. >0 = üstünde, <0 = altında.
+
+    Args:
+        close: Kapanış fiyatları.
+        vwap_line: VWAP serisi.
+        atr_vals: ATR serisi (normalize etmek için).
+
+    Returns:
+        Normalize uzaklık dizisi.
+    """
+    n = len(close)
+    out = np.full(n, np.nan, dtype=np.float64)
+    for i in range(n):
+        if not (np.isnan(vwap_line[i]) or np.isnan(atr_vals[i]) or atr_vals[i] == 0):
+            out[i] = (close[i] - vwap_line[i]) / atr_vals[i]
+    return out
+
+
+# ═════════════════════════════════════════════════════════════════════
+#  ICHIMOKU CLOUD
+# ═════════════════════════════════════════════════════════════════════
+
+def ichimoku(high: np.ndarray, low: np.ndarray, close: np.ndarray,
+             tenkan: int = 9, kijun: int = 26, senkou_b: int = 52
+             ) -> dict[str, np.ndarray]:
+    """Ichimoku Kinko Hyo — 5 bileşen.
+
+    Args:
+        high, low, close: Fiyat serileri.
+        tenkan: Tenkan-sen periyodu (varsayılan 9).
+        kijun: Kijun-sen periyodu (varsayılan 26).
+        senkou_b: Senkou Span B periyodu (varsayılan 52).
+
+    Returns:
+        dict: tenkan_sen, kijun_sen, senkou_a, senkou_b, chikou_span
+              (senkou değerleri ``kijun`` bar ileri kaydırılmıştır).
+    """
+    n = len(close)
+
+    def _midline(h: np.ndarray, l: np.ndarray, period: int) -> np.ndarray:
+        out = np.full(n, np.nan, dtype=np.float64)
+        for i in range(period - 1, n):
+            out[i] = (np.max(h[i - period + 1:i + 1]) + np.min(l[i - period + 1:i + 1])) / 2.0
+        return out
+
+    tenkan_sen = _midline(high, low, tenkan)
+    kijun_sen = _midline(high, low, kijun)
+    senkou_b_line = _midline(high, low, senkou_b)
+
+    # Senkou A = (Tenkan + Kijun) / 2 — kijun bar ileri
+    senkou_a = np.full(n, np.nan, dtype=np.float64)
+    senkou_b_shifted = np.full(n, np.nan, dtype=np.float64)
+    for i in range(n):
+        if not (np.isnan(tenkan_sen[i]) or np.isnan(kijun_sen[i])):
+            target = i + kijun
+            if target < n:
+                senkou_a[target] = (tenkan_sen[i] + kijun_sen[i]) / 2.0
+        if not np.isnan(senkou_b_line[i]):
+            target = i + kijun
+            if target < n:
+                senkou_b_shifted[target] = senkou_b_line[i]
+
+    # Chikou = close kaydırılmış kijun bar geri
+    chikou = np.full(n, np.nan, dtype=np.float64)
+    for i in range(kijun, n):
+        chikou[i - kijun] = close[i]
+
+    return {
+        "tenkan_sen": tenkan_sen,
+        "kijun_sen": kijun_sen,
+        "senkou_a": senkou_a,
+        "senkou_b": senkou_b_shifted,
+        "chikou_span": chikou,
+    }
+
+
+def ichimoku_signal(close: np.ndarray, ichi: dict[str, np.ndarray]) -> np.ndarray:
+    """Ichimoku sinyal puanı: -100 ile +100 arası.
+
+    Pozitif = bullish, negatif = bearish.
+
+    5 alt sinyal (her biri ±20):
+      1. Tenkan/Kijun cross
+      2. Fiyat vs Kumo (bulut) pozisyonu
+      3. Kumo rengi (Senkou A vs B)
+      4. Chikou vs fiyat
+      5. Kumo kalınlığı (güç göstergesi)
+    """
+    n = len(close)
+    out = np.full(n, np.nan, dtype=np.float64)
+
+    ts = ichi["tenkan_sen"]
+    ks = ichi["kijun_sen"]
+    sa = ichi["senkou_a"]
+    sb = ichi["senkou_b"]
+    ch = ichi["chikou_span"]
+
+    for i in range(1, n):
+        score = 0.0
+        valid = True
+
+        # NaN kontrol
+        for arr in [ts, ks, sa, sb]:
+            if np.isnan(arr[i]) or np.isnan(arr[i - 1]):
+                valid = False
+                break
+        if not valid:
+            continue
+
+        # 1. TK Cross: Tenkan > Kijun = bullish
+        if ts[i] > ks[i]:
+            score += 20.0
+        elif ts[i] < ks[i]:
+            score -= 20.0
+
+        # 2. Fiyat vs Kumo
+        kumo_top = max(sa[i], sb[i])
+        kumo_bot = min(sa[i], sb[i])
+        if close[i] > kumo_top:
+            score += 20.0
+        elif close[i] < kumo_bot:
+            score -= 20.0
+        # else: kumo içinde = 0
+
+        # 3. Kumo rengi
+        if sa[i] > sb[i]:
+            score += 20.0
+        elif sa[i] < sb[i]:
+            score -= 20.0
+
+        # 4. Chikou vs fiyat (26 bar önceki fiyat)
+        if not np.isnan(ch[i]):
+            if i >= 26 and not np.isnan(close[i]):
+                # Chikou değeri aslında 26 bar öncesine yerleştirilmiş
+                # şimdiki close ile karşılaştır
+                if ch[i] > close[i]:
+                    score += 20.0
+                elif ch[i] < close[i]:
+                    score -= 20.0
+
+        # 5. Kumo kalınlığı (göreli güç)
+        kumo_thick = abs(sa[i] - sb[i])
+        price_range = close[i] * 0.001  # %0.1 referans
+        if kumo_thick > price_range * 3:
+            # Kalın kumo = güçlü sinyal yönünde
+            if score > 0:
+                score += 20.0
+            elif score < 0:
+                score -= 20.0
+
+        out[i] = np.clip(score, -100.0, 100.0)
+
+    return out
+
+
+# ═════════════════════════════════════════════════════════════════════
+#  KAMA (Kaufman Adaptive Moving Average)
+# ═════════════════════════════════════════════════════════════════════
+
+def kama(close: np.ndarray, er_period: int = 10,
+         fast_sc: int = 2, slow_sc: int = 30) -> np.ndarray:
+    """Kaufman Adaptive Moving Average.
+
+    Volatilite yüksekken yavaşlar (gürültü filtreler),
+    trend netleşince hızlanır (sinyale hızlı tepki verir).
+
+    Args:
+        close: Kapanış fiyatları.
+        er_period: Efficiency Ratio penceresi.
+        fast_sc: Hızlı smoothing constant periyodu.
+        slow_sc: Yavaş smoothing constant periyodu.
+
+    Returns:
+        KAMA dizisi.
+    """
+    n = len(close)
+    out = np.full(n, np.nan, dtype=np.float64)
+
+    if n < er_period + 1:
+        return out
+
+    fast_alpha = 2.0 / (fast_sc + 1.0)
+    slow_alpha = 2.0 / (slow_sc + 1.0)
+
+    out[er_period] = close[er_period]
+
+    for i in range(er_period + 1, n):
+        direction = abs(close[i] - close[i - er_period])
+        volatility = np.sum(np.abs(np.diff(close[i - er_period:i + 1])))
+
+        if volatility == 0:
+            er = 0.0
+        else:
+            er = direction / volatility
+
+        sc = (er * (fast_alpha - slow_alpha) + slow_alpha) ** 2
+        out[i] = out[i - 1] + sc * (close[i] - out[i - 1])
+
+    return out
+
+
+def kama_slope(kama_vals: np.ndarray, lookback: int = 5,
+               atr_vals: np.ndarray | None = None) -> np.ndarray:
+    """KAMA eğim değişimi (ATR-normalize).
+
+    Pozitif = yukarı trend, negatif = aşağı trend.
+    Büyük mutlak değer = güçlü trend.
+
+    Args:
+        kama_vals: KAMA serisi.
+        lookback: Eğim penceresi.
+        atr_vals: ATR serisi (normalize için). None ise ham fark döner.
+
+    Returns:
+        Normalize eğim dizisi.
+    """
+    n = len(kama_vals)
+    out = np.full(n, np.nan, dtype=np.float64)
+    for i in range(lookback, n):
+        if np.isnan(kama_vals[i]) or np.isnan(kama_vals[i - lookback]):
+            continue
+        diff = kama_vals[i] - kama_vals[i - lookback]
+        if atr_vals is not None and not np.isnan(atr_vals[i]) and atr_vals[i] > 0:
+            out[i] = diff / atr_vals[i]
+        else:
+            out[i] = diff
+    return out
+
+
+# ═════════════════════════════════════════════════════════════════════
+#  MULTI-DIVERGENCE DETECTOR
+# ═════════════════════════════════════════════════════════════════════
+
+def detect_divergence(price: np.ndarray, indicator: np.ndarray,
+                      lookback: int = 30, swing_order: int = 5
+                      ) -> list[dict]:
+    """Fiyat-indikatör diverjans tespiti.
+
+    Hem regular hem hidden divergence arar.
+
+    Args:
+        price: Fiyat serisi (genelde close).
+        indicator: İndikatör serisi (RSI, MACD hist, OBV, vb.).
+        lookback: Geriye bakma penceresi.
+        swing_order: Swing noktası tespiti için minimum bar sayısı.
+
+    Returns:
+        Liste: [{"type": "bullish"/"bearish", "kind": "regular"/"hidden",
+                 "strength": 0-1, "bar_index": int}, ...]
+    """
+    n = len(price)
+    divs: list[dict] = []
+
+    if n < lookback + swing_order * 2:
+        return divs
+
+    # Swing noktalarını bul
+    swing_highs: list[int] = []
+    swing_lows: list[int] = []
+
+    start = max(0, n - lookback - swing_order)
+    for i in range(start + swing_order, n - swing_order):
+        if np.isnan(price[i]) or np.isnan(indicator[i]):
+            continue
+        # Swing high
+        is_high = True
+        for j in range(1, swing_order + 1):
+            if price[i] <= price[i - j] or price[i] <= price[i + j]:
+                is_high = False
+                break
+        if is_high:
+            swing_highs.append(i)
+
+        # Swing low
+        is_low = True
+        for j in range(1, swing_order + 1):
+            if price[i] >= price[i - j] or price[i] >= price[i + j]:
+                is_low = False
+                break
+        if is_low:
+            swing_lows.append(i)
+
+    # Regular Bullish: Fiyat düşük dip, indikatör yüksek dip
+    for j in range(1, len(swing_lows)):
+        i1, i2 = swing_lows[j - 1], swing_lows[j]
+        if np.isnan(indicator[i1]) or np.isnan(indicator[i2]):
+            continue
+        if price[i2] < price[i1] and indicator[i2] > indicator[i1]:
+            price_drop = (price[i1] - price[i2]) / price[i1] if price[i1] > 0 else 0
+            ind_rise = (indicator[i2] - indicator[i1]) / (abs(indicator[i1]) + 1e-10)
+            strength = min(1.0, (price_drop + abs(ind_rise)) * 5)
+            divs.append({"type": "bullish", "kind": "regular",
+                         "strength": strength, "bar_index": i2})
+
+    # Regular Bearish: Fiyat yüksek tepe, indikatör düşük tepe
+    for j in range(1, len(swing_highs)):
+        i1, i2 = swing_highs[j - 1], swing_highs[j]
+        if np.isnan(indicator[i1]) or np.isnan(indicator[i2]):
+            continue
+        if price[i2] > price[i1] and indicator[i2] < indicator[i1]:
+            price_rise = (price[i2] - price[i1]) / price[i1] if price[i1] > 0 else 0
+            ind_drop = (indicator[i1] - indicator[i2]) / (abs(indicator[i1]) + 1e-10)
+            strength = min(1.0, (price_rise + abs(ind_drop)) * 5)
+            divs.append({"type": "bearish", "kind": "regular",
+                         "strength": strength, "bar_index": i2})
+
+    # Hidden Bullish: Fiyat yüksek dip, indikatör düşük dip (trend devamı)
+    for j in range(1, len(swing_lows)):
+        i1, i2 = swing_lows[j - 1], swing_lows[j]
+        if np.isnan(indicator[i1]) or np.isnan(indicator[i2]):
+            continue
+        if price[i2] > price[i1] and indicator[i2] < indicator[i1]:
+            strength = min(1.0, abs(indicator[i1] - indicator[i2]) / (abs(indicator[i1]) + 1e-10) * 3)
+            divs.append({"type": "bullish", "kind": "hidden",
+                         "strength": strength * 0.8, "bar_index": i2})
+
+    # Hidden Bearish: Fiyat düşük tepe, indikatör yüksek tepe
+    for j in range(1, len(swing_highs)):
+        i1, i2 = swing_highs[j - 1], swing_highs[j]
+        if np.isnan(indicator[i1]) or np.isnan(indicator[i2]):
+            continue
+        if price[i2] < price[i1] and indicator[i2] > indicator[i1]:
+            strength = min(1.0, abs(indicator[i2] - indicator[i1]) / (abs(indicator[i1]) + 1e-10) * 3)
+            divs.append({"type": "bearish", "kind": "hidden",
+                         "strength": strength * 0.8, "bar_index": i2})
+
+    return divs
 
 
 # ═════════════════════════════════════════════════════════════════════

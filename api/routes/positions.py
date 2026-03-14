@@ -165,7 +165,7 @@ async def close_position(req: ClosePositionRequest):
 
     result = mt5.close_position(req.ticket)
     if result is None:
-        raise HTTPException(status_code=500, detail="Pozisyon kapatılamadı (MT5 hatası veya pozisyon bulunamadı)")
+        raise HTTPException(status_code=404, detail="Pozisyon bulunamadı veya zaten kapalı")
     engine = get_engine()
     if engine:
         engine.sync_mt5_history_recent(1)

@@ -1229,8 +1229,9 @@ class Database:
         Returns:
             Oluşturulan satırın id'si.
         """
+        # v14: INSERT OR REPLACE — aynı ticket tekrar devredilirse eski kaydı güncelle
         cur = self._execute(
-            """INSERT INTO hybrid_positions
+            """INSERT OR REPLACE INTO hybrid_positions
                (ticket, symbol, direction, volume, entry_price, entry_atr,
                 initial_sl, initial_tp, current_sl, current_tp,
                 state, breakeven_hit, trailing_active, transferred_at)

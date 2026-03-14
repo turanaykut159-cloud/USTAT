@@ -1,5 +1,5 @@
 """
-USTAT v5.4 - Baslatici
+USTAT v5.5 - Baslatici
 
 API + Vite + Electron baslatir.
 Her adimi PORT KONTROLU ile dogrulayarak ilerler.
@@ -26,7 +26,8 @@ import time
 import os
 import sys
 
-USTAT_DIR = r"C:\USTAT"
+# Otomatik: script neredeyse USTAT_DIR orasi olur (tasima destegi)
+USTAT_DIR = os.path.dirname(os.path.abspath(__file__))
 DESKTOP_DIR = os.path.join(USTAT_DIR, "desktop")
 LOG_FILE = os.path.join(USTAT_DIR, "startup.log")
 API_PID_FILE = os.path.join(USTAT_DIR, "api.pid")
@@ -295,14 +296,114 @@ def start_electron():
     return True
 
 
+HEARTBEAT_FILE = os.path.join(USTAT_DIR, "engine.heartbeat")
+WATCHDOG_STALE_SECS = 45       # v5.4.1: heartbeat bu kadar saniye eskiyse engine ölmüş kabul et
+WATCHDOG_CHECK_INTERVAL = 15   # v5.4.1: kontrol aralığı (saniye)
+MAX_AUTO_RESTARTS = 5          # v5.4.1: maksimum ardışık otomatik yeniden başlatma
+
+
+def check_heartbeat():
+    """v5.4.1: Engine heartbeat dosyasını kontrol et.
+
+    Returns:
+        True ise engine canlı, False ise stale/ölü.
+    """
+    try:
+        if not os.path.exists(HEARTBEAT_FILE):
+            return False
+        with open(HEARTBEAT_FILE, "r") as f:
+            ts = float(f.read().strip())
+        age = time.time() - ts
+        return age < WATCHDOG_STALE_SECS
+    except Exception:
+        return False
+
+
+def watchdog_loop():
+    """v5.4.1: Engine watchdog — heartbeat izle, gerekirse yeniden başlat.
+
+    Ana fonksiyon tamamlandıktan sonra çalışır.
+    Engine heartbeat'i stale olursa:
+      1. Eski process'leri temizle
+      2. API'yi yeniden başlat
+      3. Electron'u yeniden başlat
+    """
+    restart_count = 0
+    log("[WATCHDOG] Engine watchdog baslatildi")
+    log(f"  Stale esigi: {WATCHDOG_STALE_SECS}sn, kontrol araligi: {WATCHDOG_CHECK_INTERVAL}sn")
+
+    # İlk heartbeat dosyasının oluşmasını bekle (engine başlangıcı)
+    for _ in range(60):
+        if os.path.exists(HEARTBEAT_FILE):
+            break
+        time.sleep(1)
+
+    while True:
+        time.sleep(WATCHDOG_CHECK_INTERVAL)
+
+        if not port_open(8000):
+            # API portu kapalı — kullanıcı sistemi kapattı
+            if not port_open(5173):
+                log("[WATCHDOG] API ve Vite kapali — kullanici cikis yapmis, watchdog durduruluyor")
+                break
+            # Sadece API düştü
+            log("[WATCHDOG] API portu kapali — engine crash tespit edildi")
+        elif check_heartbeat():
+            # Her şey normal
+            restart_count = 0
+            continue
+        else:
+            log("[WATCHDOG] Heartbeat STALE — engine dondurulmus veya crash")
+
+        # Auto-restart limiti
+        restart_count += 1
+        if restart_count > MAX_AUTO_RESTARTS:
+            log(f"[WATCHDOG] KRITIK: {MAX_AUTO_RESTARTS} ardisik restart basarisiz — watchdog durduruluyor")
+            log("[WATCHDOG] Manuel mudahale gerekli!")
+            break
+
+        log(f"[WATCHDOG] Otomatik yeniden baslatma #{restart_count}/{MAX_AUTO_RESTARTS}")
+
+        # Eski process'leri temizle
+        try:
+            cleanup()
+        except Exception as exc:
+            log(f"[WATCHDOG] Temizlik hatasi: {exc}")
+
+        # Heartbeat dosyasını temizle
+        try:
+            if os.path.exists(HEARTBEAT_FILE):
+                os.remove(HEARTBEAT_FILE)
+        except Exception:
+            pass
+
+        # API'yi yeniden başlat
+        if not start_api():
+            log("[WATCHDOG] API baslatilamadi — bir sonraki denemede tekrar deneyecek")
+            continue
+
+        # Vite kontrol
+        if not port_open(5173):
+            start_vite()
+
+        # Electron başlat
+        start_electron()
+
+        log(f"[WATCHDOG] Yeniden baslatma #{restart_count} tamamlandi — heartbeat bekleniyor...")
+        # Yeni engine'in başlaması için bekle
+        time.sleep(30)
+
+
 def main():
     # Temiz log
     with open(LOG_FILE, "w", encoding="utf-8") as f:
         f.write("")
 
     is_prod = "--prod" in sys.argv
+    is_watchdog = "--no-watchdog" not in sys.argv  # v5.4.1
     log(f"=== USTAT v5.4 Baslatici {'(PRODUCTION)' if is_prod else '(DEVELOPMENT)'} ===")
     log(f"Python: {sys.executable}")
+    log(f"Watchdog: {'AKTIF' if is_watchdog else 'DEVRE DISI'}")
 
     # 0. Hizli temizlik (minimum bekleme)
     cleanup()
@@ -323,6 +424,15 @@ def main():
     start_electron()
 
     log("=== Tamamlandi ===")
+
+    # v5.4.1: Watchdog döngüsü — engine'i izle ve gerekirse yeniden başlat
+    if is_watchdog:
+        try:
+            watchdog_loop()
+        except KeyboardInterrupt:
+            log("[WATCHDOG] Ctrl+C — watchdog durduruluyor")
+        except Exception as exc:
+            log(f"[WATCHDOG] Beklenmeyen hata: {exc}")
 
 
 if __name__ == "__main__":

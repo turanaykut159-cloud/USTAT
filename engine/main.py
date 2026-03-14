@@ -53,6 +53,15 @@ DB_ERROR_THRESHOLD: int = 3       # art arda DB hatası → sistem durdur
 CLOSURE_SYNC_LOOKBACK_DAYS: int = 3  # kapanma sync lookback (gün)
 CLOSURE_RETRY_INTERVAL: int = 6   # pending ticket retry aralığı (cycle = 60sn)
 
+# v5.4.1: Cycle timeout eşikleri
+CYCLE_WARN_THRESHOLD: float = 15.0    # saniye — uyarı logla
+CYCLE_CRITICAL_THRESHOLD: float = 30.0  # saniye — event bus + DB kaydı
+CONSECUTIVE_SLOW_LIMIT: int = 3        # ardışık yavaş cycle → alarm
+
+# v5.4.1: Heartbeat dosyası — watchdog tarafından izlenir
+import pathlib as _pathlib
+HEARTBEAT_FILE: str = str(_pathlib.Path(__file__).resolve().parent.parent / "engine.heartbeat")
+
 
 # ═════════════════════════════════════════════════════════════════════
 #  ENGINE
@@ -117,6 +126,9 @@ class Engine:
         # OĞUL'a h_engine referansı ver (netting koruması)
         self.ogul.h_engine = self.h_engine
 
+        # OĞUL'a ÜSTAT referansı ver (strateji havuzu + kontrat profilleri)
+        self.ogul.ustat = self.ustat
+
         # ManuelMotor (Bağımsız Manuel İşlem Motoru — v14.0)
         from engine.manuel_motor import ManuelMotor
         self.manuel_motor = ManuelMotor(
@@ -137,6 +149,10 @@ class Engine:
         self.health = HealthCollector()
         self.mt5._health = self.health
 
+        # ── Hata Takip Motoru ─────────────────────────────────────
+        from engine.error_tracker import ErrorTracker
+        self.error_tracker = ErrorTracker(db=self.db)
+
         # ── Durum ───────────────────────────────────────────────────
         self._running: bool = False
         self._cycle_count: int = 0
@@ -145,6 +161,9 @@ class Engine:
         self._prev_mt5_tickets: set[int] = set()  # pozisyon kapanma tespiti için
         self._pending_closure_tickets: set[int] = set()  # VİOP uzlaşma bekleyen kapanmalar
         self._last_cleanup_date: date | None = None  # FAZ 2.8: son temizlik tarihi
+        self._last_backup_cycle: int = 0  # v5.4.1: periyodik yedekleme sayacı
+        self._consecutive_slow_cycles: int = 0  # v5.4.1: ardışık yavaş cycle sayacı
+        self._last_successful_cycle_time: float = 0.0  # v5.4.1: son başarılı cycle epoch
 
     # ═════════════════════════════════════════════════════════════════
     #  BAŞLATMA / DURDURMA
@@ -203,6 +222,18 @@ class Engine:
         # 4. Ana döngü
         self._running = True
         self._main_loop()
+
+    def _write_heartbeat(self) -> None:
+        """v5.4.1: Heartbeat dosyasını güncelle — watchdog tarafından izlenir.
+
+        Dosya içeriği: Unix timestamp (float).
+        Watchdog bu dosyayı okuyarak engine'in canlı olup olmadığını anlar.
+        """
+        try:
+            with open(HEARTBEAT_FILE, "w") as f:
+                f.write(f"{_time.time():.2f}")
+        except Exception:
+            pass  # Heartbeat yazılamasa bile engine durmamalı
 
     def stop(self, reason: str = "kullanıcı isteği", close_positions: bool | None = None) -> None:
         """Engine'i durdur — graceful shutdown.
@@ -322,6 +353,20 @@ class Engine:
                 self._run_single_cycle()
                 # DB hata sayacını sıfırla (başarılı cycle)
                 self._consecutive_db_errors = 0
+                # v5.4.1: Son başarılı cycle zamanını kaydet
+                self._last_successful_cycle_time = _time.time()
+
+                # v5.4.1: Periyodik DB yedekleme (her 360 cycle ≈ 1 saat)
+                DB_BACKUP_INTERVAL = 360
+                cycles_since_backup = self._cycle_count - self._last_backup_cycle
+                if cycles_since_backup >= DB_BACKUP_INTERVAL:
+                    try:
+                        backup_path = self.db.backup()
+                        if backup_path:
+                            logger.info(f"Periyodik DB yedek alındı: {backup_path}")
+                        self._last_backup_cycle = self._cycle_count
+                    except Exception as bk_exc:
+                        logger.error(f"Periyodik DB yedekleme hatası: {bk_exc}")
 
             except _SystemStopError as exc:
                 logger.critical(f"SİSTEM DURDURMA: {exc}")
@@ -362,15 +407,65 @@ class Engine:
                     "ERROR",
                 )
 
+            # v5.4.1: Heartbeat güncelle — watchdog izleyecek
+            self._write_heartbeat()
+
             # Cycle süresini hesapla, kalan süreyi bekle
             elapsed = _time.monotonic() - cycle_start
             sleep_time = max(0, CYCLE_INTERVAL - elapsed)
 
-            if elapsed > CYCLE_INTERVAL:
+            # v5.4.1: Gelişmiş cycle timeout tespiti
+            if elapsed >= CYCLE_CRITICAL_THRESHOLD:
+                self._consecutive_slow_cycles += 1
+                logger.critical(
+                    f"Cycle #{self._cycle_count} KRİTİK YAVAŞ: "
+                    f"{elapsed:.1f}s (eşik: {CYCLE_CRITICAL_THRESHOLD}s) — "
+                    f"ardışık yavaş: {self._consecutive_slow_cycles}/{CONSECUTIVE_SLOW_LIMIT}"
+                )
+                self._log_event_safe(
+                    "CYCLE_TIMEOUT_CRITICAL",
+                    f"Cycle #{self._cycle_count}: {elapsed:.1f}s "
+                    f"(ardışık: {self._consecutive_slow_cycles})",
+                    "CRITICAL",
+                )
+                # Circuit breaker aktifse logla
+                if self.mt5.circuit_breaker_active:
+                    logger.critical(
+                        f"MT5 circuit breaker AKTİF — yavaş cycle'ların sebebi "
+                        f"MT5 terminal donması olabilir"
+                    )
+                # Ardışık yavaş cycle limiti aşıldıysa otomatik restart
+                if self._consecutive_slow_cycles >= CONSECUTIVE_SLOW_LIMIT:
+                    logger.critical(
+                        f"{CONSECUTIVE_SLOW_LIMIT} ardışık yavaş cycle — "
+                        f"engine performans krizi, MT5 reconnect deneniyor"
+                    )
+                    self._log_event_safe(
+                        "ENGINE_PERF_CRISIS",
+                        f"{CONSECUTIVE_SLOW_LIMIT} ardışık yavaş cycle, "
+                        f"MT5 reconnect tetiklendi",
+                        "CRITICAL",
+                    )
+                    try:
+                        self.mt5.disconnect()
+                        self.mt5.connect(launch=False)
+                    except Exception as rc_exc:
+                        logger.error(f"Otomatik MT5 reconnect hatası: {rc_exc}")
+                    self._consecutive_slow_cycles = 0
+            elif elapsed > CYCLE_WARN_THRESHOLD:
+                self._consecutive_slow_cycles += 1
+                logger.warning(
+                    f"Cycle #{self._cycle_count} uzun sürdü: "
+                    f"{elapsed:.1f}s (eşik: {CYCLE_WARN_THRESHOLD}s)"
+                )
+            elif elapsed > CYCLE_INTERVAL:
                 logger.warning(
                     f"Cycle #{self._cycle_count} uzun sürdü: "
                     f"{elapsed:.1f}s (hedef: {CYCLE_INTERVAL}s)"
                 )
+                self._consecutive_slow_cycles = 0  # hafif overrun sayılmaz
+            else:
+                self._consecutive_slow_cycles = 0
 
             if sleep_time > 0 and self._running:
                 _time.sleep(sleep_time)
@@ -821,7 +916,7 @@ class Engine:
         snaps_cutoff = (now - timedelta(days=90)).isoformat()
 
         try:
-            from engine.symbols import WATCHED_SYMBOLS
+            from engine.mt5_bridge import WATCHED_SYMBOLS
             bars_del = 0
             for sym in WATCHED_SYMBOLS:
                 for tf in ("M15", "H1"):

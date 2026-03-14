@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.4 — Backend API çağrıları.
+ * ÜSTAT v5.5 — Backend API çağrıları.
  *
  * FastAPI sunucusuyla iletişim (REST + WebSocket).
  * Tüm endpoint'ler: /api/status, /api/account, /api/positions,
@@ -427,16 +427,21 @@ export function connectLiveWS(onMessage, onError = null, onStateChange = null) {
       try {
         const messages = JSON.parse(event.data);
         onMessage(messages);
-      } catch {
-        // Geçersiz JSON
+      } catch (parseErr) {
+        // v14.1: Geçersiz JSON → loglayarak izole et, WS'yi kapatma
+        console.warn(`[WS] JSON parse hatası: ${parseErr.message}, data: ${String(event.data).slice(0, 100)}`);
       }
     };
 
     ws.onerror = (err) => {
+      // v14.1: WS hatasını logla
+      console.warn('[WS] WebSocket error event:', err?.type || 'unknown');
       if (onError) onError(err);
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
+      // v14.1: Kapanış nedenini logla
+      console.warn(`[WS] WebSocket closed: code=${event.code}, reason=${event.reason || 'none'}, clean=${event.wasClean}`);
       cleanup();
       if (!intentionalClose) {
         setState('reconnecting');
@@ -485,4 +490,69 @@ export function connectLiveWS(onMessage, onError = null, onStateChange = null) {
   connect();
 
   return { close, getState };
+}
+
+
+// ── Error Tracker (Hata Takip) ──────────────────────────────────
+
+export async function getErrorSummary() {
+  try {
+    const { data } = await client.get('/errors/summary');
+    return data;
+  } catch (err) {
+    console.error('[ÜSTAT API] getErrorSummary:', err?.message ?? err);
+    return { today_errors: 0, today_warnings: 0, open_groups: 0 };
+  }
+}
+
+export async function getErrorGroups({ category, severity, resolved, limit } = {}) {
+  try {
+    const params = {};
+    if (category) params.category = category;
+    if (severity) params.severity = severity;
+    if (resolved !== undefined) params.resolved = resolved;
+    if (limit) params.limit = limit;
+    const { data } = await client.get('/errors/groups', { params });
+    return data;
+  } catch (err) {
+    console.error('[ÜSTAT API] getErrorGroups:', err?.message ?? err);
+    return { count: 0, groups: [] };
+  }
+}
+
+export async function getErrorTrends({ period = 'hourly', hours, days } = {}) {
+  try {
+    const params = { period };
+    if (hours) params.hours = hours;
+    if (days) params.days = days;
+    const { data } = await client.get('/errors/trends', { params });
+    return data;
+  } catch (err) {
+    console.error('[ÜSTAT API] getErrorTrends:', err?.message ?? err);
+    return { period, data: [] };
+  }
+}
+
+export async function resolveError(errorType, messagePrefix = '', resolvedBy = 'operator') {
+  try {
+    const { data } = await client.post('/errors/resolve', {
+      error_type: errorType,
+      message_prefix: messagePrefix,
+      resolved_by: resolvedBy,
+    });
+    return data;
+  } catch (err) {
+    console.error('[ÜSTAT API] resolveError:', err?.message ?? err);
+    return { success: false };
+  }
+}
+
+export async function resolveAllErrors(resolvedBy = 'operator') {
+  try {
+    const { data } = await client.post(`/errors/resolve-all?resolved_by=${resolvedBy}`);
+    return data;
+  } catch (err) {
+    console.error('[ÜSTAT API] resolveAllErrors:', err?.message ?? err);
+    return { success: false, resolved_count: 0 };
+  }
 }

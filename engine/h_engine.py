@@ -242,13 +242,21 @@ class HEngine:
         result["entry_price"] = entry_price
         result["current_price"] = current_price
 
+        # v5.4.1: Atomik netting kilidi al (race condition önleme)
+        from engine.netting_lock import acquire_symbol, release_symbol
+        if not acquire_symbol(symbol, owner="h_engine"):
+            result["reason"] = f"{symbol} başka motor tarafından kilitli (netting lock)"
+            return result
+
         # 5. Sembol zaten hibrit yönetiminde mi?
         if symbol in self.get_hybrid_symbols():
+            release_symbol(symbol, owner="h_engine")
             result["reason"] = f"{symbol} zaten hibrit yönetiminde (netting)"
             return result
 
         # 6. Ticket zaten hibrit yönetiminde mi? (bellek + DB)
         if ticket in self.hybrid_positions:
+            release_symbol(symbol, owner="h_engine")
             result["reason"] = f"Ticket {ticket} zaten hibrit yönetiminde"
             return result
         # v14: DB'de eski ACTIVE kayıt varsa bellekle senkronize et
@@ -266,6 +274,7 @@ class HEngine:
         # 7. Eşzamanlı limit
         active_count = len(self.hybrid_positions)
         if active_count >= self._max_concurrent:
+            release_symbol(symbol, owner="h_engine")
             result["reason"] = (
                 f"Eşzamanlı hibrit limit aşıldı ({active_count}/{self._max_concurrent})"
             )
@@ -274,6 +283,7 @@ class HEngine:
         # 8. Günlük zarar limiti
         self._refresh_daily_pnl()
         if self._daily_hybrid_pnl <= -abs(self._config_daily_limit):
+            release_symbol(symbol, owner="h_engine")
             result["reason"] = (
                 f"Günlük hibrit zarar limiti aşıldı "
                 f"({self._daily_hybrid_pnl:.2f} / -{self._config_daily_limit:.2f} TRY)"
@@ -283,6 +293,7 @@ class HEngine:
         # 9. ATR verisi
         atr_value = self._get_atr(symbol)
         if atr_value is None or atr_value <= 0:
+            release_symbol(symbol, owner="h_engine")
             result["reason"] = f"{symbol} için ATR verisi bulunamadı"
             return result
 
@@ -299,6 +310,7 @@ class HEngine:
         # 10. Güncel fiyat SL'yi zaten ihlal ediyor mu?
         suggested_sl = result["suggested_sl"]
         if direction == "BUY" and current_price <= suggested_sl:
+            release_symbol(symbol, owner="h_engine")
             result["reason"] = (
                 f"Güncel fiyat ({current_price:.4f}) zaten SL seviyesinin "
                 f"({suggested_sl:.4f}) altında — devir güvenli değil"
@@ -493,6 +505,10 @@ class HEngine:
 
         # Bellekten kaldır
         del self.hybrid_positions[ticket]
+
+        # v5.4.1: Netting kilidi serbest bırak
+        from engine.netting_lock import release_symbol
+        release_symbol(symbol, owner="h_engine")
 
         logger.info(f"Hibrit yönetiminden çıkarıldı: ticket={ticket} {symbol}")
         return {"success": True, "message": f"{symbol} hibrit yönetiminden çıkarıldı"}
@@ -734,10 +750,51 @@ class HEngine:
         if self._native_sltp:
             modify_result = self.mt5.modify_position(hp.ticket, sl=new_sl)
             if modify_result is None:
+                # v5.4.1: Modify başarısız — retry sayacı + alarm
+                retry_key = f"be_modify_{hp.ticket}"
+                fail_count = self._close_retry_counts.get(retry_key, 0) + 1
+                self._close_retry_counts[retry_key] = fail_count
                 logger.warning(
-                    f"Breakeven SL modify başarısız: ticket={hp.ticket} {hp.symbol}"
+                    f"Breakeven SL modify başarısız: ticket={hp.ticket} {hp.symbol} "
+                    f"(deneme {fail_count}/3)"
                 )
+                if fail_count >= 3:
+                    logger.critical(
+                        f"Breakeven SL 3x modify başarısız: ticket={hp.ticket} {hp.symbol} "
+                        f"— software SL moduna geçiliyor"
+                    )
+                    # Native başarısız, software SL ile korumaya devam et
+                    self._close_retry_counts.pop(retry_key, None)
+                    # Belleği güncelle ama DB'ye native=False olarak kaydet
+                    old_sl = hp.current_sl
+                    hp.current_sl = new_sl
+                    hp.breakeven_hit = True
+                    self.db.update_hybrid_position(hp.ticket, {
+                        "current_sl": new_sl, "breakeven_hit": 1,
+                    })
+                    self.db.insert_hybrid_event(
+                        ticket=hp.ticket, symbol=hp.symbol, event="BREAKEVEN_FALLBACK",
+                        details={
+                            "old_sl": old_sl, "new_sl": new_sl,
+                            "price": current_price,
+                            "message": "Native modify 3x başarısız, software SL aktif",
+                        },
+                    )
+                    logger.warning(
+                        f"Breakeven SL (software fallback): ticket={hp.ticket} {hp.symbol} "
+                        f"SL {old_sl:.4f} → {new_sl:.4f}"
+                    )
                 return
+            else:
+                # v5.4.1: Modify başarılı — MT5 doğrulama
+                self._close_retry_counts.pop(f"be_modify_{hp.ticket}", None)
+                verified_sl = self._verify_mt5_sl(hp.ticket)
+                if verified_sl is not None and abs(verified_sl - new_sl) > 0.01:
+                    logger.error(
+                        f"Breakeven SL DESYNC: ticket={hp.ticket} {hp.symbol} "
+                        f"istenen={new_sl:.4f} MT5={verified_sl:.4f} — MT5 değeri kullanılıyor"
+                    )
+                    new_sl = verified_sl
 
         old_sl = hp.current_sl
         hp.current_sl = new_sl
@@ -810,10 +867,49 @@ class HEngine:
         if self._native_sltp:
             modify_result = self.mt5.modify_position(hp.ticket, sl=new_sl)
             if modify_result is None:
+                # v5.4.1: Modify başarısız — retry sayacı + alarm
+                retry_key = f"tr_modify_{hp.ticket}"
+                fail_count = self._close_retry_counts.get(retry_key, 0) + 1
+                self._close_retry_counts[retry_key] = fail_count
                 logger.warning(
-                    f"Trailing SL modify başarısız: ticket={hp.ticket} {hp.symbol}"
+                    f"Trailing SL modify başarısız: ticket={hp.ticket} {hp.symbol} "
+                    f"(deneme {fail_count}/3)"
                 )
+                if fail_count >= 3:
+                    logger.critical(
+                        f"Trailing SL 3x modify başarısız: ticket={hp.ticket} {hp.symbol} "
+                        f"— software SL moduna geçiliyor"
+                    )
+                    self._close_retry_counts.pop(retry_key, None)
+                    old_sl = hp.current_sl
+                    hp.current_sl = new_sl
+                    hp.trailing_active = True
+                    self.db.update_hybrid_position(hp.ticket, {
+                        "current_sl": new_sl, "trailing_active": 1,
+                    })
+                    self.db.insert_hybrid_event(
+                        ticket=hp.ticket, symbol=hp.symbol, event="TRAILING_FALLBACK",
+                        details={
+                            "old_sl": old_sl, "new_sl": new_sl,
+                            "price": current_price,
+                            "message": "Native modify 3x başarısız, software SL aktif",
+                        },
+                    )
+                    logger.warning(
+                        f"Trailing SL (software fallback): ticket={hp.ticket} {hp.symbol} "
+                        f"SL {old_sl:.4f} → {new_sl:.4f}"
+                    )
                 return
+            else:
+                # v5.4.1: Modify başarılı — MT5 doğrulama
+                self._close_retry_counts.pop(f"tr_modify_{hp.ticket}", None)
+                verified_sl = self._verify_mt5_sl(hp.ticket)
+                if verified_sl is not None and abs(verified_sl - new_sl) > 0.01:
+                    logger.error(
+                        f"Trailing SL DESYNC: ticket={hp.ticket} {hp.symbol} "
+                        f"istenen={new_sl:.4f} MT5={verified_sl:.4f} — MT5 değeri kullanılıyor"
+                    )
+                    new_sl = verified_sl
 
         old_sl = hp.current_sl
         hp.current_sl = new_sl
@@ -838,6 +934,35 @@ class HEngine:
             f"SL {old_sl:.4f} → {new_sl:.4f} (fiyat={current_price:.4f}) "
             f"[{'native' if self._native_sltp else 'software'}]"
         )
+
+    # ═════════════════════════════════════════════════════════════════
+    #  MT5 SL DOĞRULAMA — v5.4.1
+    # ═════════════════════════════════════════════════════════════════
+
+    def _verify_mt5_sl(self, ticket: int) -> float | None:
+        """MT5'ten pozisyonun gerçek SL değerini oku ve doğrula.
+
+        v5.4.1 ekleme: Modify sonrası bellek-MT5 tutarlılık kontrolü.
+
+        Args:
+            ticket: MT5 pozisyon ticket numarası.
+
+        Returns:
+            MT5'teki gerçek SL değeri, okunamazsa None.
+        """
+        try:
+            positions = self.mt5.get_positions()
+            if not positions:
+                return None
+            mt5_pos = next(
+                (p for p in positions if p.get("ticket") == ticket), None,
+            )
+            if mt5_pos is None:
+                return None
+            return mt5_pos.get("sl", 0.0)
+        except Exception as exc:
+            logger.debug(f"MT5 SL doğrulama okunamadı: ticket={ticket}: {exc}")
+            return None
 
     # ═════════════════════════════════════════════════════════════════
     #  ZORLA KAPAT — EOD / Kill-Switch L3
@@ -1088,6 +1213,10 @@ class HEngine:
 
         # Bellekten kaldır
         self.hybrid_positions.pop(hp.ticket, None)
+
+        # v5.4.1: Netting kilidi serbest bırak
+        from engine.netting_lock import release_symbol
+        release_symbol(hp.symbol, owner="h_engine")
 
         logger.info(
             f"Hibrit pozisyon kapatıldı: ticket={hp.ticket} {hp.symbol} "

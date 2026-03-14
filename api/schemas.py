@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 class StatusResponse(BaseModel):
     """GET /api/status — Sistem durumu."""
-    version: str = "5.4.0"
+    version: str = "5.5.0"
     engine_running: bool = False
     mt5_connected: bool = False
     regime: str = "TREND"          # TREND / RANGE / VOLATILE / OLAY
@@ -29,6 +29,10 @@ class StatusResponse(BaseModel):
     last_cycle: str | None = None
     deactivated_symbols: list[str] = []
     warnings: list[WarningItem] = []
+    # v5.4.1: Sessiz hata göstergesi
+    data_fresh: bool = True                       # veri güncel mi?
+    last_successful_cycle: str | None = None       # son başarılı cycle ISO timestamp
+    circuit_breaker_active: bool = False            # MT5 circuit breaker durumu
 
 
 class WarningItem(BaseModel):

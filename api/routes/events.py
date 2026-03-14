@@ -5,10 +5,14 @@ Filtreleme: event_type, severity, limit.
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Query
 
 from api.deps import get_db
 from api.schemas import EventItem, EventsResponse
+
+logger = logging.getLogger("ustat.api.routes.events")
 
 router = APIRouter()
 
@@ -20,21 +24,30 @@ async def get_events(
     limit: int = Query(50, ge=1, le=500, description="Maks kayıt"),
 ):
     """Sistem olaylarını filtreli olarak döndür."""
-    db = get_db()
-    if not db:
+    try:
+        db = get_db()
+        if not db:
+            return EventsResponse()
+
+        rows = db.get_events(event_type=event_type, severity=severity, limit=limit)
+        if not rows:
+            rows = []
+
+        items = []
+        for r in rows:
+            try:
+                items.append(EventItem(
+                    id=r.get("id", 0),
+                    timestamp=str(r.get("timestamp", "")),
+                    type=str(r.get("type", "")),
+                    severity=str(r.get("severity", "INFO")),
+                    message=str(r.get("message", "")),
+                    action=str(r.get("action", "")),
+                ))
+            except Exception:
+                continue
+
+        return EventsResponse(count=len(items), events=items)
+    except Exception as exc:
+        logger.exception("events endpoint HATASI: %s", exc)
         return EventsResponse()
-
-    rows = db.get_events(event_type=event_type, severity=severity, limit=limit)
-    items = [
-        EventItem(
-            id=r.get("id", 0),
-            timestamp=r.get("timestamp", ""),
-            type=r.get("type", ""),
-            severity=r.get("severity", "INFO"),
-            message=r.get("message", ""),
-            action=r.get("action", ""),
-        )
-        for r in rows
-    ]
-
-    return EventsResponse(count=len(items), events=items)

@@ -19,6 +19,7 @@ Kritik kurallar:
 
 from __future__ import annotations
 
+import json
 import statistics
 from datetime import datetime, date, timedelta
 from typing import Any
@@ -150,6 +151,9 @@ class Ustat:
         # ── Dedup cache (tekrarlayan olay filtreleme) ────────────
         self._dedup_cache: dict[str, datetime] = {}
 
+        # ── Persistence: DB'den önceki oturum verilerini yükle ─────
+        self._load_persisted_state()
+
     # ════════════════════════════════════════════════════════════════
     #  ANA CYCLE
     # ════════════════════════════════════════════════════════════════
@@ -192,6 +196,10 @@ class Ustat:
         if self._should_daily_report(now):
             self._generate_daily_report(baba, ogul, now)
             self._generate_regulation_suggestions(now)
+            self._apply_regulation_feedback()
+
+        # 8. Persistence — her cycle sonunda DB'ye kaydet
+        self._save_persisted_state()
 
     # ════════════════════════════════════════════════════════════════
     #  1. OLAY/KARAR KAYDI
@@ -552,10 +560,9 @@ class Ustat:
     def _should_next_day_analysis(self, now: datetime) -> bool:
         """Ertesi gün analizi zamanı geldi mi?
 
-        Koşullar: saat >= 09:30, günde 1 kez, hafta içi.
+        Günde 1 kez, hafta içi. Saat kısıtlaması kaldırıldı —
+        motor başlar başlamaz ilk döngüde çalışır.
         """
-        if now.hour < 9 or (now.hour == 9 and now.minute < 30):
-            return False
         today = now.date()
         if self._last_next_day_analysis == today:
             return False
@@ -1072,13 +1079,97 @@ class Ustat:
             )
 
     # ════════════════════════════════════════════════════════════════
+    #  FEEDBACK LOOP — Regülasyon Önerilerini Parametrelere Yansıt
+    # ════════════════════════════════════════════════════════════════
+
+    def _apply_regulation_feedback(self) -> None:
+        """Regülasyon önerilerini strateji havuzundaki parametrelere uygula.
+
+        Güvenli mikro-ayarlama: parametreleri %10-%20 aralığında değiştirir.
+        Büyük değişiklikler yapmaz — sistemi kademeli optimize eder.
+
+        Kurallar:
+          - BABA hataları çoksa → SL çarpanını sıkılaştır (küçült)
+          - OĞUL hataları çoksa → sinyal eşiğini yükselt
+          - Düşük skorlu işlemler → trailing/breakeven parametrelerini ayarla
+          - Düşük win-rate kontratlar → (Top 5 zaten cezalandırıyor, ek ayar yok)
+
+        Tüm değişiklikler DB'ye config_history olarak kaydedilir.
+        """
+        if not self.regulation_suggestions:
+            return
+
+        active_key = self.strategy_pool.get("active_profile", "trend")
+        profile = STRATEGY_PROFILES.get(active_key)
+        if not profile or "parameters" not in profile:
+            return
+
+        params = profile["parameters"]
+        applied: list[str] = []
+
+        for suggestion in self.regulation_suggestions:
+            param = suggestion.get("parameter", "")
+            priority = suggestion.get("priority", "LOW")
+
+            # HIGH öncelik: BABA risk hataları → SL sıkılaştır
+            if param == "max_daily_loss" and priority == "HIGH":
+                old_sl = params.get("sl_atr_mult", 1.5)
+                # SL'yi %10 küçült (daha sıkı risk)
+                new_sl = round(max(0.8, old_sl * 0.90), 2)
+                if new_sl != old_sl:
+                    params["sl_atr_mult"] = new_sl
+                    applied.append(f"sl_atr_mult: {old_sl} → {new_sl}")
+
+            # MEDIUM öncelik: OĞUL sinyal hataları → eşik yükselt
+            elif param == "signal_threshold" and priority in ("MEDIUM", "HIGH"):
+                old_th = params.get("signal_threshold", 50)
+                # Eşiği %10 artır (daha seçici sinyal)
+                new_th = min(80, old_th + 5)
+                if new_th != old_th:
+                    params["signal_threshold"] = new_th
+                    applied.append(f"signal_threshold: {old_th} → {new_th}")
+
+            # MEDIUM öncelik: İşlem yönetimi kötü → trailing iyileştir
+            elif param == "trade_management" and priority == "MEDIUM":
+                old_trail = params.get("trailing_start_atr", 1.0)
+                # Trailing'i %10 sıkılaştır (daha erken aktif)
+                new_trail = round(max(0.5, old_trail * 0.90), 2)
+                if new_trail != old_trail:
+                    params["trailing_start_atr"] = new_trail
+                    applied.append(f"trailing_start_atr: {old_trail} → {new_trail}")
+
+        if applied:
+            # Strateji havuzunu güncelle
+            for i, prof in enumerate(self.strategy_pool.get("profiles", [])):
+                if prof.get("market_type") == profile.get("market_type"):
+                    self.strategy_pool["profiles"][i]["parameters"] = params
+
+            changes_text = "; ".join(applied)
+            logger.info(f"[ÜSTAT] Feedback loop: {changes_text}")
+
+            self._log_event(
+                "REGULATION_APPLIED",
+                f"Regülasyon uygulandı ({active_key}): {changes_text}",
+                severity="WARNING",
+            )
+
+            # Config history'ye kaydet
+            try:
+                self._db.insert_event(
+                    event_type="CONFIG_CHANGE",
+                    message=f"ÜSTAT feedback: {changes_text}",
+                    severity="INFO",
+                    action="ustat_regulation",
+                )
+            except Exception:
+                pass
+
+    # ════════════════════════════════════════════════════════════════
     #  GÜNLÜK RAPOR
     # ════════════════════════════════════════════════════════════════
 
     def _should_daily_report(self, now: datetime) -> bool:
-        """Günlük rapor zamanı geldi mi? (18:00 sonrası, günde 1 kez)."""
-        if now.hour < 18:
-            return False
+        """Günlük rapor zamanı geldi mi? (Günde 1 kez, saat kısıtlaması kaldırıldı)."""
         if self._last_daily_report is None:
             return True
         return self._last_daily_report.date() != now.date()
@@ -1099,8 +1190,8 @@ class Ustat:
         if baba and hasattr(baba, "current_regime") and baba.current_regime:
             regime_str = baba.current_regime.regime_type.value
 
-        active_count = len(ogul.active_trades) if ogul else 0
-        top5 = ogul._current_top5 if ogul else []
+        active_count = len(getattr(ogul, "active_trades", {})) if ogul else 0
+        top5 = getattr(ogul, "_current_top5", []) if ogul else []
         error_count = len(self.error_attributions)
         suggestion_count = len(self.regulation_suggestions)
         nda_count = len(self.next_day_analyses)
@@ -1205,6 +1296,100 @@ class Ustat:
         ]
         for k in expired_keys:
             del self._dedup_cache[k]
+
+    # ════════════════════════════════════════════════════════════════
+    #  PERSISTENCE — DB'ye kaydet / DB'den yükle
+    # ════════════════════════════════════════════════════════════════
+
+    def _load_persisted_state(self) -> None:
+        """Uygulama başlangıcında önceki oturum verilerini DB'den yükle.
+
+        app_state tablosundaki JSON verilerini okuyarak ÜSTAT'ın
+        error_attributions, next_day_analyses, regulation_suggestions,
+        strategy_pool ve contract_profiles verilerini geri yükler.
+        Böylece uygulama restart'ında veriler kaybolmaz.
+        """
+        if not self._db:
+            return
+
+        keys_map = {
+            "ustat_error_attributions": "error_attributions",
+            "ustat_next_day_analyses": "next_day_analyses",
+            "ustat_regulation_suggestions": "regulation_suggestions",
+            "ustat_strategy_pool": "strategy_pool",
+            "ustat_contract_profiles": "contract_profiles",
+        }
+
+        for db_key, attr_name in keys_map.items():
+            try:
+                raw = self._db.get_state(db_key)
+                if raw:
+                    data = json.loads(raw)
+                    setattr(self, attr_name, data)
+                    logger.info(
+                        f"[ÜSTAT] Persistence yüklendi: {attr_name} "
+                        f"({len(data) if isinstance(data, (list, dict)) else '?'} kayıt)"
+                    )
+            except Exception as exc:
+                logger.warning(f"[ÜSTAT] Persistence yükleme hatası ({db_key}): {exc}")
+
+    def _save_persisted_state(self) -> None:
+        """ÜSTAT verilerini DB'ye kaydet (her cycle sonunda çağrılır).
+
+        Tüm analiz sonuçlarını app_state tablosuna JSON olarak yazar.
+        Böylece uygulama kapansa bile veriler korunur.
+        """
+        if not self._db:
+            return
+
+        data_map = {
+            "ustat_error_attributions": self.error_attributions,
+            "ustat_next_day_analyses": self.next_day_analyses,
+            "ustat_regulation_suggestions": self.regulation_suggestions,
+            "ustat_strategy_pool": self.strategy_pool,
+            "ustat_contract_profiles": self.contract_profiles,
+        }
+
+        for db_key, data in data_map.items():
+            try:
+                self._db.set_state(db_key, json.dumps(data, ensure_ascii=False))
+            except Exception as exc:
+                logger.warning(f"[ÜSTAT] Persistence kaydetme hatası ({db_key}): {exc}")
+
+    # ════════════════════════════════════════════════════════════════
+    #  AKTIF STRATEJİ PARAMETRELERİ — OĞUL OKUR
+    # ════════════════════════════════════════════════════════════════
+
+    def get_active_params(self) -> dict[str, Any]:
+        """Aktif rejim profiline göre strateji parametrelerini döndür.
+
+        OĞUL bu metodu çağırarak rejime uygun dinamik parametreleri alır.
+        Eğer aktif profil yoksa varsayılan (trend) parametreleri döner.
+
+        Returns:
+            Parametre sözlüğü: sl_atr_mult, tp_atr_mult, lot_scale,
+            max_hold_minutes, trailing_start_atr, breakeven_atr,
+            signal_threshold.
+        """
+        active_key = self.strategy_pool.get("active_profile", "trend")
+        profile = STRATEGY_PROFILES.get(active_key)
+        if profile and "parameters" in profile:
+            return dict(profile["parameters"])
+        # Fallback: trend profili
+        return dict(STRATEGY_PROFILES["trend"]["parameters"])
+
+    def get_contract_profile(self, symbol: str) -> dict[str, Any] | None:
+        """Belirli bir kontratın davranış profilini döndür.
+
+        OĞUL Top 5 seçiminde ve sinyal üretiminde bu bilgiyi kullanır.
+
+        Args:
+            symbol: Kontrat sembolü.
+
+        Returns:
+            Kontrat profili dict veya None (profil yoksa).
+        """
+        return self.contract_profiles.get(symbol)
 
     # ════════════════════════════════════════════════════════════════
     #  API TARAFINDAN OKUNAN VERİLER

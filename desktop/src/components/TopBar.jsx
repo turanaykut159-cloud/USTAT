@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.4 — Üst bilgi çubuğu.
+ * ÜSTAT v5.5 — Üst bilgi çubuğu.
  *
  * Sol:  ÜSTAT v5.4 logosu | Kill-switch (L1/L2/L3) | Bağlantı durumu (yeşil/kırmızı nokta)
  * Sağ:  Bakiye | Equity | Floating | Günlük K/Z (MT5, 2sn) | Pin | Saat

@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.4 — Sol dikey navigasyon menüsü.
+ * ÜSTAT v5.5 — Sol dikey navigasyon menüsü.
  *
  * 6 sayfa linki (ikonlu) + Güvenli Kapat (2 adım doğrulama) + Kill-Switch (en altta, kırmızı, 2s basılı tutma).
  */
@@ -19,6 +19,7 @@ const NAV_ITEMS = [
   { path: '/performance', label: 'Üstat & Performans', icon: '🏆' },
   { path: '/risk',        label: 'Risk Yönetimi',      icon: '🛡️' },
   { path: '/monitor',     label: 'System Monitor',      icon: '📡' },
+  { path: '/errors',      label: 'Hata Takip',          icon: '🔍' },
   { path: '/settings',    label: 'Ayarlar',            icon: '⚙️' },
 ];
 

@@ -77,6 +77,26 @@ async def get_status():
     pipeline = get_pipeline()
     deactivated_symbols = pipeline.get_deactivated_symbols() if pipeline else []
 
+    # v5.4.1: Sessiz hata göstergesi
+    import time as _time
+    data_fresh = True
+    last_successful_cycle = None
+    circuit_breaker_active = False
+
+    if engine and hasattr(engine, '_last_successful_cycle_time'):
+        lsc = engine._last_successful_cycle_time
+        if lsc > 0:
+            last_successful_cycle = datetime.fromtimestamp(lsc).isoformat()
+            # Veri 60 saniyeden eski ise stale kabul et (6 cycle kaçırılmış)
+            stale_threshold = 60.0
+            data_fresh = (_time.time() - lsc) < stale_threshold
+        else:
+            # Engine henüz ilk cycle'ı tamamlamadı
+            data_fresh = engine_running
+
+    if mt5 and hasattr(mt5, 'circuit_breaker_active'):
+        circuit_breaker_active = mt5.circuit_breaker_active
+
     return StatusResponse(
         engine_running=engine_running,
         mt5_connected=mt5_connected,
@@ -90,6 +110,9 @@ async def get_status():
         last_cycle=last_cycle,
         deactivated_symbols=deactivated_symbols,
         warnings=warnings,
+        data_fresh=data_fresh,
+        last_successful_cycle=last_successful_cycle,
+        circuit_breaker_active=circuit_breaker_active,
     )
 
 

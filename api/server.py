@@ -1,4 +1,4 @@
-"""ÜSTAT v5.4 API — FastAPI Sunucu.
+"""ÜSTAT v5.5 API — FastAPI Sunucu.
 
 Desktop uygulamasına REST API + WebSocket köprüsü sağlar.
 
@@ -33,6 +33,7 @@ from api.deps import set_engine
 from api.routes import (
     account,
     events,
+    error_dashboard,
     health,
     hybrid_trade,
     killswitch,
@@ -53,7 +54,7 @@ from api.routes import (
 logger = logging.getLogger("ustat.api")
 
 # Tek kaynak: OpenAPI ve root endpoint aynı versiyonu kullanır
-API_VERSION = "5.4.0"
+API_VERSION = "5.5.0"
 
 
 # ── Lifespan: Engine başlat / durdur ─────────────────────────────
@@ -113,8 +114,16 @@ async def lifespan(app: FastAPI):
                     f"Engine thread CRASHED: {exc} — "
                     f"API tek başına çalışamaz, süreç kapatılıyor."
                 )
-            # Engine yoksa API'nin çalışması anlamsız — süreci kapat
-            # Electron veya start_ustat.py yeniden başlatabilir
+            # v5.4.1: Graceful shutdown — os._exit() yerine engine.stop() çağır
+            # Bu pending trade'lerin DB'ye yazılmasını ve MT5 bağlantısının
+            # düzgün kapatılmasını sağlar
+            try:
+                logger.info("Watchdog: Graceful shutdown başlatılıyor...")
+                engine.stop(reason="engine_thread_terminated")
+                logger.info("Watchdog: Graceful shutdown tamamlandı.")
+            except Exception as stop_exc:
+                logger.error(f"Watchdog: Graceful shutdown hatası: {stop_exc}")
+            # Graceful shutdown tamamlandıktan sonra süreci kapat
             import os
             os._exit(1)
 
@@ -189,6 +198,7 @@ app.include_router(ogul_activity.router, prefix="/api", tags=["ogul"])
 app.include_router(live.router, tags=["websocket"])
 app.include_router(settings.router, prefix="/api", tags=["settings"])
 app.include_router(mt5_verify.router, prefix="/api", tags=["mt5"])
+app.include_router(error_dashboard.router, prefix="/api", tags=["errors"])
 
 
 @app.get("/")

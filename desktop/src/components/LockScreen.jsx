@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.4 — Kilit / Bekleme Ekranı.
+ * ÜSTAT v5.5 — Kilit / Bekleme Ekranı.
  *
  * Akış (fire-and-forget MT5 başlatma + polling doğrulama):
  *   CHECKING    → kayıtlı credential kontrol

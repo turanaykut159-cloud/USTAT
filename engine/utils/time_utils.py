@@ -6,6 +6,8 @@ from datetime import datetime, time, date
 # VİOP seans saatleri (Türkiye saati, UTC+3)
 VIOP_OPEN = time(9, 30)
 VIOP_CLOSE = time(18, 15)
+VIOP_LUNCH_START = time(12, 30)
+VIOP_LUNCH_END = time(14, 0)
 # Resmi tatil günleri (yıllık güncellenmeli)
 HOLIDAYS_2025 = [
     date(2025, 1, 1),   # Yılbaşı

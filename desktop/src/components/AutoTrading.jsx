@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.4 — Otomatik İşlem Paneli.
+ * ÜSTAT v5.5 — Otomatik İşlem Paneli.
  *
  * Layout:
  *   Üst:    4 stat kartı (Durum, Aktif Rejim, Lot Çarpanı, Oto. İşlem)

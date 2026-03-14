@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.4 Desktop — Electron ana process.
+ * ÜSTAT v5.5 Desktop — Electron ana process.
  *
  * Pencere: 1400x900 min, koyu tema, always-on-top, tam ekran başlangıç.
  * System tray: Göster/Gizle/Always on top toggle/Çıkış.
@@ -11,6 +11,13 @@ const path = require('path');
 const net = require('net');
 const fs = require('fs');
 const mt5Manager = require('./mt5Manager');
+
+// ── v14.1: Renderer Crash Recovery sabitleri ─────────────────────
+const MAX_CRASH_RELOADS = 3;          // Üst üste max yeniden yükleme
+const CRASH_RELOAD_WINDOW = 60000;    // 60sn içinde crash loop koruması
+const HEALTH_CHECK_INTERVAL = 30000;  // 30sn renderer sağlık kontrolü
+let crashTimestamps = [];             // Crash zaman damgaları
+let healthCheckTimer = null;
 
 // ── Dosya loglama (debug) ────────────────────────────────────────
 const LOG_PATH = path.join(__dirname, '..', 'electron.log');
@@ -30,7 +37,7 @@ process.on('unhandledRejection', (reason) => {
 });
 
 // ── Sabitler ─────────────────────────────────────────────────────
-const APP_TITLE = 'ÜSTAT v5.4';
+const APP_TITLE = 'ÜSTAT v5.5';
 const MIN_WIDTH = 1400;
 const MIN_HEIGHT = 900;
 const BG_COLOR = '#0d1117';
@@ -43,12 +50,50 @@ const SPLASH_HTML = `<!DOCTYPE html>
 <head><meta charset="utf-8"><title>${APP_TITLE}</title></head>
 <body style="display:flex;align-items:center;justify-content:center;height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#e6edf3;margin:0">
 <div style="text-align:center">
-<h1 style="font-size:48px;margin:0;font-weight:300;letter-spacing:2px">\u00dcSTAT <span style="color:#484f58;font-size:24px">v5.4</span></h1>
+<h1 style="font-size:48px;margin:0;font-weight:300;letter-spacing:2px">\u00dcSTAT <span style="color:#484f58;font-size:24px">v5.5</span></h1>
 <p style="color:#484f58;margin:20px 0 30px;font-size:14px">V\u0130OP Algorithmic Trading</p>
 <div style="width:36px;height:36px;border:3px solid #21262d;border-top-color:#58a6ff;border-radius:50%;animation:s 1s linear infinite;margin:0 auto"></div>
 <p style="color:#30363d;font-size:13px;margin-top:24px">Y\u00fckleniyor...</p>
 </div>
 <style>@keyframes s{to{transform:rotate(360deg)}}</style>
+</body></html>`;
+
+// ── v14.1: Crash Fallback HTML ──────────────────────────────────
+const CRASH_HTML = `<!DOCTYPE html>
+<html style="background:${BG_COLOR};height:100%;margin:0">
+<head><meta charset="utf-8"><title>${APP_TITLE} — Hata</title></head>
+<body style="display:flex;align-items:center;justify-content:center;height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#e6edf3;margin:0">
+<div style="text-align:center;max-width:500px;padding:2rem">
+<div style="font-size:48px;margin-bottom:16px">\u26A0\uFE0F</div>
+<h2 style="color:#ef5350;margin:0 0 12px">Uygulama Hatas\u0131</h2>
+<p style="color:#8b949e;margin:0 0 24px;line-height:1.6">
+Renderer process beklenmedik \u015Fekilde sonland\u0131.
+Uygulama kendini kurtarmaya \u00E7al\u0131\u015Facak.
+</p>
+<div id="countdown" style="color:#58a6ff;font-size:14px;margin-bottom:24px">
+5 saniye i\u00E7inde yeniden y\u00FCklenecek...
+</div>
+<button onclick="window.location.reload()" style="padding:10px 24px;border-radius:6px;border:none;background:#58a6ff;color:#0d1117;cursor:pointer;font-weight:600;font-size:14px;margin-right:8px">
+Hemen Yeniden Y\u00FCkle
+</button>
+<button onclick="document.getElementById('details').style.display='block'" style="padding:10px 24px;border-radius:6px;border:1px solid #30363d;background:transparent;color:#8b949e;cursor:pointer;font-size:14px">
+Detay
+</button>
+<div id="details" style="display:none;margin-top:20px;text-align:left;background:#161b22;border-radius:8px;padding:16px;font-size:12px;color:#8b949e">
+<p>Olas\u0131 nedenler:</p>
+<ul style="padding-left:20px;line-height:1.8">
+<li>API ba\u011Flant\u0131s\u0131 koptu</li>
+<li>Bellek yetersizli\u011Fi</li>
+<li>Renderer JavaScript hatas\u0131</li>
+</ul>
+<p>Hata electron.log dosyas\u0131na kaydedildi.</p>
+</div>
+<script>
+let c=5;const el=document.getElementById('countdown');
+const t=setInterval(()=>{c--;if(c<=0){clearInterval(t);window.location.reload();}
+else{el.textContent=c+' saniye i\u00E7inde yeniden y\u00FCklenecek...';}},1000);
+</script>
+</div>
 </body></html>`;
 
 let mainWindow = null;
@@ -168,7 +213,98 @@ function createWindow() {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
+    stopHealthCheck();
   });
+
+  // ── v14.1: Renderer crash detection ─────────────────────────────
+  // render-process-gone: GPU process veya renderer çöktüğünde tetiklenir
+  app.on('render-process-gone', (_event, _webContents, details) => {
+    elog(`RENDER-PROCESS-GONE: reason=${details.reason}, exitCode=${details.exitCode}`);
+    handleRendererCrash(`render-process-gone: ${details.reason}`);
+  });
+
+  // webContents crashed: renderer process beklenmedik çöktü
+  mainWindow.webContents.on('crashed', (_event, killed) => {
+    elog(`RENDERER CRASHED: killed=${killed}`);
+    handleRendererCrash(`webContents crashed, killed=${killed}`);
+  });
+
+  // did-fail-load: sayfa yükleme hatası (network, dosya bulunamadı vs.)
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDesc, validatedURL) => {
+    // -3: Aborted (normal navigasyon), yoksay
+    if (errorCode === -3) return;
+    elog(`DID-FAIL-LOAD: code=${errorCode}, desc=${errorDesc}, url=${validatedURL}`);
+  });
+
+  // unresponsive: renderer yanıt vermiyor (freeze)
+  mainWindow.on('unresponsive', () => {
+    elog('WINDOW UNRESPONSIVE — renderer donmus olabilir');
+  });
+
+  mainWindow.on('responsive', () => {
+    elog('WINDOW RESPONSIVE — renderer tekrar yanitliyor');
+  });
+
+  // ── v14.1: Renderer log forwarding (IPC) ──────────────────────
+  ipcMain.on('renderer:log', (_event, level, ...args) => {
+    const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+    elog(`[Renderer/${level}] ${msg}`);
+  });
+
+  // ── v14.1: Health check başlat ────────────────────────────────
+  startHealthCheck();
+}
+
+// ── v14.1: Crash Handler ────────────────────────────────────────
+function handleRendererCrash(reason) {
+  const now = Date.now();
+  crashTimestamps.push(now);
+  // Son 60sn içindeki crash'leri say
+  crashTimestamps = crashTimestamps.filter(t => now - t < CRASH_RELOAD_WINDOW);
+
+  if (crashTimestamps.length > MAX_CRASH_RELOADS) {
+    elog(`CRASH LOOP DETECTED (${crashTimestamps.length}x/${CRASH_RELOAD_WINDOW/1000}sn) — fallback gösteriliyor`);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(CRASH_HTML)}`);
+    }
+    return;
+  }
+
+  elog(`Renderer crash (${crashTimestamps.length}/${MAX_CRASH_RELOADS}) — yeniden yükleniyor. Neden: ${reason}`);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    const isDev = process.env.NODE_ENV === 'development';
+    if (isDev) {
+      mainWindow.loadURL(`http://localhost:${DEV_PORT}`);
+    } else {
+      mainWindow.loadFile(path.join(__dirname, 'dist', 'index.html'));
+    }
+  }
+}
+
+// ── v14.1: Window Health Check ──────────────────────────────────
+function startHealthCheck() {
+  stopHealthCheck();
+  healthCheckTimer = setInterval(() => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+
+    // Renderer'a basit bir JS çalıştır — yanıt gelmezse sorun var
+    mainWindow.webContents.executeJavaScript('document.readyState', true)
+      .then((state) => {
+        if (state !== 'complete' && state !== 'interactive') {
+          elog(`HEALTH CHECK: readyState=${state} — olağandışı`);
+        }
+      })
+      .catch((err) => {
+        elog(`HEALTH CHECK FAILED: ${err.message} — renderer yanıtsız`);
+      });
+  }, HEALTH_CHECK_INTERVAL);
+}
+
+function stopHealthCheck() {
+  if (healthCheckTimer) {
+    clearInterval(healthCheckTimer);
+    healthCheckTimer = null;
+  }
 }
 
 // ── Vite Dev Server Polling ──────────────────────────────────────

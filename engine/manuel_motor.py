@@ -60,8 +60,8 @@ CONTRACT_SIZE: float = 100.0
 MAX_LOT_PER_CONTRACT: float = 1.0
 MARGIN_RESERVE_PCT: float = 0.20
 MAX_CONCURRENT_MANUAL: int = 3
-TRADING_OPEN: time = time(9, 45)
-TRADING_CLOSE: time = time(17, 45)
+TRADING_OPEN: time = time(9, 40)
+TRADING_CLOSE: time = time(17, 50)
 SENT_EXPIRE_SEC: float = 30.0    # SENT → MT5'te yoksa 30 sn sonra temizle
 
 # ── Risk Skor Eşikleri ──────────────────────────────────────────────
@@ -129,7 +129,7 @@ class ManuelMotor:
 
         # 1. İşlem saatleri
         if not self._is_trading_allowed():
-            result["reason"] = "İşlem saatleri dışında (09:45-17:45)"
+            result["reason"] = "İşlem saatleri dışında (09:40-17:50)"
             return result
 
         # 2. Kendi active_trades'de netting çakışma

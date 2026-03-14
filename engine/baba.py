@@ -303,6 +303,8 @@ class Baba:
         self._risk_state: dict[str, Any] = {
             "daily_reset_date": None,
             "daily_trade_count": 0,
+            "daily_auto_trade_count": 0,    # v14: otomatik işlem sayısı
+            "daily_manual_trade_count": 0,  # v14: manuel işlem sayısı
             "weekly_reset_week": None,
             "weekly_loss_halved": False,
             "monthly_reset_month": None,
@@ -984,6 +986,8 @@ class Baba:
 
         self._risk_state["daily_reset_date"] = today
         self._risk_state["daily_trade_count"] = 0
+        self._risk_state["daily_auto_trade_count"] = 0     # v14: reset
+        self._risk_state["daily_manual_trade_count"] = 0   # v14: reset
         self._risk_state["daily_reset_equity"] = None   # önceki günü temizle
 
         # Günlük kayıp veya üst üste kayıp nedenli L2 varsa kaldır
@@ -1145,10 +1149,10 @@ class Baba:
             verdict.reason = f"Floating loss > %{risk_params.max_floating_loss*100:.1f} — yeni işlem engeli"
             return verdict
 
-        # 9. Günlük işlem sayısı
-        if self._risk_state["daily_trade_count"] >= risk_params.max_daily_trades:
+        # 9. Günlük işlem sayısı (v14: sadece otomatik işlemler sınırlanır)
+        if self._risk_state["daily_auto_trade_count"] >= risk_params.max_daily_trades:
             verdict.can_trade = False
-            verdict.reason = f"Günlük max işlem ({risk_params.max_daily_trades}) doldu"
+            verdict.reason = f"Günlük max otomatik işlem ({risk_params.max_daily_trades}) doldu"
             return verdict
 
         # 10. Cooldown (üst üste kayıp)
@@ -1427,14 +1431,22 @@ class Baba:
         )
         return False
 
-    def increment_daily_trade_count(self) -> None:
+    def increment_daily_trade_count(self, trade_type: str = "auto") -> None:
         """Bir işlem açıldığında çağrılır (Oğul tarafından).
 
-        Günlük işlem sayacını arttırır.
+        Günlük işlem sayacını arttırır (otomatik/manuel ayrımı).
+
+        Args:
+            trade_type: İşlem tipi ("auto" veya "manual"). Varsayılan "auto".
         """
         self._risk_state["daily_trade_count"] += 1
+        if trade_type == "manual":
+            self._risk_state["daily_manual_trade_count"] += 1
+        else:  # default is "auto"
+            self._risk_state["daily_auto_trade_count"] += 1
         logger.debug(
-            f"Günlük işlem sayısı: {self._risk_state['daily_trade_count']}"
+            f"Günlük işlem sayısı: {self._risk_state['daily_trade_count']} "
+            f"({trade_type})"
         )
 
     # ── Public risk durumu erişimleri (OĞUL/API kullanımı için) ────
@@ -1714,6 +1726,9 @@ class Baba:
         Rapor AÇIK #6 düzeltmesi: Önce zarardaki pozisyonları kapatır,
         ardından drawdown hâlâ eşik üstündeyse kârdakileri de kapatır.
 
+        v5.4.1 ekleme: Başarısız kapatımlar için agresif retry (5 deneme, 2sn
+        aralık) + market order fallback + acil uyarı.
+
         Args:
             reason: Kapanış nedeni.
 
@@ -1740,7 +1755,7 @@ class Baba:
             f"{len(winning)} kârda ({reason})"
         )
 
-        CLOSE_MAX_RETRIES = 3
+        CLOSE_MAX_RETRIES = 5  # v5.4.1: 3'ten 5'e çıkarıldı
         closed_count = 0
 
         # 1) Önce zarardakileri kapat
@@ -1770,6 +1785,41 @@ class Baba:
                 f"— {len(winning)} kârdaki pozisyon korundu"
             )
 
+        # v5.4.1: Başarısız kapatımlar için agresif ikinci tur retry
+        if failed_tickets:
+            logger.critical(
+                f"L3 ilk tur başarısız: {len(failed_tickets)} pozisyon açık kaldı "
+                f"— agresif retry başlatılıyor (5 deneme, 2sn aralık)"
+            )
+            import time as _time
+            still_failed: list[int] = []
+            for ticket in failed_tickets:
+                recovered = False
+                for retry in range(1, 6):
+                    _time.sleep(2)  # 2sn bekleme — piyasa emri için zaman ver
+                    try:
+                        result = self._mt5.close_position(ticket)
+                    except Exception:
+                        result = None
+                    if result:
+                        logger.info(
+                            f"L3 agresif retry başarılı: ticket={ticket} "
+                            f"(deneme {retry}/5)"
+                        )
+                        closed_count += 1
+                        recovered = True
+                        break
+                    logger.warning(
+                        f"L3 agresif retry {retry}/5 başarısız: ticket={ticket}"
+                    )
+                if not recovered:
+                    still_failed.append(ticket)
+                    logger.critical(
+                        f"L3 KRİTİK: ticket={ticket} 10 denemede kapatılamadı! "
+                        f"MANUEL MÜDAHALE GEREKLİ!"
+                    )
+            failed_tickets = still_failed
+
         if closed_count > 0:
             self._db.insert_event(
                 event_type="KILL_SWITCH",
@@ -1780,10 +1830,23 @@ class Baba:
         if failed_tickets:
             self._db.insert_event(
                 event_type="KILL_SWITCH",
-                message=f"Kapatılamayan pozisyonlar: {failed_tickets}",
+                message=(
+                    f"KRİTİK: {len(failed_tickets)} pozisyon 10 denemede "
+                    f"kapatılamadı — MANUEL MÜDAHALE GEREKLİ: {failed_tickets}"
+                ),
                 severity="CRITICAL",
-                action="positions_close_failed",
+                action="positions_close_failed_final",
             )
+            # v5.4.1: Event bus üzerinden UI'a acil uyarı gönder
+            try:
+                from engine.event_bus import emit as _emit
+                _emit("l3_close_failed", {
+                    "failed_tickets": failed_tickets,
+                    "reason": reason,
+                    "message": f"{len(failed_tickets)} pozisyon kapatılamadı — MANUEL MÜDAHALE GEREKLİ",
+                })
+            except Exception:
+                pass
         return failed_tickets
 
     def _try_close_position(
@@ -1791,9 +1854,12 @@ class Baba:
     ) -> tuple[int, list[int]]:
         """Tek pozisyonu kapatmayı dene.
 
+        v5.4.1: Denemeler arasına 1sn bekleme eklendi.
+
         Returns:
             (kapatılan_sayı, başarısız_ticket_listesi)
         """
+        import time as _time
         ticket = pos.get("ticket")
         if not ticket:
             return 0, []
@@ -1816,6 +1882,8 @@ class Baba:
                 f"Kapanış denemesi {attempt}/{max_retries} "
                 f"başarısız: ticket={ticket}"
             )
+            if attempt < max_retries:
+                _time.sleep(1)  # v5.4.1: Denemeler arası 1sn bekleme
         logger.error(
             f"Pozisyon {max_retries} denemede kapatılamadı: ticket={ticket}"
         )

@@ -43,6 +43,26 @@ from engine.utils.indicators import (
     bb_kc_squeeze,
     williams_r as calc_williams_r,
 )
+from engine.utils.price_action import (
+    find_support_resistance,
+    detect_bar_patterns,
+    pattern_confirms_direction,
+    analyze_trend_structure,
+    trend_supports_direction,
+    calculate_confluence,
+    get_structural_sl,
+    get_structural_tp,
+    CONFLUENCE_MIN_ENTRY,
+)
+from engine.utils.multi_tf import (
+    analyze_multi_tf,
+    h1_trend_filter,
+    m5_entry_quality,
+)
+from engine.utils.signal_engine import (
+    generate_signal as se2_generate_signal,
+    SignalVerdict,
+)
 from engine.baba import VIOP_EXPIRY_DATES
 from engine.utils.time_utils import ALL_HOLIDAYS
 
@@ -96,8 +116,8 @@ MAX_SLIPPAGE_ATR_MULT: float = 0.5     # max slippage = 0.5 × ATR
 MAX_LOT_PER_CONTRACT: float  = 1.0     # test süreci: kontrat başına max 1 lot
 MARGIN_RESERVE_PCT: float    = 0.20    # test süreci: %20 teminat ayırma
 MAX_CONCURRENT: int          = 5       # test süreci: eş zamanlı maks 5 pozisyon
-TRADING_OPEN: time           = time(9, 45)   # işlem başlangıç
-TRADING_CLOSE: time          = time(17, 45)  # işlem bitiş + tüm pozisyonlar kapatılır
+TRADING_OPEN: time           = time(9, 40)   # işlem başlangıç (açılıştan 10dk sonra)
+TRADING_CLOSE: time          = time(17, 50)  # işlem bitiş (kapanıştan 25dk önce)
 
 # ── Likidite Sınıfı Bazlı Parametreler ───────────────────────
 # A sınıfı: yüksek likidite (F_THYAO, F_AKBNK, F_ASELS, F_TCELL, F_PGSUS)
@@ -232,6 +252,32 @@ SPREAD_AVG_LOOKBACK: int = 100              # son 100 tick spread ortalaması
 
 # ── Oylama sistemi ──────────────────────────────────────────────────
 VOTING_ATR_LOOKBACK: int = 5        # ATR genişleme: son 5 bar ATR vs önceki 5 bar
+
+# ── FAZ 3: Ağırlıklı oylama sistemi ──────────────────────────────
+# Oy ağırlıkları (toplam 10)
+VOTE_W_RSI:       float = 2.0    # RSI momentum
+VOTE_W_EMA:       float = 2.5    # EMA trend
+VOTE_W_TREND_PA:  float = 2.5    # Price Action trend yapısı (FAZ 1)
+VOTE_W_ATR:       float = 1.5    # ATR genişleme
+VOTE_W_VOLUME:    float = 1.5    # Hacim
+
+# Ağırlıklı oylama eşikleri
+WEIGHTED_VOTE_EXIT_THRESHOLD: float = 3.0   # Ağırlıklı ters skor >= 3 → çık
+WEIGHTED_VOTE_HOLD_THRESHOLD: float = 4.0   # Ağırlıklı lehte skor >= 4 → tut
+
+# ── FAZ 3: 3-kademeli TP sistemi ─────────────────────────────────
+TP1_ATR: float = 1.5    # TP1: 1.5×ATR → %33 kapat
+TP2_ATR: float = 2.5    # TP2: 2.5×ATR → %33 kapat
+TP3_TRAIL: bool = True   # TP3: kalan trailing ile yönetilir
+TP1_CLOSE_PCT: float = 0.33   # TP1'de kapatılacak oran
+TP2_CLOSE_PCT: float = 0.50   # TP2'de kalanın yarısı
+
+# ── FAZ 3: Conviction (inanç) bazlı lot ölçekleme ────────────────
+CONVICTION_HIGH_THRESHOLD: float = 75.0    # Confluence >= 75 → tam lot
+CONVICTION_MED_THRESHOLD:  float = 60.0    # Confluence 60-75 → %70 lot
+CONVICTION_LOW_MULT:       float = 0.5     # Confluence < 60 → %50 lot (düşük inanç)
+CONVICTION_HIGH_MULT:      float = 1.0     # Yüksek inanç → tam lot
+CONVICTION_MED_MULT:       float = 0.7     # Orta inanç → %70 lot
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -474,9 +520,16 @@ class Ogul:
             return
 
         # 10. Her sembol için sinyal üretimi
+        from engine.netting_lock import is_symbol_locked, acquire_symbol, release_symbol
+
         for symbol in symbols:
             # Sembol başına 1 aktif işlem kuralı
             if symbol in self.active_trades:
+                continue
+
+            # v5.4.1: Atomik netting kilidi kontrolü (race condition önleme)
+            if is_symbol_locked(symbol, exclude_owner="ogul"):
+                logger.debug(f"Netting kilit: {symbol} — başka motor tarafından kilitli, sinyal atlanıyor")
                 continue
 
             # Hibrit yönetimindeki sembol atla (netting koruması)
@@ -636,35 +689,113 @@ class Ogul:
                 sell_votes += 1
                 result["ema_vote"] = "SELL"
 
-        # ── Oy 3: Volatilite — ATR(14) genişliyor mu ──────────────
+        # ── Oy 3: Volatilite — ATR(14) genişliyor mu (adaptif) ─────
         atr_arr = calc_atr(high, low, close, period=ATR_PERIOD)
+        _vol_regime = "NORMAL"  # LOW / NORMAL / HIGH
         if atr_arr is not None and len(atr_arr) >= VOTING_ATR_LOOKBACK * 2:
             recent_atr = np.nanmean(atr_arr[-VOTING_ATR_LOOKBACK:])
             prev_atr = np.nanmean(
                 atr_arr[-(VOTING_ATR_LOOKBACK * 2):-VOTING_ATR_LOOKBACK]
             )
+
+            # Volatilite rejim tespiti (adaptif filtreler için)
+            if len(atr_arr) >= 50:
+                atr_clean = atr_arr[~np.isnan(atr_arr)]
+                if len(atr_clean) >= 50:
+                    pct_rank = float(
+                        np.searchsorted(np.sort(atr_clean[-100:]), recent_atr)
+                        / len(atr_clean[-100:]) * 100
+                    )
+                    if pct_rank < 30:
+                        _vol_regime = "LOW"
+                    elif pct_rank > 70:
+                        _vol_regime = "HIGH"
+
             if prev_atr > 0 and recent_atr > prev_atr:
                 result["atr_expanding"] = True
-                # ATR genişleme yön nötr — ama çoğunluk yönünü destekler
                 if buy_votes > sell_votes:
                     buy_votes += 1
                 elif sell_votes > buy_votes:
                     sell_votes += 1
+            elif _vol_regime == "LOW" and prev_atr > 0:
+                # Düşük volatilite: ATR genişlemese bile stabil ise kabul et
+                # (sıkışma bölgesinde sinyal kaçırmamak için)
+                ratio = recent_atr / prev_atr if prev_atr > 0 else 0
+                if ratio >= 0.90:  # %10'dan fazla daralmadıysa stabil
+                    result["atr_expanding"] = True
+                    result["atr_regime_override"] = True
 
-        # ── Oy 4: Likidite — Hacim > 20-bar ortalaması mı ─────────
+        result["vol_regime"] = _vol_regime
+
+        # ── Oy 4: Likidite — Hacim adaptif eşik ─────────────────
         if len(volume) >= VOL_LOOKBACK + 1:
             current_vol = volume[-1]
             avg_vol = np.nanmean(volume[-(VOL_LOOKBACK + 1):-1])
-            if avg_vol > 0 and current_vol > avg_vol:
-                result["volume_above_avg"] = True
-                # Hacim yön nötr — ama çoğunluk yönünü destekler
-                if buy_votes > sell_votes:
-                    buy_votes += 1
-                elif sell_votes > buy_votes:
-                    sell_votes += 1
+            if avg_vol > 0:
+                vol_ratio = current_vol / avg_vol
+                # Düşük volatilite rejiminde hacim eşiği %80'e düşer
+                # Normal/yüksek rejimde standart %100
+                vol_threshold = 0.80 if _vol_regime == "LOW" else 1.0
+
+                if vol_ratio >= vol_threshold:
+                    result["volume_above_avg"] = True
+                    if buy_votes > sell_votes:
+                        buy_votes += 1
+                    elif sell_votes > buy_votes:
+                        sell_votes += 1
+                result["vol_ratio"] = round(vol_ratio, 2)
 
         result["buy_votes"] = buy_votes
         result["sell_votes"] = sell_votes
+
+        # ── FAZ 3: Ağırlıklı oylama (price action dahil) ────────
+        w_buy = 0.0
+        w_sell = 0.0
+
+        # RSI ağırlığı
+        if result["rsi_vote"] == "BUY":
+            w_buy += VOTE_W_RSI
+        elif result["rsi_vote"] == "SELL":
+            w_sell += VOTE_W_RSI
+
+        # EMA ağırlığı
+        if result["ema_vote"] == "BUY":
+            w_buy += VOTE_W_EMA
+        elif result["ema_vote"] == "SELL":
+            w_sell += VOTE_W_EMA
+
+        # ATR genişleme ağırlığı (mevcut çoğunluk yönüne)
+        if result["atr_expanding"]:
+            if w_buy > w_sell:
+                w_buy += VOTE_W_ATR
+            elif w_sell > w_buy:
+                w_sell += VOTE_W_ATR
+
+        # Hacim ağırlığı (mevcut çoğunluk yönüne)
+        if result["volume_above_avg"]:
+            if w_buy > w_sell:
+                w_buy += VOTE_W_VOLUME
+            elif w_sell > w_buy:
+                w_sell += VOTE_W_VOLUME
+
+        # FAZ 3: Price Action trend yapısı ağırlığı
+        try:
+            pa_trend = analyze_trend_structure(high, low, close)
+            if pa_trend.direction == "up":
+                w_buy += VOTE_W_TREND_PA * pa_trend.trend_strength
+                result["pa_trend"] = "up"
+            elif pa_trend.direction == "down":
+                w_sell += VOTE_W_TREND_PA * pa_trend.trend_strength
+                result["pa_trend"] = "down"
+            else:
+                result["pa_trend"] = "range"
+            result["pa_trend_strength"] = pa_trend.trend_strength
+        except Exception:
+            result["pa_trend"] = "error"
+            result["pa_trend_strength"] = 0.0
+
+        result["weighted_buy"] = round(w_buy, 2)
+        result["weighted_sell"] = round(w_sell, 2)
 
         # Sonuç: en yüksek oy alan yön
         if buy_votes > sell_votes:
@@ -708,9 +839,56 @@ class Ogul:
         high = df["high"].values.astype(np.float64)
         low = df["low"].values.astype(np.float64)
         volume = df["volume"].values.astype(np.float64)
+        open_ = df["open"].values.astype(np.float64) if "open" in df.columns else close.copy()
 
         candidates: list[Signal] = []
 
+        # ═══════════════════════════════════════════════════════════════
+        #  Signal Engine v2.0 — Yapı-Öncelikli Ana Motor
+        # ═══════════════════════════════════════════════════════════════
+        try:
+            verdict: SignalVerdict = se2_generate_signal(
+                open_, high, low, close, volume,
+                current_price=float(close[-1]),
+            )
+            if verdict.should_trade and verdict.direction != "NEUTRAL":
+                # SignalVerdict → Signal dönüşümü
+                se2_signal_type = (
+                    SignalType.BUY if verdict.direction == "BUY"
+                    else SignalType.SELL
+                )
+                se2_strategy_map = {
+                    "trend_follow": StrategyType.TREND_FOLLOW,
+                    "mean_reversion": StrategyType.MEAN_REVERSION,
+                    "breakout": StrategyType.BREAKOUT,
+                }
+                se2_strategy = se2_strategy_map.get(
+                    verdict.strategy_type, StrategyType.TREND_FOLLOW
+                )
+                se2_signal = Signal(
+                    symbol=symbol,
+                    signal_type=se2_signal_type,
+                    price=verdict.entry_price,
+                    sl=verdict.structural_sl,
+                    tp=verdict.structural_tp,
+                    strength=min(verdict.strength + 0.15, 1.0),  # SE3 bonusu
+                    reason=verdict.reason,
+                    strategy=se2_strategy,
+                )
+                candidates.append(se2_signal)
+                logger.info(
+                    f"[ÜSTAT-SE] Sinyal üretildi [{symbol}]: "
+                    f"{verdict.direction} güç={verdict.strength:.2f} "
+                    f"skor={verdict.total_score:.0f} "
+                    f"kaynak={verdict.agreeing_sources}/9 "
+                    f"R:R={verdict.risk_reward:.1f}"
+                )
+        except Exception as exc:
+            logger.warning(f"[ÜSTAT-SE] Sinyal motoru hatası [{symbol}]: {exc}")
+
+        # ═══════════════════════════════════════════════════════════════
+        #  Eski Strateji Motoru (Fallback)
+        # ═══════════════════════════════════════════════════════════════
         for strategy in strategies:
             signal: Signal | None = None
 
@@ -733,8 +911,239 @@ class Ogul:
         if not candidates:
             return None
 
-        # En güçlü sinyali seç
+        # En güçlü sinyali seç (SE2 bonusu ile SE2 sinyali tercih edilir)
         best = max(candidates, key=lambda s: s.strength)
+
+        # ── FAZ 1: Price Action Confluence Gate ────────────────────
+        # Yapısal farkındalık: sinyal, piyasa yapısıyla uyumlu mu?
+        try:
+            atr_arr = calc_atr(high, low, close, ATR_PERIOD)
+            atr_val = last_valid(atr_arr)
+            if atr_val and atr_val > 0:
+                direction_str = "BUY" if best.signal_type == SignalType.BUY else "SELL"
+
+                # Destek/Direnç seviyeleri
+                pa_levels = find_support_resistance(high, low, close, atr_val)
+
+                # Bar pattern tanıma
+                pa_patterns = detect_bar_patterns(open_, high, low, close, atr_val)
+
+                # Trend yapısı (HH/HL/LH/LL)
+                pa_trend = analyze_trend_structure(high, low, close)
+
+                # Gösterge değerleri (confluence hesabı için)
+                ema_f_arr = ema(close, TF_EMA_FAST)
+                ema_s_arr = ema(close, TF_EMA_SLOW)
+                rsi_arr = calc_rsi(close, MR_RSI_PERIOD)
+                _, _, hist_arr = calc_macd(close)
+                adx_arr = calc_adx(high, low, close, ATR_PERIOD)
+
+                _ema_f = last_valid(ema_f_arr) or 0.0
+                _ema_s = last_valid(ema_s_arr) or 0.0
+                _rsi = last_valid(rsi_arr) or 50.0
+                _hist = last_valid(hist_arr) or 0.0
+                _adx = last_valid(adx_arr) or 0.0
+
+                # Hacim oranı
+                vol_avg = float(np.nanmean(volume[-21:-1])) if len(volume) > 21 else float(np.nanmean(volume))
+                vol_ratio = float(volume[-1]) / vol_avg if vol_avg > 0 else 1.0
+
+                # Confluence hesapla
+                confluence = calculate_confluence(
+                    direction=direction_str,
+                    price=best.price,
+                    levels=pa_levels,
+                    patterns=pa_patterns,
+                    trend=pa_trend,
+                    atr_val=atr_val,
+                    adx_val=_adx,
+                    rsi_val=_rsi,
+                    macd_hist=_hist,
+                    ema_fast=_ema_f,
+                    ema_slow=_ema_s,
+                    volume_ratio=vol_ratio,
+                )
+
+                # Confluence gate: skor yetersizse sinyal red
+                if not confluence.can_enter:
+                    logger.info(
+                        f"[PA] Confluence yetersiz [{symbol}]: "
+                        f"skor={confluence.total_score:.1f} < {CONFLUENCE_MIN_ENTRY} "
+                        f"(seviye={confluence.level_score:.1f}, "
+                        f"pattern={confluence.pattern_score:.1f}, "
+                        f"indikatör={confluence.indicator_score:.1f}, "
+                        f"hacim={confluence.volume_score:.1f}, "
+                        f"trend={confluence.trend_score:.1f})"
+                    )
+                    return None
+
+                # Confluence skoru sinyal gücüne ekle (0-1 ölçeğine normalize)
+                confluence_bonus = (confluence.total_score - CONFLUENCE_MIN_ENTRY) / 100.0
+                best.strength = min(best.strength + confluence_bonus * 0.3, 1.0)
+
+                # Pattern yönü ters ise uyarı logla (soft engel — strength düşür)
+                pat_ok, pat_str = pattern_confirms_direction(pa_patterns, direction_str)
+                if not pat_ok:
+                    best.strength *= 0.7
+                    logger.debug(
+                        f"[PA] Pattern çelişkisi [{symbol}]: "
+                        f"strength {best.strength:.2f} (×0.7)"
+                    )
+
+                # Trend yapısı ters ise strength düşür
+                trend_ok, t_str = trend_supports_direction(pa_trend, direction_str)
+                if not trend_ok and t_str > 0.5:
+                    best.strength *= 0.6
+                    logger.debug(
+                        f"[PA] Trend çelişkisi [{symbol}]: "
+                        f"yapı={pa_trend.direction}, sinyal={direction_str} "
+                        f"strength {best.strength:.2f} (×0.6)"
+                    )
+
+                # Yapısal SL/TP iyileştirmesi
+                structural_sl = get_structural_sl(
+                    direction_str, best.price,
+                    pa_trend.swing_lows, pa_trend.swing_highs,
+                    atr_val,
+                )
+                if structural_sl is not None:
+                    # Yapısal SL daha sıkı (daha yakın) ise kullan
+                    if direction_str == "BUY" and structural_sl > best.sl:
+                        logger.debug(
+                            f"[PA] Yapısal SL [{symbol}]: "
+                            f"{best.sl:.4f} → {structural_sl:.4f}"
+                        )
+                        best.sl = structural_sl
+                    elif direction_str == "SELL" and structural_sl < best.sl:
+                        logger.debug(
+                            f"[PA] Yapısal SL [{symbol}]: "
+                            f"{best.sl:.4f} → {structural_sl:.4f}"
+                        )
+                        best.sl = structural_sl
+
+                structural_tp = get_structural_tp(
+                    direction_str, best.price,
+                    pa_trend.swing_highs, pa_trend.swing_lows,
+                    atr_val,
+                )
+                if structural_tp is not None:
+                    # Yapısal TP daha uzak ise kullan (daha iyi R:R)
+                    if direction_str == "BUY" and structural_tp > best.tp:
+                        best.tp = structural_tp
+                    elif direction_str == "SELL" and structural_tp < best.tp:
+                        best.tp = structural_tp
+
+                # Confluence detaylarını reason'a ekle
+                best.reason += (
+                    f" | PA: conf={confluence.total_score:.0f}"
+                    f" trend={pa_trend.direction}"
+                )
+
+                logger.info(
+                    f"[PA] Confluence geçti [{symbol}]: "
+                    f"skor={confluence.total_score:.1f} "
+                    f"(L={confluence.level_score:.0f} P={confluence.pattern_score:.0f} "
+                    f"I={confluence.indicator_score:.0f} V={confluence.volume_score:.0f} "
+                    f"T={confluence.trend_score:.0f}) "
+                    f"trend={pa_trend.direction}"
+                )
+        except Exception as exc:
+            # Price Action hatası sinyal üretimini engellemez
+            logger.warning(f"[PA] Price action analiz hatası [{symbol}]: {exc}")
+
+        # ── FAZ 2: Multi-Timeframe Uyum Gate ──────────────────────
+        try:
+            direction_str = "BUY" if best.signal_type == SignalType.BUY else "SELL"
+
+            # H1 verisi al
+            h1_df = self.db.get_bars(symbol, "H1", limit=70)
+            h1_data = None
+            if h1_df is not None and not h1_df.empty and len(h1_df) >= 30:
+                h1_data = {
+                    "high": h1_df["high"].values.astype(np.float64),
+                    "low": h1_df["low"].values.astype(np.float64),
+                    "close": h1_df["close"].values.astype(np.float64),
+                    "volume": h1_df["volume"].values.astype(np.float64),
+                }
+
+            # M5 verisi al
+            m5_df = self.db.get_bars(symbol, "M5", limit=60)
+            m5_data = None
+            if m5_df is not None and not m5_df.empty and len(m5_df) >= 20:
+                m5_data = {
+                    "high": m5_df["high"].values.astype(np.float64),
+                    "low": m5_df["low"].values.astype(np.float64),
+                    "close": m5_df["close"].values.astype(np.float64),
+                    "volume": m5_df["volume"].values.astype(np.float64),
+                }
+
+            # M15 verisi (zaten elimizde var)
+            m15_data = {
+                "high": high,
+                "low": low,
+                "close": close,
+                "volume": volume,
+            }
+
+            mtf = analyze_multi_tf(direction_str, h1_data, m15_data, m5_data)
+
+            # H1 ters trend engeli (güçlü ters trend = giriş yapma)
+            if h1_data is not None:
+                h1_pass, h1_dir, h1_str = h1_trend_filter(
+                    h1_data["close"], h1_data["high"], h1_data["low"],
+                    direction_str,
+                )
+                if not h1_pass:
+                    logger.info(
+                        f"[MTF] H1 trend engeli [{symbol}]: "
+                        f"sinyal={direction_str}, H1={h1_dir}, "
+                        f"güç={h1_str:.2f}"
+                    )
+                    return None
+
+            # Çoklu TF çakışma engeli
+            if mtf.alignment == "conflict":
+                logger.info(
+                    f"[MTF] TF çakışması [{symbol}]: "
+                    f"skor={mtf.total_score:.1f}, "
+                    f"alignment={mtf.alignment}"
+                )
+                return None
+
+            # MTF skoru sinyal gücüne ekle
+            if mtf.total_score > 50:
+                mtf_bonus = (mtf.total_score - 50) / 200.0  # max 0.25 bonus
+                best.strength = min(best.strength + mtf_bonus, 1.0)
+
+            # Strong alignment bonus
+            if mtf.alignment == "strong":
+                best.strength = min(best.strength + 0.1, 1.0)
+
+            # M5 giriş kalitesi
+            if m5_data is not None:
+                m5_qual, m5_timing = m5_entry_quality(
+                    m5_data["high"], m5_data["low"], m5_data["close"],
+                    direction_str,
+                )
+                if m5_timing == "wait" and m5_qual < 0.3:
+                    best.strength *= 0.7  # Kötü zamanlama cezası
+                    logger.debug(
+                        f"[MTF] M5 zamanlama kötü [{symbol}]: "
+                        f"kalite={m5_qual:.2f}, timing={m5_timing}"
+                    )
+
+            best.reason += f" | MTF: {mtf.alignment}({mtf.total_score:.0f})"
+
+            logger.info(
+                f"[MTF] Analiz [{symbol}]: skor={mtf.total_score:.1f} "
+                f"uyum={mtf.alignment} "
+                f"H1={mtf.h1.trend_direction if mtf.h1 else '?'} "
+                f"M15={mtf.m15.trend_direction if mtf.m15 else '?'} "
+                f"M5={mtf.m5.trend_direction if mtf.m5 else '?'}"
+            )
+        except Exception as exc:
+            # Multi-TF hatası sinyal üretimini engellemez
+            logger.warning(f"[MTF] Multi-TF analiz hatası [{symbol}]: {exc}")
 
         # ÜSTAT signal_threshold — rejime göre minimum sinyal gücü filtresi
         ustat_threshold = self._get_ustat_param("signal_threshold", 0)
@@ -1433,6 +1842,59 @@ class Ogul:
                 f"Bias-lot nötr [{signal.symbol}]: lot*0.85={lot:.2f}"
             )
 
+        # ── FAZ 3: Conviction bazlı lot ölçekleme ───────────────
+        # Confluence skoru yüksekse → daha büyük lot (güçlü inanç)
+        # Düşükse → daha küçük lot (düşük inanç)
+        try:
+            df = self.db.get_bars(signal.symbol, "M15", limit=MIN_BARS_M15)
+            if df is not None and not df.empty and len(df) >= MIN_BARS_M15:
+                _close = df["close"].values.astype(np.float64)
+                _high = df["high"].values.astype(np.float64)
+                _low = df["low"].values.astype(np.float64)
+                _volume = df["volume"].values.astype(np.float64)
+                _open = df["open"].values.astype(np.float64) if "open" in df.columns else _close.copy()
+
+                _atr_arr = calc_atr(_high, _low, _close, ATR_PERIOD)
+                _atr = last_valid(_atr_arr)
+                if _atr and _atr > 0:
+                    _levels = find_support_resistance(_high, _low, _close, _atr)
+                    _patterns = detect_bar_patterns(_open, _high, _low, _close, _atr)
+                    _trend = analyze_trend_structure(_high, _low, _close)
+
+                    _ema_f = last_valid(ema(_close, TF_EMA_FAST)) or 0
+                    _ema_s = last_valid(ema(_close, TF_EMA_SLOW)) or 0
+                    _rsi = last_valid(calc_rsi(_close, MR_RSI_PERIOD)) or 50
+                    _, _, _hist = calc_macd(_close)
+                    _hist_val = last_valid(_hist) or 0
+                    _adx = last_valid(calc_adx(_high, _low, _close, ATR_PERIOD)) or 0
+                    _vol_avg = float(np.nanmean(_volume[-21:-1])) if len(_volume) > 21 else float(np.nanmean(_volume))
+                    _vol_ratio = float(_volume[-1]) / _vol_avg if _vol_avg > 0 else 1.0
+
+                    conf = calculate_confluence(
+                        direction=direction, price=signal.price,
+                        levels=_levels, patterns=_patterns, trend=_trend,
+                        atr_val=_atr, adx_val=_adx, rsi_val=_rsi,
+                        macd_hist=_hist_val, ema_fast=_ema_f, ema_slow=_ema_s,
+                        volume_ratio=_vol_ratio,
+                    )
+
+                    if conf.total_score >= CONVICTION_HIGH_THRESHOLD:
+                        conv_mult = CONVICTION_HIGH_MULT
+                    elif conf.total_score >= CONVICTION_MED_THRESHOLD:
+                        conv_mult = CONVICTION_MED_MULT
+                    else:
+                        conv_mult = CONVICTION_LOW_MULT
+
+                    lot_before = lot
+                    lot = lot * conv_mult
+                    logger.info(
+                        f"[FAZ3] Conviction sizing [{signal.symbol}]: "
+                        f"conf={conf.total_score:.0f} → ×{conv_mult} "
+                        f"lot {lot_before:.2f}→{lot:.2f}"
+                    )
+        except Exception as exc:
+            logger.warning(f"[FAZ3] Conviction sizing hatası [{signal.symbol}]: {exc}")
+
         # v14: Lot çarpan yığılması koruması — tüm çarpanlar sonrası
         # lot hâlâ pozitifse minimum 1.0 lot (vol_min) uygula
         if 0 < lot < 1.0:
@@ -1966,9 +2428,35 @@ class Ogul:
 
         # Hibrit pozisyonları da kapat (EOD)
         if self.h_engine:
-            failed = self.h_engine.force_close_all(reason="EOD_17:45")
+            failed = self.h_engine.force_close_all(reason="EOD_17:50")
             if failed:
                 logger.error(f"EOD hibrit kapatma başarısız: {failed}")
+
+        # Manuel pozisyonları da kapat (EOD) — v14.1 düzeltme
+        if self.manuel_motor and self.manuel_motor.active_trades:
+            manual_count = len(self.manuel_motor.active_trades)
+            logger.warning(
+                f"EOD: {manual_count} manuel pozisyon kapatılıyor"
+            )
+            for sym in list(self.manuel_motor.active_trades):
+                trade = self.manuel_motor.active_trades[sym]
+                if trade.ticket:
+                    try:
+                        self.mt5.close_position(trade.ticket)
+                    except Exception as exc:
+                        logger.error(
+                            f"EOD manuel close_position hatası [{sym}] "
+                            f"ticket={trade.ticket}: {exc}"
+                        )
+            # sync_positions bir sonraki cycle'da kapanışları tespit edecek
+            # ama hemen de sync çağırabiliriz
+            try:
+                self.manuel_motor.sync_positions()
+            except Exception as exc:
+                logger.error(f"EOD ManuelMotor sync hatası: {exc}")
+
+        # v5.4.1: EOD sonrası MT5 doğrulama — hala açık pozisyon var mı?
+        self._verify_eod_closure()
 
         self.db.insert_event(
             event_type="EOD_CLOSE",
@@ -1976,6 +2464,81 @@ class Ogul:
             severity="INFO",
             action="eod_close",
         )
+
+    def _verify_eod_closure(self) -> None:
+        """v5.4.1: EOD kapatım sonrası MT5 doğrulama.
+
+        MT5'te hala açık pozisyon varsa agresif retry ile kapatır.
+        Bu adım, phantom pozisyonların (DB'de kapalı, MT5'te açık) oluşmasını önler.
+        """
+        import time as _time
+        try:
+            remaining = self.mt5.get_positions()
+        except Exception as exc:
+            logger.error(f"EOD doğrulama — MT5 sorgu hatası: {exc}")
+            return
+
+        if not remaining:
+            logger.info("EOD doğrulama: MT5'te açık pozisyon yok — OK")
+            return
+
+        logger.critical(
+            f"EOD DOĞRULAMA: MT5'te hala {len(remaining)} açık pozisyon var! "
+            f"Zorla kapatma başlatılıyor..."
+        )
+
+        still_open: list[int] = []
+        for pos in remaining:
+            ticket = pos.get("ticket")
+            if not ticket:
+                continue
+            closed = False
+            for attempt in range(1, 6):
+                try:
+                    result = self.mt5.close_position(ticket)
+                    if result:
+                        logger.info(
+                            f"EOD doğrulama — ticket={ticket} kapatıldı "
+                            f"(deneme {attempt}/5)"
+                        )
+                        closed = True
+                        break
+                except Exception as exc:
+                    logger.error(
+                        f"EOD doğrulama — close hatası ticket={ticket} "
+                        f"deneme {attempt}/5: {exc}"
+                    )
+                _time.sleep(1)
+            if not closed:
+                still_open.append(ticket)
+
+        if still_open:
+            logger.critical(
+                f"EOD KRİTİK: {len(still_open)} pozisyon kapatılamadı! "
+                f"GECE BOYUNCA AÇIK KALACAK! Ticketlar: {still_open}"
+            )
+            self.db.insert_event(
+                event_type="EOD_CLOSE_FAILED",
+                message=(
+                    f"KRİTİK: {len(still_open)} pozisyon EOD'da kapatılamadı — "
+                    f"MANUEL MÜDAHALE GEREKLİ: {still_open}"
+                ),
+                severity="CRITICAL",
+                action="eod_close_verification_failed",
+            )
+            # UI'a acil uyarı
+            try:
+                from engine.event_bus import emit as _emit
+                _emit("eod_close_failed", {
+                    "still_open": still_open,
+                    "message": f"{len(still_open)} pozisyon gece boyunca açık kalacak!",
+                })
+            except Exception:
+                pass
+        else:
+            logger.info(
+                f"EOD doğrulama: tüm {len(remaining)} pozisyon başarıyla kapatıldı"
+            )
 
     # ═════════════════════════════════════════════════════════════════
     #  AKTİF İŞLEM YÖNETİMİ
@@ -2178,12 +2741,33 @@ class Ogul:
             reverse = voting["buy_votes"]
         trade.voting_score = favorable
 
-        # 3/4+ ters oy veya ≤1/4 lehte → çık
-        if reverse >= 3 or favorable <= 1:
-            exit_reason = "signal_reversal" if reverse >= 3 else "signal_loss"
+        # FAZ 3: Ağırlıklı oylama ile çıkış kararı
+        w_buy = voting.get("weighted_buy", 0.0)
+        w_sell = voting.get("weighted_sell", 0.0)
+
+        if trade.direction == "BUY":
+            w_favorable = w_buy
+            w_reverse = w_sell
+        else:
+            w_favorable = w_sell
+            w_reverse = w_buy
+
+        # Ağırlıklı ters skor yeterince yüksek veya lehte çok düşük → çık
+        weighted_exit = (
+            w_reverse >= WEIGHTED_VOTE_EXIT_THRESHOLD
+            or (w_favorable < 2.0 and reverse >= 3)
+        )
+        # Legacy fallback: eski 3/4 kuralı da hâlâ geçerli
+        legacy_exit = (reverse >= 3 or favorable <= 1)
+
+        if weighted_exit or legacy_exit:
+            if weighted_exit:
+                exit_reason = f"weighted_reversal(w_rev={w_reverse:.1f})"
+            else:
+                exit_reason = "signal_reversal" if reverse >= 3 else "signal_loss"
             logger.info(
-                f"Oylama çıkışı [{symbol}]: lehte={favorable}, "
-                f"ters={reverse} → {exit_reason}"
+                f"Oylama çıkışı [{symbol}]: lehte={favorable}(w={w_favorable:.1f}), "
+                f"ters={reverse}(w={w_reverse:.1f}) → {exit_reason}"
             )
             try:
                 self.mt5.close_position(trade.ticket)
@@ -2293,7 +2877,7 @@ class Ogul:
                 except Exception as exc:
                     logger.error(f"TP1 kısmi kapanış hatası [{symbol}]: {exc}")
 
-        # ── 6. Trailing Stop Güncelle (EMA20 bazlı) ───────────────
+        # ── 6. Trailing Stop Güncelle (EMA20 + Swing bazlı hibrit) ──
         ema_20 = ema(close, period=TF_EMA_FAST)
         ema_val = last_valid(ema_20)
         if ema_val is not None:
@@ -2304,8 +2888,26 @@ class Ogul:
             if LUNCH_START <= now_time <= LUNCH_END:
                 trail_mult *= LUNCH_TRAIL_WIDEN
 
+            # FAZ 3: Swing-bazlı trailing — yapısal seviye ile EMA hibrit
+            # En sıkı olanı (pozisyona en yakın) seçilir
+            try:
+                swing_sl = get_structural_sl(
+                    trade.direction, current_price,
+                    analyze_trend_structure(high, low, close).swing_lows,
+                    analyze_trend_structure(high, low, close).swing_highs,
+                    atr_val, buffer_atr_mult=0.2,
+                )
+            except Exception:
+                swing_sl = None
+
             if trade.direction == "BUY":
-                new_trailing = ema_val - trail_mult * atr_val
+                ema_trailing = ema_val - trail_mult * atr_val
+                # Swing SL varsa ve EMA trailing'den sıkıysa tercih et
+                if swing_sl is not None and swing_sl > ema_trailing:
+                    new_trailing = swing_sl
+                else:
+                    new_trailing = ema_trailing
+
                 if new_trailing > trade.trailing_sl:
                     try:
                         result = self.mt5.modify_position(
@@ -2316,14 +2918,21 @@ class Ogul:
                             trade.sl = new_trailing
                             logger.debug(
                                 f"Trailing güncellendi [{symbol}]: "
-                                f"SL={new_trailing:.4f}"
+                                f"SL={new_trailing:.4f} "
+                                f"({'swing' if swing_sl and swing_sl > ema_trailing else 'ema'})"
                             )
                     except Exception as exc:
                         logger.error(
                             f"Trailing modify hatası [{symbol}]: {exc}"
                         )
             else:
-                new_trailing = ema_val + trail_mult * atr_val
+                ema_trailing = ema_val + trail_mult * atr_val
+                # Swing SL varsa ve EMA trailing'den sıkıysa tercih et
+                if swing_sl is not None and swing_sl < ema_trailing:
+                    new_trailing = swing_sl
+                else:
+                    new_trailing = ema_trailing
+
                 update = False
                 if trade.trailing_sl <= 0:
                     update = True
@@ -2339,7 +2948,8 @@ class Ogul:
                             trade.sl = new_trailing
                             logger.debug(
                                 f"Trailing güncellendi [{symbol}]: "
-                                f"SL={new_trailing:.4f}"
+                                f"SL={new_trailing:.4f} "
+                                f"({'swing' if swing_sl and swing_sl < ema_trailing else 'ema'})"
                             )
                     except Exception as exc:
                         logger.error(
@@ -2791,6 +3401,16 @@ class Ogul:
         # Trailing stop güncelleme — likidite bazlı çarpan
         liq_class = self._get_liq_class(symbol)
         trail_mult = TRAILING_ATR_BY_CLASS.get(liq_class, TF_TRAILING_ATR_MULT)
+        # Başarısız modify cooldown: 5 döngü boyunca tekrar deneme
+        _modify_fails = getattr(trade, "_modify_fail_count", 0)
+        if _modify_fails >= 3:
+            _cooldown = getattr(trade, "_modify_cooldown", 0)
+            if _cooldown > 0:
+                trade._modify_cooldown = _cooldown - 1
+                return
+            else:
+                trade._modify_fail_count = 0  # Cooldown bitti, tekrar dene
+
         if trade.direction == "BUY":
             new_sl = current_price - trail_mult * atr_val
             if new_sl > trade.trailing_sl:
@@ -2804,9 +3424,18 @@ class Ogul:
                 if mod_result:
                     trade.trailing_sl = new_sl
                     trade.sl = new_sl
+                    trade._modify_fail_count = 0
                     logger.debug(
                         f"Trailing SL güncellendi [{symbol}]: {new_sl:.4f}"
                     )
+                else:
+                    trade._modify_fail_count = getattr(trade, "_modify_fail_count", 0) + 1
+                    if trade._modify_fail_count >= 3:
+                        trade._modify_cooldown = 10  # 10 döngü bekle
+                        logger.warning(
+                            f"Trailing SL modify 3x başarısız [{symbol}], "
+                            f"10 döngü cooldown uygulanıyor"
+                        )
         else:  # SELL
             new_sl = current_price + trail_mult * atr_val
             if new_sl < trade.trailing_sl:
@@ -2820,9 +3449,18 @@ class Ogul:
                 if mod_result:
                     trade.trailing_sl = new_sl
                     trade.sl = new_sl
+                    trade._modify_fail_count = 0
                     logger.debug(
                         f"Trailing SL güncellendi [{symbol}]: {new_sl:.4f}"
                     )
+                else:
+                    trade._modify_fail_count = getattr(trade, "_modify_fail_count", 0) + 1
+                    if trade._modify_fail_count >= 3:
+                        trade._modify_cooldown = 10
+                        logger.warning(
+                            f"Trailing SL modify 3x başarısız [{symbol}], "
+                            f"10 döngü cooldown uygulanıyor"
+                        )
 
     def _manage_mean_reversion(
         self,

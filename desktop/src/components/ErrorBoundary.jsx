@@ -1,5 +1,5 @@
 /**
- * USTAT v5.4 Desktop — React Error Boundary.
+ * USTAT v5.5 Desktop — React Error Boundary.
  *
  * Yakalanmamis React renderlamasi hatalarinda
  * uygulamanin tamamen cokmesini onler.
@@ -34,6 +34,12 @@ export default class ErrorBoundary extends React.Component {
 
   componentDidCatch(error, errorInfo) {
     console.error('[ErrorBoundary] Yakalanmamis hata:', error, errorInfo);
+    // v14.1: Hata detayını main process'e ilet (electron.log)
+    try {
+      const stack = errorInfo?.componentStack || '';
+      window.electronAPI?.logToMain?.('ERROR',
+        `[ErrorBoundary/${this.props.label || 'App'}] ${error?.message || error} | Stack: ${stack.slice(0, 500)}`);
+    } catch { /* yoksay */ }
   }
 
   handleReset = () => {
