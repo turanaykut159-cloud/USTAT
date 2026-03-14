@@ -54,8 +54,8 @@ logger = get_logger(__name__)
 
 ATR_PERIOD: int = 14          # ATR hesaplama periyodu
 MIN_BARS: int = 30            # ATR hesaplamak için min bar sayısı
-TRADING_OPEN: dtime = dtime(9, 45)
-TRADING_CLOSE: dtime = dtime(17, 45)
+TRADING_OPEN: dtime = dtime(9, 40)
+TRADING_CLOSE: dtime = dtime(17, 50)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -125,7 +125,7 @@ class HEngine:
 
         # ── Software SL/TP kapatma retry sayaçları ─────────────
         self._close_retry_counts: dict[int, int] = {}  # ticket → retry sayısı
-        _MAX_CLOSE_RETRIES: int = 3  # max kapatma denemesi
+        self._MAX_CLOSE_RETRIES: int = 3  # max kapatma denemesi
 
         # ── Config parametreleri ──────────────────────────────────
         hybrid_cfg = config.get("hybrid", {})
@@ -216,7 +216,7 @@ class HEngine:
         # 3. İşlem saatleri
         now = datetime.now()
         if not self._is_trading_hours(now):
-            result["reason"] = "İşlem saatleri dışında (09:45-17:45)"
+            result["reason"] = "İşlem saatleri dışında (09:40-17:50)"
             return result
 
         # 4. MT5'te pozisyon kontrolü
@@ -247,10 +247,21 @@ class HEngine:
             result["reason"] = f"{symbol} zaten hibrit yönetiminde (netting)"
             return result
 
-        # 6. Ticket zaten hibrit yönetiminde mi?
+        # 6. Ticket zaten hibrit yönetiminde mi? (bellek + DB)
         if ticket in self.hybrid_positions:
             result["reason"] = f"Ticket {ticket} zaten hibrit yönetiminde"
             return result
+        # v14: DB'de eski ACTIVE kayıt varsa bellekle senkronize et
+        try:
+            db_active = self.db.get_active_hybrid_positions()
+            db_ticket_exists = any(r.get("ticket") == ticket for r in db_active)
+            if db_ticket_exists:
+                logger.warning(
+                    f"Ticket {ticket} DB'de ACTIVE ama bellekte yok — "
+                    f"eski kayıt INSERT OR REPLACE ile güncellenecek"
+                )
+        except Exception:
+            pass  # DB hatası devir engellemez
 
         # 7. Eşzamanlı limit
         active_count = len(self.hybrid_positions)
@@ -526,12 +537,53 @@ class HEngine:
 
             # ── Sync: Pozisyon MT5'te kapanmış mı? ────────────────
             if mt5_pos is None:
+                # SE3 düzeltme: Tek snapshot'a güvenme — 2. doğrulama yap
+                # MT5 bazen geçici snapshot tutarsızlığı yaşıyor
+                miss_key = f"miss_{ticket}"
+                miss_count = self._close_retry_counts.get(miss_key, 0) + 1
+                self._close_retry_counts[miss_key] = miss_count
+
+                if miss_count < 3:
+                    # İlk 2 kayıpta bekle — geçici olabilir
+                    logger.warning(
+                        f"Hibrit pozisyon MT5'te bulunamadı: ticket={ticket} "
+                        f"{hp.symbol} — doğrulama bekleniyor ({miss_count}/3)"
+                    )
+                    continue
+
+                # 3. ardışık kayıp — gerçekten kapanmış, doğrulandı
+                self._close_retry_counts.pop(miss_key, None)
+                logger.info(
+                    f"Hibrit pozisyon kapanışı doğrulandı (3/3 miss): "
+                    f"ticket={ticket} {hp.symbol}"
+                )
                 self._handle_external_close(hp)
                 continue
+            else:
+                # Pozisyon bulundu — miss sayacını sıfırla
+                miss_key = f"miss_{ticket}"
+                if miss_key in self._close_retry_counts:
+                    logger.info(
+                        f"Hibrit pozisyon tekrar bulundu: ticket={ticket} "
+                        f"{hp.symbol} — geçici kayıp düzeldi"
+                    )
+                    self._close_retry_counts.pop(miss_key, None)
 
             current_price = mt5_pos.get("price_current", 0.0)
             profit = mt5_pos.get("profit", 0.0)
             swap = mt5_pos.get("swap", 0.0)
+
+            # ── Netting hacim kontrolü ──────────────────────────────
+            mt5_volume = mt5_pos.get("volume", hp.volume)
+            if mt5_volume != hp.volume:
+                vol_key = f"vol_warn_{ticket}"
+                if vol_key not in self._close_retry_counts:
+                    logger.warning(
+                        f"Netting hacim uyuşmazlığı: ticket={ticket} "
+                        f"{hp.symbol} — engine={hp.volume} lot, "
+                        f"MT5={mt5_volume} lot (dışarıdan lot eklenmiş olabilir)"
+                    )
+                    self._close_retry_counts[vol_key] = 1
 
             if current_price <= 0:
                 continue
@@ -614,8 +666,10 @@ class HEngine:
             f" (deneme {retry_count + 1}/{self._MAX_CLOSE_RETRIES})"
         )
 
-        # TRADE_ACTION_DEAL ile kapat
-        close_result = self.mt5.close_position(hp.ticket)
+        # TRADE_ACTION_DEAL ile kapat — netting koruma: sadece engine lotu
+        close_result = self.mt5.close_position(
+            hp.ticket, expected_volume=hp.volume,
+        )
         if close_result is None:
             self._close_retry_counts[hp.ticket] = retry_count + 1
             logger.error(
@@ -830,8 +884,10 @@ class HEngine:
             except Exception:
                 pass
 
-            # MT5'te kapat
-            close_result = self.mt5.close_position(ticket)
+            # MT5'te kapat — netting koruma: sadece engine lotu
+            close_result = self.mt5.close_position(
+                ticket, expected_volume=hp.volume,
+            )
             if close_result is None:
                 logger.error(
                     f"Hibrit force_close başarısız: ticket={ticket} {hp.symbol}"
@@ -945,7 +1001,7 @@ class HEngine:
         return hp.entry_price - current_price
 
     def _is_trading_hours(self, now: datetime | None = None) -> bool:
-        """İşlem saatleri içinde olup olmadığını kontrol et (09:45-17:45).
+        """İşlem saatleri içinde olup olmadığını kontrol et (09:40-17:50).
 
         Args:
             now: Kontrol zamanı. None ise şu an.
@@ -976,16 +1032,30 @@ class HEngine:
         """MT5'te kapatılmış (harici kapanış) hibrit pozisyonu işle.
 
         SL/TP hit veya kullanıcı MT5'ten kapatmış olabilir.
+        Gerçek PnL'i MT5 deal geçmişinden almaya çalışır.
 
         Args:
             hp: Kapatılan hibrit pozisyon.
         """
-        # PnL bilgisi: DB'deki son risk snapshot'tan veya 0
+        # Gerçek PnL bilgisi: Deal geçmişinden almayı dene
         pnl = 0.0
         swap = 0.0
+        try:
+            deal_pnl = self.mt5.get_deal_summary(hp.ticket)
+            if deal_pnl is not None:
+                pnl = deal_pnl.get("pnl", 0.0)
+                swap = deal_pnl.get("swap", 0.0)
+                logger.info(
+                    f"Hibrit harici kapanış deal PnL: ticket={hp.ticket} "
+                    f"pnl={pnl:.2f} swap={swap:.2f}"
+                )
+        except Exception as exc:
+            logger.debug(f"Deal PnL alınamadı: {exc}")
+
         self._finalize_close(hp, "EXTERNAL", pnl, swap)
         logger.info(
-            f"Hibrit pozisyon harici kapanış: ticket={hp.ticket} {hp.symbol}"
+            f"Hibrit pozisyon harici kapanış: ticket={hp.ticket} {hp.symbol} "
+            f"pnl={pnl:.2f}"
         )
 
     def _finalize_close(
