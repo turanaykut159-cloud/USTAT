@@ -220,9 +220,15 @@ CENTRAL_BANK_DATES: set[date] = {
     date(2025, 1, 29), date(2025, 3, 19), date(2025, 5, 7),
     date(2025, 6, 18), date(2025, 7, 30), date(2025, 9, 17),
     date(2025, 10, 29), date(2025, 12, 10),
-    # 2026 TCMB (tahmini)
+    # 2026 TCMB PPK (tahmini — her ayın üçüncü Perşembesi)
     date(2026, 1, 22), date(2026, 2, 19), date(2026, 3, 19),
     date(2026, 4, 16), date(2026, 5, 21), date(2026, 6, 18),
+    date(2026, 7, 16), date(2026, 8, 20), date(2026, 9, 17),
+    date(2026, 10, 22), date(2026, 11, 19), date(2026, 12, 17),
+    # 2026 FED FOMC (tahmini — 8 toplantı, 2 günlük, son gün)
+    date(2026, 1, 28), date(2026, 3, 18), date(2026, 5, 6),
+    date(2026, 6, 17), date(2026, 7, 29), date(2026, 9, 16),
+    date(2026, 10, 28), date(2026, 12, 16),
 }
 
 # VİOP vade bitiş tarihleri (her ayın son iş günü)
@@ -236,9 +242,9 @@ VIOP_EXPIRY_DATES: set[date] = {
     date(2025, 10, 31), date(2025, 11, 28), date(2025, 12, 31),
     # 2026
     date(2026, 1, 30), date(2026, 2, 27), date(2026, 3, 31),
-    date(2026, 4, 30), date(2026, 5, 25), date(2026, 6, 30),
+    date(2026, 4, 30), date(2026, 5, 29), date(2026, 6, 30),
     date(2026, 7, 31), date(2026, 8, 31), date(2026, 9, 30),
-    date(2026, 10, 28), date(2026, 11, 30), date(2026, 12, 31),
+    date(2026, 10, 30), date(2026, 11, 30), date(2026, 12, 31),
 }
 
 
@@ -318,6 +324,9 @@ class Baba:
             "daily_reset_equity": None,     # Fix: günlük sıfırlama anındaki equity
         }
 
+        # ── Risk state geri yükleme (restart dayanıklılığı) ─────────
+        self._restore_risk_state()
+
         # ── Cycle sayacı (fake analiz frekansı için) ──────────────────
         self._cycle_count: int = 0
 
@@ -354,6 +363,11 @@ class Baba:
         """
         self._cycle_count += 1
 
+        # ── ÜSTAT bildirimlerini oku ve logla ────────────────────
+        # ÜSTAT risk parametrelerini değiştirdiğinde ustat_notifications
+        # kuyruğuna yazar. BABA burada bilgilendirilir.
+        self._process_ustat_notifications()
+
         if pipeline:
             self._update_spread_history(pipeline)
             self._update_usdtry_history()
@@ -370,7 +384,129 @@ class Baba:
         self._check_period_resets()
         self._evaluate_kill_switch_triggers()
 
+        # ── Risk state DB persist (her cycle) ─────────────────────
+        self._persist_risk_state()
+
         return regime
+
+    # ── Risk state DB persist / restore ────────────────────────────
+
+    _RISK_STATE_DB_KEY = "baba_risk_state"
+
+    def _persist_risk_state(self) -> None:
+        """Risk state'ini DB'ye kaydet (her cycle sonunda).
+
+        Serileştirme: date/datetime/tuple → ISO string dönüşümü yapılır.
+        Geri yükleme sırasında ``_restore_risk_state`` aynı dönüşümü tersine çevirir.
+        """
+        try:
+            import json as _json
+
+            # date / datetime / tuple → JSON-serializable dönüşüm
+            serializable: dict[str, Any] = {}
+            for key, val in self._risk_state.items():
+                if isinstance(val, date) and not isinstance(val, datetime):
+                    serializable[key] = {"_type": "date", "v": val.isoformat()}
+                elif isinstance(val, datetime):
+                    serializable[key] = {"_type": "datetime", "v": val.isoformat()}
+                elif isinstance(val, tuple):
+                    serializable[key] = {"_type": "tuple", "v": list(val)}
+                else:
+                    serializable[key] = val
+
+            self._db.set_state(
+                self._RISK_STATE_DB_KEY, _json.dumps(serializable)
+            )
+        except Exception as exc:
+            logger.warning(f"[BABA] Risk state persist hatası: {exc}")
+
+    def _restore_risk_state(self) -> None:
+        """Engine restart'ta risk state'ini DB'den geri yükle.
+
+        DB'de kayıtlı state yoksa veya deserializasyon başarısız olursa
+        varsayılan (sıfır) değerlerle devam edilir.
+        """
+        try:
+            import json as _json
+
+            raw = self._db.get_state(self._RISK_STATE_DB_KEY)
+            if not raw:
+                logger.info("[BABA] Risk state geri yükleme: DB'de kayıt yok — varsayılan")
+                return
+
+            stored: dict[str, Any] = _json.loads(raw)
+            restored_keys: list[str] = []
+
+            for key, val in stored.items():
+                if key not in self._risk_state:
+                    continue  # bilinmeyen anahtar — güvenli atla
+
+                # Tip dönüşümü (serialize sırasında eklenen _type tag'ları)
+                if isinstance(val, dict) and "_type" in val:
+                    t = val["_type"]
+                    v = val["v"]
+                    if t == "date":
+                        val = date.fromisoformat(v)
+                    elif t == "datetime":
+                        val = datetime.fromisoformat(v)
+                    elif t == "tuple":
+                        val = tuple(v)
+
+                old = self._risk_state[key]
+                if old != val:
+                    restored_keys.append(f"{key}: {old} → {val}")
+                self._risk_state[key] = val
+
+            if restored_keys:
+                logger.info(
+                    f"[BABA] Risk state geri yüklendi: {'; '.join(restored_keys)}"
+                )
+            else:
+                logger.info("[BABA] Risk state geri yüklendi (değişiklik yok)")
+
+        except Exception as exc:
+            logger.warning(
+                f"[BABA] Risk state geri yükleme hatası: {exc} — varsayılan kullanılacak"
+            )
+
+    def _process_ustat_notifications(self) -> None:
+        """ÜSTAT'ın risk parametre ayarlamalarını oku ve logla.
+
+        ÜSTAT parametreleri değiştirdiğinde RiskParams.ustat_notifications
+        kuyruğuna mesaj yazar. BABA burada bu mesajları okur, loglar ve
+        kuyruğu temizler. Böylece BABA, ÜSTAT'ın yaptığı değişikliklerden
+        haberdar olur ve loglarına yansıtır.
+        """
+        # risk_params referansını bul (self'te olmayabilir, main.py'de tutulur)
+        # BABA check_risk_limits'e risk_params parametre olarak alır,
+        # ama run_cycle'da doğrudan erişim yok. risk_params kuyruğunu
+        # main.py üzerinden erişebilmek için dolaylı yol kullanıyoruz.
+        # Alternatif: main.py'de risk_params referansını baba'ya da ver.
+        # Burada __init__'te atanmış _risk_params_ref kullanılır.
+        rp = getattr(self, "_risk_params_ref", None)
+        if rp is None:
+            return
+
+        notifications = getattr(rp, "ustat_notifications", [])
+        if not notifications:
+            return
+
+        for msg in notifications:
+            logger.info(f"[BABA] ÜSTAT bildirimi: {msg}")
+            # DB'ye de kaydet
+            try:
+                if self._db:
+                    self._db.insert_event(
+                        event_type="USTAT_NOTIFICATION",
+                        message=msg,
+                        severity="WARNING",
+                        action="baba_risk",
+                    )
+            except Exception:
+                pass
+
+        # Kuyruğu temizle
+        rp.ustat_notifications.clear()
 
     # ═════════════════════════════════════════════════════════════════
     #  REJİM ALGILAMA
@@ -1228,13 +1364,13 @@ class Baba:
             _baseline_to_iso(self._risk_baseline_date),
         )
         snapshots = self._db.get_risk_snapshots(
-            since=since_str, limit=500,
+            since=since_str, limit=1, oldest_first=True,
         )
         if not snapshots:
             return None
 
-        # En eski snapshot = hafta başı equity
-        week_start_equity = snapshots[-1].get("equity", 0.0)
+        # En eski snapshot = hafta başı equity (oldest_first=True ile ASC sıralı)
+        week_start_equity = snapshots[0].get("equity", 0.0)
         current_equity = snap.get("equity", 0.0)
 
         if week_start_equity <= 0:
@@ -1281,12 +1417,13 @@ class Baba:
             _baseline_to_iso(self._risk_baseline_date),
         )
         snapshots = self._db.get_risk_snapshots(
-            since=since_str, limit=1000,
+            since=since_str, limit=1, oldest_first=True,
         )
         if not snapshots:
             return False
 
-        month_start_equity = snapshots[-1].get("equity", 0.0)
+        # En eski snapshot = ay başı equity (oldest_first=True ile ASC sıralı)
+        month_start_equity = snapshots[0].get("equity", 0.0)
         current_equity = snap.get("equity", 0.0)
 
         if month_start_equity <= 0:

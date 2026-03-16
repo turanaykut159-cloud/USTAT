@@ -57,9 +57,9 @@ async def get_risk():
             monday = today - timedelta(days=today.weekday())
             week_start_iso = f"{monday.isoformat()}T00:00:00"
             week_since = max(week_start_iso, baseline_iso) if baseline_iso else week_start_iso
-            snapshots = db.get_risk_snapshots(since=week_since, limit=500)
+            snapshots = db.get_risk_snapshots(since=week_since, limit=1, oldest_first=True)
             if snapshots and equity > 0:
-                week_start_equity = snapshots[-1].get("equity", 0.0) or 0.0
+                week_start_equity = snapshots[0].get("equity", 0.0) or 0.0
                 if week_start_equity > 0 and equity < week_start_equity:
                     resp.weekly_drawdown_pct = (week_start_equity - equity) / week_start_equity
                 else:
@@ -71,9 +71,9 @@ async def get_risk():
             month_start = today.replace(day=1)
             month_start_iso = f"{month_start.isoformat()}T00:00:00"
             month_since = max(month_start_iso, baseline_iso) if baseline_iso else month_start_iso
-            m_snapshots = db.get_risk_snapshots(since=month_since, limit=1000)
+            m_snapshots = db.get_risk_snapshots(since=month_since, limit=1, oldest_first=True)
             if m_snapshots and equity > 0:
-                month_start_equity = m_snapshots[-1].get("equity", 0.0) or 0.0
+                month_start_equity = m_snapshots[0].get("equity", 0.0) or 0.0
                 if month_start_equity > 0 and equity < month_start_equity:
                     resp.monthly_drawdown_pct = (month_start_equity - equity) / month_start_equity
                 else:

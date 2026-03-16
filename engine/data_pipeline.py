@@ -707,13 +707,15 @@ class DataPipeline:
             Günlük PnL tutarı.
         """
         today = datetime.now().strftime("%Y-%m-%d")
-        snapshots = self._db.get_risk_snapshots(since=f"{today}T00:00:00", limit=1)
+        snapshots = self._db.get_risk_snapshots(
+            since=f"{today}T00:00:00", limit=1, oldest_first=True,
+        )
 
         if not snapshots:
             return 0.0
 
-        # En eski snapshot = gün başı
-        first = snapshots[-1]
+        # En eski snapshot = gün başı (oldest_first=True ile ASC sıralı)
+        first = snapshots[0]
         start_equity = first.get("equity", current_equity)
         return round(current_equity - start_equity, 2)
 

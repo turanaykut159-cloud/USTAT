@@ -925,25 +925,29 @@ class Database:
         self,
         since: str | None = None,
         limit: int = 100,
+        oldest_first: bool = False,
     ) -> list[dict[str, Any]]:
         """Risk görüntülerini getir.
 
         Args:
             since: Başlangıç timestamp (ISO-8601).
             limit: Maksimum satır.
+            oldest_first: True ise en eskiden yeniye sırala (ASC).
+                          False ise en yeniden eskiye sırala (DESC, mevcut davranış).
 
         Returns:
             Risk snapshot sözlüklerinin listesi.
         """
+        order = "ASC" if oldest_first else "DESC"
         if since:
             rows = self._fetch_all(
-                """SELECT * FROM risk_snapshots
-                   WHERE timestamp>=? ORDER BY timestamp DESC LIMIT ?""",
+                f"""SELECT * FROM risk_snapshots
+                   WHERE timestamp>=? ORDER BY timestamp {order} LIMIT ?""",
                 (since, limit),
             )
         else:
             rows = self._fetch_all(
-                "SELECT * FROM risk_snapshots ORDER BY timestamp DESC LIMIT ?",
+                f"SELECT * FROM risk_snapshots ORDER BY timestamp {order} LIMIT ?",
                 (limit,),
             )
         for r in rows:

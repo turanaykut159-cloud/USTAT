@@ -2,6 +2,35 @@
 
 ---
 
+## #44 — Risk Hesaplama Bug Fix: Günlük/Haftalık/Aylık PnL Doğru Sıralama (2026-03-17)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-17 |
+| **Neden** | `_calculate_daily_pnl()` fonksiyonu `get_risk_snapshots(limit=1)` ile sadece en yeni kaydı çekiyordu (DESC sıralama). Günlük PnL her zaman ~0 hesaplanıyordu. DB kanıtı: 2785 snapshot'tan sadece 2'si sıfır olmayan daily_pnl değerine sahipti. Haftalık (limit=500) ve aylık (limit=1000) hesaplamalar da günde ~2785 snapshot biriktiği için gerçek başlangıç equity'sine ulaşamıyordu. |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `engine/database.py` | `get_risk_snapshots()` fonksiyonuna `oldest_first: bool = False` parametresi eklendi. `True` ise `ORDER BY timestamp ASC`, `False` ise mevcut `DESC` davranışı korunuyor. |
+| `engine/data_pipeline.py` | `_calculate_daily_pnl()` → `oldest_first=True, limit=1` ile günün ilk snapshot'ını alıyor. `snapshots[-1]` → `snapshots[0]` düzeltildi. |
+| `api/routes/risk.py` | Haftalık ve aylık drawdown hesaplaması → `oldest_first=True, limit=1` ile dönem başlangıç equity'sini doğru alıyor. |
+| `engine/baba.py` | `_check_weekly_loss()` ve `_check_monthly_loss()` → aynı `oldest_first=True, limit=1` düzeltmesi. |
+
+### Kök Neden Kanıtı
+- Debug scripti ile DB sorgulandı: 2785 snapshot, 2783'ü daily_pnl=0.00
+- Gerçek günlük değişim -545.24 TRY, sistem 0.00 kaydediyordu
+- `ORDER BY DESC LIMIT 1` → en yeni kayıt döner, en eski değil
+- Haftalık limit=500 sadece birkaç saati kapsıyordu (günde ~2785 snapshot)
+
+### Etki Analizi
+- `oldest_first=False` default → mevcut tüm diğer çağrılar değişmeden çalışmaya devam ediyor
+- API doğrulaması yapıldı: haftalık %5.52, aylık %5.25 doğru hesaplanıyor
+- Kırmızı Bölge dosyaları: 4 dosya (database.py, data_pipeline.py, risk.py, baba.py)
+
+---
+
 ## #43 — OĞUL Manuel/Hibrit Pozisyon Sahiplenme Bugu (2026-03-10)
 
 | Alan | Detay |
