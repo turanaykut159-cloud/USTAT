@@ -80,11 +80,11 @@ def _categorize_trades(trades: list[dict]) -> TradeCategories:
         # Süreye göre
         dur_min = _calc_duration_minutes(t.get("entry_time"), t.get("exit_time"))
         if dur_min < 120:
-            dur_label = "Kısa (<2s)"
+            dur_label = "Kısa (<2 saat)"
         elif dur_min < 480:
-            dur_label = "Orta (2-8s)"
+            dur_label = "Orta (2-8 saat)"
         else:
-            dur_label = "Uzun (>8s)"
+            dur_label = "Uzun (>8 saat)"
         groups["by_duration"].setdefault(dur_label, []).append(t)
 
         # Rejime göre
@@ -335,6 +335,12 @@ async def get_ustat_brain(
                     priority=rs.get("priority", "MEDIUM"),
                 ))
 
+        # Geçmiş kategorizasyonu (ÜSTAT engine'den — çok boyutlu sınıflandırma)
+        trade_categorization_engine: dict = {}
+        if ustat:
+            tc = ustat.get_trade_categories() or {}
+            trade_categorization_engine = tc.get("summary", {})
+
         return UstatBrainResponse(
             trade_categories=trade_categories,
             contract_profiles=contract_profiles,
@@ -344,6 +350,7 @@ async def get_ustat_brain(
             next_day_analyses=next_day_analyses,
             strategy_pool=strategy_pool,
             regulation_suggestions=regulation_suggestions,
+            trade_categorization_engine=trade_categorization_engine,
         )
     except Exception as exc:
         logger.exception("ustat/brain endpoint HATASI: %s", exc)

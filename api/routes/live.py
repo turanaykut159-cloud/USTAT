@@ -30,8 +30,9 @@ logger = logging.getLogger("ustat.api.ws")
 
 router = APIRouter()
 
-# Aktif bağlantılar (broadcast için)
+# Aktif bağlantılar (broadcast için) — asyncio.Lock ile korunur
 _active_connections: list[WebSocket] = []
+_connections_lock: asyncio.Lock = asyncio.Lock()
 
 PUSH_INTERVAL = 2.0  # saniye
 EVENT_DRAIN_INTERVAL = 1.0  # saniye — event bus kontrol sıklığı
@@ -51,7 +52,8 @@ async def websocket_live(ws: WebSocket):
     global _event_drain_task
 
     await ws.accept()
-    _active_connections.append(ws)
+    async with _connections_lock:
+        _active_connections.append(ws)
     logger.info(f"WebSocket bağlantısı açıldı. Aktif: {len(_active_connections)}")
 
     # İlk bağlantıda global event drain task'i başlat
@@ -76,8 +78,9 @@ async def websocket_live(ws: WebSocket):
 
     finally:
         push_task.cancel()
-        if ws in _active_connections:
-            _active_connections.remove(ws)
+        async with _connections_lock:
+            if ws in _active_connections:
+                _active_connections.remove(ws)
         logger.info(f"WebSocket bağlantısı kapandı. Aktif: {len(_active_connections)}")
 
         # Son bağlantı kapandıysa drain task'i durdur
@@ -329,12 +332,18 @@ async def broadcast(message: dict) -> None:
     text = json.dumps([message], default=str)
     disconnected: list[WebSocket] = []
 
-    for ws in _active_connections:
+    # Snapshot alarak iterate et — lock altında kopya
+    async with _connections_lock:
+        snapshot = list(_active_connections)
+
+    for ws in snapshot:
         try:
             await ws.send_text(text)
         except Exception:
             disconnected.append(ws)
 
-    for ws in disconnected:
-        if ws in _active_connections:
-            _active_connections.remove(ws)
+    if disconnected:
+        async with _connections_lock:
+            for ws in disconnected:
+                if ws in _active_connections:
+                    _active_connections.remove(ws)

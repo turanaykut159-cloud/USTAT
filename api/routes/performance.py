@@ -67,11 +67,15 @@ async def get_performance(
 
     daily_pnls = list(daily_pnl_map.values()) if daily_pnl_map else []
 
-    # Günlük, haftalık, aylık PnL (son N gün)
+    # Günlük, haftalık, aylık PnL (takvim bazlı)
+    from datetime import date, timedelta
     sorted_days = sorted(daily_pnl_map.keys(), reverse=True)
     daily_pnl_today = daily_pnl_map.get(sorted_days[0], 0.0) if sorted_days else 0.0
-    weekly_pnl = sum(daily_pnl_map[d] for d in sorted_days[:5]) if len(sorted_days) >= 1 else 0.0
-    monthly_pnl = sum(daily_pnl_map[d] for d in sorted_days[:22]) if len(sorted_days) >= 1 else 0.0
+    _today = date.today()
+    _week_start = (_today - timedelta(days=_today.weekday())).isoformat()  # Pazartesi
+    _month_start = _today.replace(day=1).isoformat()
+    weekly_pnl = sum(v for d, v in daily_pnl_map.items() if d >= _week_start)
+    monthly_pnl = sum(v for d, v in daily_pnl_map.items() if d >= _month_start)
 
     best_day = max(daily_pnls) if daily_pnls else 0.0
     worst_day = min(daily_pnls) if daily_pnls else 0.0

@@ -1460,3 +1460,39 @@ Bu düzeltmeler native SLTP çalışmadığı için sorunu çözmedi ama kod kal
 ### Analiz Raporları (bu oturumda oluşturuldu)
 - `OGUL_MOTOR_ANALIZI.md` — OĞUL sinyal motoru detaylı analiz raporu (8.0/10, "Porsche 911 GT3")
 - `BABA_RISK_ANALIZI.md` — BABA risk motoru detaylı analiz raporu (6.5/10→8.5/10 hedefi)
+
+---
+
+## #41 — Tam Sistem Audit: WebSocket Güvenliği, Süre Etiketi & PnL Düzeltmesi (2026-03-16)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-16 |
+| **Neden** | v5.5 tüm katmanların (5 motor + MT5 Bridge + 18 API route + 10 React sayfa) kapsamlı deep-dive audit'i. 12 şüpheli sorun tespit edildi, 3'ü gerçek bug olarak doğrulandı ve düzeltildi, 7'si false alarm olarak doğrulandı. |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `api/routes/live.py` | **KRİTİK** — WebSocket `_active_connections` listesi eşzamanlı coroutine'ler tarafından kilitsiz değiştiriliyordu. `asyncio.Lock` (`_connections_lock`) eklendi; tüm append/remove işlemleri lock altına alındı, broadcast snapshot pattern uygulandı. |
+| `api/routes/ustat_brain.py` | **KRİTİK** — İşlem süre etiketleri "Kısa (<2s)", "Orta (2-8s)", "Uzun (>8s)" olarak saniye gösteriyordu ancak eşikler 120/480 dakika (2/8 saat) bazlıydı. Etiketler "saat" olarak düzeltildi. |
+| `api/routes/performance.py` | **ORTA** — Haftalık/aylık PnL hesaplaması sabit gün sayısı (5/22) kullanıyordu. Takvim bazlı hesaplamaya geçildi: Pazartesi başlangıç (weekday) ve ayın 1'i (replace day=1). |
+
+### Eklenen
+- `_connections_lock: asyncio.Lock` — WebSocket bağlantı listesi thread-safety koruması (live.py)
+- Takvim bazlı `_week_start`, `_month_start` hesaplaması (performance.py)
+
+### Doğrulanan (False Alarm — Düzeltme Gerekmedi)
+- `baba.current_regime` null erişimi — 6 noktada zaten `if baba and baba.current_regime:` koruması var
+- Pozisyon tipi filtreleme — Backend/frontend "Hibrit"/"Otomatik"/"Manuel" tam eşleşiyor
+- Risk drawdown sıfıra bölme — `equity > 0` korumaları zaten mevcut
+- Risk haftalık drawdown sıralaması — `ORDER BY timestamp DESC` + `[-1]` doğru çalışıyor
+- Dashboard hata yönetimi — Her kart try/catch + varsayılan değer ile korunuyor
+- HybridTrade günlük limit — `daily_limit > 0` kontrolü zaten var
+- UX seviyesi notlar — Fonksiyonel değil, kozmetik
+
+### Audit Kapsamı
+- 5 motor katmanı: ÜSTAT, BABA, OĞUL, ManuelMotor, H-Engine — ✅
+- MT5 Bridge (4 katmanlı koruma) — ✅
+- Frontend (10 sayfa, 45+ kart) — ✅
+- API (18 route + 1 WebSocket) — ✅
