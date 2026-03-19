@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.5 — Tema uyumlu onay / uyarı modalı.
+ * ÜSTAT v5.6 — Tema uyumlu onay / uyarı modalı.
  * window.confirm / window.alert yerine kullanılır; koyu tema ve uygulama formuna uyumlu.
  */
 

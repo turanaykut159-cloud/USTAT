@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.5 Desktop — React entry point (Vite).
+ * ÜSTAT v5.6 Desktop — React entry point (Vite).
  *
  * v14.1: Global error handler + renderer log forwarding eklendi.
  */

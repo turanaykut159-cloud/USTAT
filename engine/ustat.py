@@ -148,8 +148,18 @@ class Ustat:
         }
         self.contract_profiles: dict[str, dict[str, Any]] = {}
 
+        # ── Geçmiş kategorizasyonu (Görev 6) ─────────────────────
+        self.trade_categories: dict[str, Any] = {}
+        self._last_categorization_update: date | None = None
+
+        # ── BABA referansı (main.py tarafından atanır) ─────────
+        self._risk_params: Any | None = None  # RiskParams referansı
+
         # ── Dedup cache (tekrarlayan olay filtreleme) ────────────
         self._dedup_cache: dict[str, datetime] = {}
+
+        # ── Feedback loop: bugün uygulanmış ayarları izle ────────
+        self._applied_today: set[str] = set()
 
         # ── Persistence: DB'den önceki oturum verilerini yükle ─────
         self._load_persisted_state()
@@ -191,6 +201,10 @@ class Ustat:
         # 6. Ertesi gün analizi — sabah 09:30'da
         if self._should_next_day_analysis(now):
             self._run_next_day_analysis(now)
+
+        # 6b. Geçmiş kategorizasyonu — günde 1 kez (ertesi gün analizinden sonra)
+        if self._should_update_categorization(now):
+            self._update_trade_categorization(now)
 
         # 7. Günlük rapor + regülasyon önerileri — 18:00'da
         if self._should_daily_report(now):
@@ -648,9 +662,13 @@ class Ustat:
         if not entry_price or not exit_price:
             return None
 
-        # Potansiyel kâr tahmini (fiyat hareketinin ~1.5 katı)
-        price_move = abs(exit_price - entry_price)
-        potential_move = price_move * 1.5
+        # ── Potansiyel kâr: gerçek high/low bar verisinden hesapla ──
+        # İşlem süresi boyunca en iyi çıkış noktasını bul (DB bar verisi).
+        # Bar verisi bulunamazsa fallback olarak fiyat hareketi * 1.5 kullan.
+        potential_move = self._calc_potential_move(
+            symbol, direction, entry_price,
+            trade.get("entry_time", ""), trade.get("exit_time", ""),
+        )
         # VİOP kontrat çarpanı ile potansiyel TL
         potential_pnl = abs(potential_move * lot * 100)
 
@@ -821,6 +839,67 @@ class Ustat:
             score -= 10
 
         return max(0.0, min(100.0, score))
+
+    def _calc_potential_move(
+        self,
+        symbol: str,
+        direction: str,
+        entry_price: float,
+        entry_time: str,
+        exit_time: str,
+    ) -> float:
+        """İşlem süresi boyunca gerçek en iyi çıkış fiyatından potansiyel hareketi hesapla.
+
+        DB'deki M15 bar verisini kullanarak, işlem süresince fiyatın
+        ulaştığı en yüksek (BUY) veya en düşük (SELL) noktayı bulur.
+        Böylece "bu işlemden ne kadar kâr elde edilebilirdi?" sorusu
+        gerçek veriye dayalı cevaplanır.
+
+        Args:
+            symbol: Kontrat sembolü.
+            direction: İşlem yönü (BUY/SELL).
+            entry_price: Giriş fiyatı.
+            entry_time: Giriş zamanı (ISO string).
+            exit_time: Çıkış zamanı (ISO string).
+
+        Returns:
+            Potansiyel fiyat hareketi (pozitif değer).
+        """
+        if not self._db or not entry_time or not exit_time:
+            # Fallback: basit fiyat hareketi tahmini
+            return abs(entry_price * 0.01)  # %1 varsayılan hareket
+
+        try:
+            bars_df = self._db.get_bars(
+                symbol=symbol, timeframe="M15",
+                since=entry_time, limit=200,
+            )
+            if bars_df is None or bars_df.empty:
+                return abs(entry_price * 0.01)
+
+            # Sadece işlem süresi içindeki barları filtrele
+            if "timestamp" in bars_df.columns:
+                mask = bars_df["timestamp"] <= exit_time
+                bars_df = bars_df[mask]
+
+            if bars_df.empty:
+                return abs(entry_price * 0.01)
+
+            if direction == "BUY":
+                # BUY işlemde en iyi çıkış: barların en yüksek high'ı
+                best_price = float(bars_df["high"].max())
+                potential = best_price - entry_price
+            else:
+                # SELL işlemde en iyi çıkış: barların en düşük low'u
+                best_price = float(bars_df["low"].min())
+                potential = entry_price - best_price
+
+            # Negatif olamaz (en kötü ihtimal entry price'ta çık)
+            return max(0.0, potential)
+
+        except Exception as exc:
+            logger.debug(f"[ÜSTAT] Potansiyel hareket hesaplama hatası ({symbol}): {exc}")
+            return abs(entry_price * 0.01)
 
     # ════════════════════════════════════════════════════════════════
     #  6. STRATEJİ HAVUZU
@@ -1111,6 +1190,10 @@ class Ustat:
             param = suggestion.get("parameter", "")
             priority = suggestion.get("priority", "LOW")
 
+            # ── Günlük tekrar koruması: aynı parametre bugün zaten ayarlandıysa atla
+            if param in self._applied_today:
+                continue
+
             # HIGH öncelik: BABA risk hataları → SL sıkılaştır
             if param == "max_daily_loss" and priority == "HIGH":
                 old_sl = params.get("sl_atr_mult", 1.5)
@@ -1119,6 +1202,7 @@ class Ustat:
                 if new_sl != old_sl:
                     params["sl_atr_mult"] = new_sl
                     applied.append(f"sl_atr_mult: {old_sl} → {new_sl}")
+                    self._applied_today.add(param)
 
             # MEDIUM öncelik: OĞUL sinyal hataları → eşik yükselt
             elif param == "signal_threshold" and priority in ("MEDIUM", "HIGH"):
@@ -1128,6 +1212,7 @@ class Ustat:
                 if new_th != old_th:
                     params["signal_threshold"] = new_th
                     applied.append(f"signal_threshold: {old_th} → {new_th}")
+                    self._applied_today.add(param)
 
             # MEDIUM öncelik: İşlem yönetimi kötü → trailing iyileştir
             elif param == "trade_management" and priority == "MEDIUM":
@@ -1137,6 +1222,7 @@ class Ustat:
                 if new_trail != old_trail:
                     params["trailing_start_atr"] = new_trail
                     applied.append(f"trailing_start_atr: {old_trail} → {new_trail}")
+                    self._applied_today.add(param)
 
         if applied:
             # Strateji havuzunu güncelle
@@ -1145,7 +1231,7 @@ class Ustat:
                     self.strategy_pool["profiles"][i]["parameters"] = params
 
             changes_text = "; ".join(applied)
-            logger.info(f"[ÜSTAT] Feedback loop: {changes_text}")
+            logger.info(f"[ÜSTAT] Feedback loop (OĞUL): {changes_text}")
 
             self._log_event(
                 "REGULATION_APPLIED",
@@ -1163,6 +1249,93 @@ class Ustat:
                 )
             except Exception:
                 pass
+
+        # ── BABA risk parametresi ayarlaması ──────────────────────
+        self._apply_baba_feedback()
+
+    # ════════════════════════════════════════════════════════════════
+    #  BABA FEEDBACK — Risk Parametresi Ayarlama
+    # ════════════════════════════════════════════════════════════════
+
+    def _apply_baba_feedback(self) -> None:
+        """Hata atamalarına göre BABA risk parametrelerini mikro-ayarla.
+
+        ÜSTAT'ın BABA'yı yönlendirmesi — risk_params üzerinden:
+          - BABA hataları çoksa → max_daily_loss sıkılaştır (daha erken dur)
+          - Üst üste kayıp fazlaysa → cooldown süresini artır
+          - Büyük drawdown varsa → max_floating_loss sıkılaştır
+
+        Tüm ayarlamalar %10-15 aralığında, güvenli sınırlar içinde yapılır.
+        Aynı ayar günde en fazla 1 kez uygulanır.
+        """
+        if not self._risk_params:
+            return
+
+        rp = self._risk_params
+        baba_applied: list[str] = []
+
+        # 1. BABA hataları çoksa → günlük kayıp limitini sıkılaştır
+        baba_errors = [
+            ea for ea in self.error_attributions
+            if ea.get("responsible") == "BABA"
+        ]
+        if len(baba_errors) >= 2 and "baba_max_daily_loss" not in self._applied_today:
+            old_val = rp.max_daily_loss
+            # %10 sıkılaştır, minimum %1.0'ın altına düşürme
+            new_val = round(max(0.010, old_val * 0.90), 4)
+            if new_val != old_val:
+                rp.max_daily_loss = new_val
+                baba_applied.append(
+                    f"max_daily_loss: %{old_val*100:.1f} → %{new_val*100:.1f}"
+                )
+                self._applied_today.add("baba_max_daily_loss")
+
+        # 2. Büyük zararlı işlemler varsa → floating loss limitini sıkılaştır
+        big_losses = [
+            ea for ea in self.error_attributions
+            if ea.get("error_type") == "RISK_MISS"
+        ]
+        if big_losses and "baba_floating_loss" not in self._applied_today:
+            old_val = rp.max_floating_loss
+            # %10 sıkılaştır, minimum %0.8'in altına düşürme
+            new_val = round(max(0.008, old_val * 0.90), 4)
+            if new_val != old_val:
+                rp.max_floating_loss = new_val
+                baba_applied.append(
+                    f"max_floating_loss: %{old_val*100:.1f} → %{new_val*100:.1f}"
+                )
+                self._applied_today.add("baba_floating_loss")
+
+        # 3. Düşük skorlu işlemler çoksa → cooldown süresini artır
+        low_scores = [
+            a for a in self.next_day_analyses
+            if a.get("total_score", 100) < 35
+        ]
+        if len(low_scores) >= 2 and "baba_cooldown" not in self._applied_today:
+            old_val = rp.cooldown_hours
+            # 1 saat artır, max 8 saat
+            new_val = min(8, old_val + 1)
+            if new_val != old_val:
+                rp.cooldown_hours = new_val
+                baba_applied.append(
+                    f"cooldown_hours: {old_val} → {new_val}"
+                )
+                self._applied_today.add("baba_cooldown")
+
+        if baba_applied:
+            changes = "; ".join(baba_applied)
+            logger.info(f"[ÜSTAT] Feedback loop (BABA): {changes}")
+            self._log_event(
+                "BABA_REGULATION_APPLIED",
+                f"BABA risk parametreleri ayarlandı: {changes}",
+                severity="WARNING",
+            )
+            # ── BABA'ya bildir: bildirim kuyruğuna yaz ──
+            # BABA kendi cycle'ında bu kuyruğu okuyarak farkındalık kazanır.
+            if hasattr(rp, "ustat_notifications"):
+                rp.ustat_notifications.append(
+                    f"[ÜSTAT→BABA] Parametre ayarlaması: {changes}"
+                )
 
     # ════════════════════════════════════════════════════════════════
     #  GÜNLÜK RAPOR
@@ -1318,6 +1491,7 @@ class Ustat:
             "ustat_regulation_suggestions": "regulation_suggestions",
             "ustat_strategy_pool": "strategy_pool",
             "ustat_contract_profiles": "contract_profiles",
+            "ustat_trade_categories": "trade_categories",
         }
 
         for db_key, attr_name in keys_map.items():
@@ -1332,6 +1506,75 @@ class Ustat:
                     )
             except Exception as exc:
                 logger.warning(f"[ÜSTAT] Persistence yükleme hatası ({db_key}): {exc}")
+
+        # ── STRATEGY_PROFILES overlay: DB'deki ayarlanmış parametreleri yükle ──
+        # Feedback loop'un yaptığı parametre değişiklikleri engine restart'ında
+        # kayboluyordu çünkü STRATEGY_PROFILES hardcoded dict yeniden yükleniyordu.
+        # Çözüm: DB'deki strateji havuzundan her profilin parametrelerini oku ve
+        # STRATEGY_PROFILES'ı güncelle. Böylece get_active_params() her zaman
+        # en güncel (feedback loop tarafından ayarlanmış) değerleri döndürür.
+        try:
+            raw_pool = self._db.get_state("ustat_strategy_pool")
+            if raw_pool:
+                pool = json.loads(raw_pool)
+                db_profiles = pool.get("profiles", [])
+                for db_prof in db_profiles:
+                    mtype = db_prof.get("market_type", "")
+                    db_params = db_prof.get("parameters")
+                    if mtype and db_params and mtype in STRATEGY_PROFILES:
+                        hardcoded = STRATEGY_PROFILES[mtype]["parameters"]
+                        changed = []
+                        for k, v in db_params.items():
+                            if k in hardcoded and hardcoded[k] != v:
+                                changed.append(f"{k}: {hardcoded[k]} → {v}")
+                                hardcoded[k] = v
+                        if changed:
+                            logger.info(
+                                f"[ÜSTAT] STRATEGY_PROFILES overlay ({mtype}): "
+                                f"{'; '.join(changed)}"
+                            )
+        except Exception as exc:
+            logger.warning(f"[ÜSTAT] STRATEGY_PROFILES overlay hatası: {exc}")
+
+        # ── Zamanlama state'lerini yükle (restart'ta tekrar çalışma engeli) ──
+        try:
+            timing_raw = self._db.get_state("ustat_timing_state")
+            if timing_raw:
+                timing = json.loads(timing_raw)
+                # Günlük rapor: bugün zaten çalıştıysa tekrar çalıştırma
+                last_report = timing.get("last_daily_report_date")
+                if last_report and last_report == date.today().isoformat():
+                    self._last_daily_report = datetime.now()
+                    logger.info("[ÜSTAT] Persistence: Günlük rapor bugün zaten çalışmış, atlanacak.")
+                # Ertesi gün analizi: bugün zaten çalıştıysa tekrar çalıştırma
+                last_nda = timing.get("last_next_day_analysis")
+                if last_nda and last_nda == date.today().isoformat():
+                    self._last_next_day_analysis = date.today()
+                    logger.info("[ÜSTAT] Persistence: Ertesi gün analizi bugün zaten çalışmış, atlanacak.")
+                # Kontrat profili: bugün zaten çalıştıysa tekrar çalıştırma
+                last_cp = timing.get("last_contract_profile_update")
+                if last_cp and last_cp == date.today().isoformat():
+                    self._last_contract_profile_update = date.today()
+                    logger.info("[ÜSTAT] Persistence: Kontrat profilleri bugün zaten güncellenmiş, atlanacak.")
+                # Strateji havuzu: son güncelleme zamanı
+                last_sp = timing.get("last_strategy_pool_update")
+                if last_sp:
+                    try:
+                        self._last_strategy_pool_update = datetime.fromisoformat(last_sp)
+                    except (ValueError, TypeError):
+                        pass
+                # Geçmiş kategorizasyonu: bugün zaten çalıştıysa tekrar çalıştırma
+                last_cat = timing.get("last_categorization_update")
+                if last_cat and last_cat == date.today().isoformat():
+                    self._last_categorization_update = date.today()
+                    logger.info("[ÜSTAT] Persistence: Geçmiş kategorizasyonu bugün zaten çalışmış, atlanacak.")
+                # Bugün uygulanmış feedback ayarları
+                applied = timing.get("applied_today")
+                if applied and timing.get("applied_date") == date.today().isoformat():
+                    self._applied_today = set(applied)
+                    logger.info(f"[ÜSTAT] Persistence: Bugün zaten uygulanan feedback: {applied}")
+        except Exception as exc:
+            logger.warning(f"[ÜSTAT] Zamanlama state yükleme hatası: {exc}")
 
     def _save_persisted_state(self) -> None:
         """ÜSTAT verilerini DB'ye kaydet (her cycle sonunda çağrılır).
@@ -1348,6 +1591,7 @@ class Ustat:
             "ustat_regulation_suggestions": self.regulation_suggestions,
             "ustat_strategy_pool": self.strategy_pool,
             "ustat_contract_profiles": self.contract_profiles,
+            "ustat_trade_categories": self.trade_categories,
         }
 
         for db_key, data in data_map.items():
@@ -1355,6 +1599,199 @@ class Ustat:
                 self._db.set_state(db_key, json.dumps(data, ensure_ascii=False))
             except Exception as exc:
                 logger.warning(f"[ÜSTAT] Persistence kaydetme hatası ({db_key}): {exc}")
+
+        # ── Zamanlama state'lerini kaydet (restart koruması) ──────
+        try:
+            timing_state = {
+                "last_daily_report_date": (
+                    self._last_daily_report.date().isoformat()
+                    if self._last_daily_report else None
+                ),
+                "last_next_day_analysis": (
+                    self._last_next_day_analysis.isoformat()
+                    if self._last_next_day_analysis else None
+                ),
+                "last_contract_profile_update": (
+                    self._last_contract_profile_update.isoformat()
+                    if self._last_contract_profile_update else None
+                ),
+                "last_strategy_pool_update": (
+                    self._last_strategy_pool_update.isoformat()
+                    if self._last_strategy_pool_update else None
+                ),
+                "last_categorization_update": (
+                    self._last_categorization_update.isoformat()
+                    if self._last_categorization_update else None
+                ),
+                "applied_today": list(self._applied_today),
+                "applied_date": date.today().isoformat(),
+            }
+            self._db.set_state(
+                "ustat_timing_state",
+                json.dumps(timing_state, ensure_ascii=False),
+            )
+        except Exception as exc:
+            logger.warning(f"[ÜSTAT] Zamanlama state kaydetme hatası: {exc}")
+
+    # ════════════════════════════════════════════════════════════════
+    #  6b. GEÇMİŞ KATEGORİZASYONU — Çok Boyutlu Sınıflandırma
+    # ════════════════════════════════════════════════════════════════
+
+    def _should_update_categorization(self, now: datetime) -> bool:
+        """Geçmiş kategorizasyonu güncelleme zamanı geldi mi? (günde 1 kez)."""
+        today = now.date()
+        if self._last_categorization_update == today:
+            return False
+        # Ertesi gün analizinden sonra çalışsın (en erken 10:00)
+        return now.hour >= 10
+
+    def _update_trade_categorization(self, now: datetime) -> None:
+        """Son 30 günlük kapanan işlemleri çok boyutlu sınıflandır.
+
+        Boyutlar:
+          1. Kârlılık: büyük_kâr / küçük_kâr / başabaş / küçük_zarar / büyük_zarar
+          2. Strateji: trend_follow / mean_reversion / breakout / diğer
+          3. Rejim: TREND / RANGE / VOLATILE / OLAY
+          4. Çıkış tipi: TP_HIT / TRAILING / SL_HIT / TIMEOUT / KILL_SWITCH / diğer
+          5. Zaman dilimi: sabah (09:30-12:00) / öğle (12:00-14:00) / öğleden_sonra (14:00-18:00)
+          6. Gün: Pazartesi-Cuma
+
+        Bu veriler API'den okunarak frontend'de filtreli analiz yapılabilir.
+
+        Args:
+            now: Şu anki zaman.
+        """
+        self._last_categorization_update = now.date()
+
+        if not self._db:
+            return
+
+        since = (now - timedelta(days=30)).strftime("%Y-%m-%d")
+        try:
+            trades = self._db.get_trades(since=since, limit=2000, closed_only=True)
+        except Exception as exc:
+            logger.warning(f"[ÜSTAT] Kategorizasyon trade çekme hatası: {exc}")
+            return
+
+        if not trades:
+            self.trade_categories = {"categories": [], "summary": {}, "updated": now.isoformat()}
+            return
+
+        categorized: list[dict[str, Any]] = []
+        # Özet sayaçları
+        by_profit = {"büyük_kâr": 0, "küçük_kâr": 0, "başabaş": 0, "küçük_zarar": 0, "büyük_zarar": 0}
+        by_strategy: dict[str, int] = {}
+        by_regime: dict[str, int] = {}
+        by_exit: dict[str, int] = {}
+        by_session: dict[str, int] = {}
+        by_day: dict[str, int] = {}
+
+        for trade in trades:
+            pnl = trade.get("pnl", 0.0) or 0.0
+            strategy = trade.get("strategy", "diğer") or "diğer"
+            regime = trade.get("regime", "BİLİNMİYOR") or "BİLİNMİYOR"
+            exit_reason = trade.get("exit_reason", "diğer") or "diğer"
+            exit_time = trade.get("exit_time", "")
+
+            # 1. Kârlılık kategorisi
+            if pnl > 500:
+                profit_cat = "büyük_kâr"
+            elif pnl > 50:
+                profit_cat = "küçük_kâr"
+            elif pnl >= -50:
+                profit_cat = "başabaş"
+            elif pnl >= -500:
+                profit_cat = "küçük_zarar"
+            else:
+                profit_cat = "büyük_zarar"
+
+            # 2. Zaman dilimi
+            session_cat = "bilinmiyor"
+            if exit_time and len(exit_time) >= 16:
+                try:
+                    hour = int(exit_time[11:13])
+                    if hour < 12:
+                        session_cat = "sabah"
+                    elif hour < 14:
+                        session_cat = "öğle"
+                    else:
+                        session_cat = "öğleden_sonra"
+                except (ValueError, IndexError):
+                    pass
+
+            # 3. Gün
+            day_cat = "bilinmiyor"
+            if exit_time and len(exit_time) >= 10:
+                try:
+                    dt = datetime.fromisoformat(exit_time[:10])
+                    day_names = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
+                    day_cat = day_names[dt.weekday()]
+                except (ValueError, IndexError):
+                    pass
+
+            # 4. Çıkış tipi normalize
+            exit_cat = exit_reason
+            if exit_reason in ("TRAILING_STOP", "TRAILING"):
+                exit_cat = "TRAILING"
+            elif exit_reason not in ("TP_HIT", "SL_HIT", "TIMEOUT", "KILL_SWITCH", "SIGNAL_EXIT", "BREAKEVEN"):
+                exit_cat = "diğer"
+
+            entry = {
+                "trade_id": trade.get("id", 0),
+                "symbol": trade.get("symbol", ""),
+                "pnl": round(pnl, 2),
+                "profit_category": profit_cat,
+                "strategy": strategy,
+                "regime": regime,
+                "exit_type": exit_cat,
+                "session": session_cat,
+                "day": day_cat,
+            }
+            categorized.append(entry)
+
+            # Sayaçları güncelle
+            by_profit[profit_cat] = by_profit.get(profit_cat, 0) + 1
+            by_strategy[strategy] = by_strategy.get(strategy, 0) + 1
+            by_regime[regime] = by_regime.get(regime, 0) + 1
+            by_exit[exit_cat] = by_exit.get(exit_cat, 0) + 1
+            by_session[session_cat] = by_session.get(session_cat, 0) + 1
+            by_day[day_cat] = by_day.get(day_cat, 0) + 1
+
+        # En kârlı strateji-rejim kombinasyonu
+        combo_pnl: dict[str, float] = {}
+        for entry in categorized:
+            combo_key = f"{entry['strategy']}_{entry['regime']}"
+            combo_pnl[combo_key] = combo_pnl.get(combo_key, 0) + entry["pnl"]
+        best_combo = max(combo_pnl, key=combo_pnl.get) if combo_pnl else ""  # type: ignore[arg-type]
+        worst_combo = min(combo_pnl, key=combo_pnl.get) if combo_pnl else ""  # type: ignore[arg-type]
+
+        self.trade_categories = {
+            "categories": categorized,
+            "summary": {
+                "total_trades": len(categorized),
+                "total_pnl": round(sum(e["pnl"] for e in categorized), 2),
+                "by_profit": by_profit,
+                "by_strategy": by_strategy,
+                "by_regime": by_regime,
+                "by_exit": by_exit,
+                "by_session": by_session,
+                "by_day": by_day,
+                "best_combo": {"key": best_combo, "pnl": round(combo_pnl.get(best_combo, 0), 2)} if best_combo else None,
+                "worst_combo": {"key": worst_combo, "pnl": round(combo_pnl.get(worst_combo, 0), 2)} if worst_combo else None,
+            },
+            "updated": now.isoformat(),
+        }
+
+        logger.info(
+            f"[ÜSTAT] Geçmiş kategorizasyonu: {len(categorized)} işlem, "
+            f"{len(by_strategy)} strateji, {len(by_regime)} rejim kategorize edildi."
+        )
+        self._log_event(
+            "TRADE_CATEGORIZATION",
+            f"Geçmiş kategorizasyonu güncellendi: {len(categorized)} işlem sınıflandırıldı. "
+            f"En iyi kombo: {best_combo} ({combo_pnl.get(best_combo, 0):.2f} TL)",
+            severity="INFO",
+        )
 
     # ════════════════════════════════════════════════════════════════
     #  AKTIF STRATEJİ PARAMETRELERİ — OĞUL OKUR
@@ -1366,17 +1803,70 @@ class Ustat:
         OĞUL bu metodu çağırarak rejime uygun dinamik parametreleri alır.
         Eğer aktif profil yoksa varsayılan (trend) parametreleri döner.
 
+        Ek olarak ``preferred_strategy`` ve ``strategy_bonus`` alanlarını
+        içerir. OĞUL bu bilgiyi sinyal üretiminde strateji tercihi olarak
+        kullanabilir (ör. "trend_follow" tercih ediliyorsa trend sinyallerine
+        +10 bonus puan verir).
+
         Returns:
             Parametre sözlüğü: sl_atr_mult, tp_atr_mult, lot_scale,
             max_hold_minutes, trailing_start_atr, breakeven_atr,
-            signal_threshold.
+            signal_threshold, preferred_strategy, strategy_bonus.
         """
         active_key = self.strategy_pool.get("active_profile", "trend")
         profile = STRATEGY_PROFILES.get(active_key)
         if profile and "parameters" in profile:
-            return dict(profile["parameters"])
-        # Fallback: trend profili
-        return dict(STRATEGY_PROFILES["trend"]["parameters"])
+            params = dict(profile["parameters"])
+        else:
+            params = dict(STRATEGY_PROFILES["trend"]["parameters"])
+
+        # ── Strateji yönlendirmesi: rejim + geçmiş veriye dayalı tercih ──
+        params["preferred_strategy"] = self._determine_preferred_strategy(active_key)
+        params["strategy_bonus"] = 10  # Tercih edilen stratejiye eklenecek bonus puan
+        return params
+
+    def _determine_preferred_strategy(self, active_profile: str) -> str:
+        """Mevcut rejim ve geçmiş performansa göre tercih edilen stratejiyi belirle.
+
+        Kural seti:
+          - volatil profil → breakout tercih et
+          - duragan profil → mean_reversion tercih et
+          - patlama profil → breakout tercih et
+          - trend profil → trend_follow tercih et
+          - Ek: Geçmiş kategorizasyondaki en iyi strateji-rejim kombinasyonu
+            mevcut rejime uyuyorsa, o stratejiyi tercih et.
+
+        Args:
+            active_profile: Aktif profil anahtarı (volatil/duragan/patlama/trend).
+
+        Returns:
+            Tercih edilen strateji adı (trend_follow/mean_reversion/breakout).
+        """
+        # Temel rejim-strateji eşlemesi
+        default_map = {
+            "volatil": "breakout",
+            "duragan": "mean_reversion",
+            "patlama": "breakout",
+            "trend": "trend_follow",
+        }
+        default_pref = default_map.get(active_profile, "trend_follow")
+
+        # Geçmiş kategorizasyondan en iyi kombinasyonu kontrol et
+        if self.trade_categories:
+            summary = self.trade_categories.get("summary", {})
+            best = summary.get("best_combo")
+            if best and best.get("pnl", 0) > 0:
+                combo_key = best.get("key", "")
+                # combo_key format: "strategy_REGIME" ör. "trend_follow_TREND"
+                # Mevcut rejimle eşleşiyorsa bu stratejiyi tercih et
+                current_regime = self.strategy_pool.get("current_regime", "")
+                if current_regime and combo_key.endswith(f"_{current_regime}"):
+                    # Strateji adını çıkar (son _REGIME kısmını çıkar)
+                    strategy_part = combo_key.rsplit(f"_{current_regime}", 1)[0]
+                    if strategy_part in ("trend_follow", "mean_reversion", "breakout"):
+                        return strategy_part
+
+        return default_pref
 
     def get_contract_profile(self, symbol: str) -> dict[str, Any] | None:
         """Belirli bir kontratın davranış profilini döndür.
@@ -1414,3 +1904,7 @@ class Ustat:
     def get_contract_profiles(self) -> dict[str, dict[str, Any]]:
         """Kontrat profillerini döndür (API için)."""
         return dict(self.contract_profiles)
+
+    def get_trade_categories(self) -> dict[str, Any]:
+        """Geçmiş kategorizasyonunu döndür (API için)."""
+        return dict(self.trade_categories)

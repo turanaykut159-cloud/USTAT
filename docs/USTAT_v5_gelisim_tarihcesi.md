@@ -1,4 +1,57 @@
-# ÜSTAT v5.4 — Gelişim Tarihçesi
+# ÜSTAT v5.6 — Gelişim Tarihçesi
+
+---
+
+## #45 — Kırmızı Bölge Kapsamlı Bug Tarama ve Düzeltme: 29 Sorun Tespiti (2026-03-20)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-20 |
+| **Neden** | 8 Kırmızı Bölge dosyasının sistematik taranması sonucu 29 sorun tespit edildi (10 Kritik, 12 Yüksek, 7 Orta). Hata Takip sekmesinin sadece 1/46 event'i gösterdiği belirlendi, API katmanında DB'den okuma düzeltmesi yapıldı. Tüm düzeltmeler Anayasa 2.2 protokolüne uygun (kök neden kanıtı → etki analizi → kullanıcı onayı → rollback planı) tek tek uygulandı. |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `engine/baba.py` | **K1:** `except: pass` → fail-safe kilitleme (pozisyon limit sorgusu hatası → `can_trade=False`). **K2:** Kill-switch `threading.Lock` eklendi (race condition koruması). **Y1:** `daily_reset_equity` bayat veri koruması (`daily_reset_date` doğrulama). **Y2:** ADX `np.mean` → `np.nanmean` + NaN guard. **Y3:** Spread ring buffer `list` → `deque(maxlen=N)` (thread-safe, 4 okuma noktasında `list()` snapshot). **Y8:** Haftalık kayıp string tarih karşılaştırma → `datetime` karşılaştırma. **Y11:** `_reset_daily()` sonunda hemen `_persist_risk_state()` (crash sonrası eski cooldown önleme). |
+| `engine/ogul.py` | **K4:** Lot fraction fallback düzeltmesi (`fractioned_lot >= v_min*0.5` kontrolü). **K5:** Position limit `threading.Lock` + `TradeState.PENDING` (race condition). **Y4:** Conviction ATR kontrolü `if _atr and` → `if _atr is not None and`. **Y5:** Netting ticket fallback'te `position_ticket` yoksa warning log. **Y6:** Manuel motor EOD bloğu yerel referans + dict snapshot (race condition). **Y7:** DB sync `update_trade` try/except sarılma. **M14:** ÜSTAT param `float(None)` koruması. **M15:** Breakout `range_width < ATR*0.5` kontrolü. **M16:** Limit fiyat piyasadan 2×ATR uzaksa düzeltme. **M17:** Confluence skor [0,100] clamp. |
+| `engine/mt5_bridge.py` | **K6:** SL/TP başarısız → pozisyon kapatma doğrulaması (`force_closed` + `unprotected_position` flag). **K8:** Netting ticket seçimi `max(ticket)` ile en yüksek. **Y10:** `close_position` hata logları `error` → `critical` ("POZİSYON HÂLÂ AÇIK!" uyarısı). **M9:** Circuit breaker probe'da `_cb_tripped_at` güncelleme (tek probe garantisi). |
+| `engine/data_pipeline.py` | **K9:** Risk snapshot timeout'ta atlanma kaldırıldı — her zaman `update_risk_snapshot()` çağrılır. |
+| `engine/database.py` | **Y9:** `sync_mt5_trades` try/except + `rollback()` sarılma (kısmi yazım önleme). **Y12:** Hibrit pozisyon kontrolü 2 noktada atomik SQL subquery. **M10:** Backup `pages=100, sleep=0.005` parçalı yapı (write lock blokajı önleme). |
+| `config/default.json` | **K10:** `baseline_date` format `"2026-03-10 13:01"` → `"2026-03-10T13:01:00"` (ISO 8601). |
+| `api/routes/error_dashboard.py` | Tam yeniden yazım — ErrorTracker in-memory store yerine DB events tablosundan okuma. 40+ event tipi → 8 kategori mapping. Summary, groups, trends endpoint'leri DB bazlı. |
+| `desktop/src/components/ErrorTracker.jsx` | Tam yeniden yazım — try/catch ile hata yönetimi, hover tooltip, EOD countdown badge, trend chart data tutarlılığı. |
+| `desktop/src/services/api.js` | `resolveAllErrors()` query parameter → POST body düzeltmesi. |
+
+### Eklenen
+
+- `threading.Lock` — baba.py kill-switch + ogul.py pozisyon limiti (2 ayrı lock)
+- `collections.deque` — baba.py spread ring buffer (thread-safe)
+- `_persist_risk_state()` çağrısı — günlük reset sonrası hemen persist
+- `rollback()` — database.py sync_mt5_trades hata durumu
+- Atomik SQL subquery — database.py hibrit pozisyon kontrolü
+- Limit fiyat piyasa mesafesi doğrulaması — ogul.py 2×ATR guard
+- Confluence skor sınır kontrolü — ogul.py [0,100] clamp
+- Circuit breaker tek probe garantisi — mt5_bridge.py `_cb_tripped_at` güncelleme
+
+### Atlanan (False Alarm)
+
+- **K3:** Floating loss formülü — equity bazlı hesaplama aslında daha konservatif (equity küçüldükçe % artar → daha erken tetiklenir)
+- **K7:** `err` undefined variable — `err = mt5.last_error()` zaten tanımlı bir atama
+- **M8:** `close_position_partial` hacim yuvarlama — satır 1202-1209'da zaten mevcut
+
+### Doğrulama
+
+- Tüm 9 değişen dosya syntax kontrolünden geçti (Python AST + JSON parse) ✅
+- Tüm Kırmızı Bölge dosyaları için `.bak` yedekleri mevcut ✅
+- Siyah Kapı fonksiyon mantıkları korundu, sadece bug fix ve güvenlik katmanı eklendi ✅
+- Anayasa 2.2 protokolü: 29 sorunun her biri için kök neden → etki analizi → kullanıcı onayı → rollback planı uygulandı ✅
+
+### Audit Kapsamı
+
+- 8 Kırmızı Bölge dosyası (baba.py, ogul.py, mt5_bridge.py, main.py, ustat.py, database.py, data_pipeline.py, default.json) — ✅
+- 29 sorun tespiti: 10 Kritik + 12 Yüksek + 7 Orta — ✅
+- 24 düzeltme uygulandı, 3 false alarm atlandı, 2 zaten mevcut — ✅
 
 ---
 

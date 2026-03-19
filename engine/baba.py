@@ -37,6 +37,8 @@ Kill-switch (3 seviye):
 from __future__ import annotations
 
 import math
+import threading
+from collections import deque
 from datetime import date, datetime, time, timedelta
 from typing import Any
 
@@ -301,8 +303,8 @@ class Baba:
         _cycle_interval = self._config.get("engine.cycle_interval", 10)
         self._spread_history_len: int = max(10, int(300 / _cycle_interval))
 
-        self._spread_history: dict[str, list[float]] = {
-            s: [] for s in WATCHED_SYMBOLS
+        self._spread_history: dict[str, deque[float]] = {
+            s: deque(maxlen=self._spread_history_len) for s in WATCHED_SYMBOLS
         }
         # USD/TRY ring buffer
         self._usdtry_history: list[float] = []
@@ -337,6 +339,7 @@ class Baba:
         self._kill_switch_level: int = KILL_SWITCH_NONE
         self._kill_switch_details: dict[str, Any] = {}
         self._killed_symbols: set[str] = set()
+        self._ks_lock = threading.Lock()  # Kill-switch atomik geçiş kilidi (Anayasa 4.3)
         # L3 kapanışta kapatılamayan pozisyon ticket'ları (API'ye iletilir)
         self._last_l3_failed_tickets: list[int] = []
 
@@ -572,7 +575,9 @@ class Baba:
         # Fix 7: RANGE + yüksek ADX çelişkisi → TREND'e override
         adx_override = False
         if winner == RegimeType.RANGE and adx_vals:
-            avg_adx = float(np.mean(adx_vals))
+            avg_adx = float(np.nanmean(adx_vals))
+            if np.isnan(avg_adx):
+                avg_adx = 0.0
             if avg_adx > ADX_TREND_THRESHOLD:
                 logger.info(
                     f"Rejim ADX çapraz kontrol: RANGE→TREND "
@@ -816,9 +821,10 @@ class Baba:
         self, symbol: str, liq_class: str
     ) -> EarlyWarning | None:
         """Spread patlaması: A→3×, B→4×, C→5×."""
-        history = self._spread_history.get(symbol, [])
-        if len(history) < 5:
+        buf = self._spread_history.get(symbol)
+        if buf is None or len(buf) < 5:
             return None
+        history = list(buf)  # deque → list atomik snapshot
 
         current = history[-1]
         avg = float(np.mean(history[:-1]))
@@ -1047,8 +1053,13 @@ class Baba:
 
         # Fix 1: Günlük sıfırlama sonrası reset equity varsa onu baz al
         # Bu sayede önceki günün kaybı yeni günü bloklamaz
+        # Fix Y1: reset_eq'nun bugüne ait olduğunu doğrula (bayat veri koruması)
         reset_eq = self._risk_state.get("daily_reset_equity")
-        if reset_eq is not None and reset_eq > 0:
+        reset_date = self._risk_state.get("daily_reset_date")
+        today_str = date.today().isoformat()
+
+        if (reset_eq is not None and reset_eq > 0
+                and reset_date == today_str):
             day_start_equity = reset_eq
             daily_pnl = equity - reset_eq
         else:
@@ -1161,6 +1172,10 @@ class Baba:
             severity="INFO",
             action="daily_reset",
         )
+
+        # Fix Y11: Reset sonrası hemen persist — crash durumunda
+        # eski cooldown'un geri gelmesini önle
+        self._persist_risk_state()
 
     def _reset_weekly(self, week_tuple: tuple) -> None:
         """Haftalık lot yarılama flagini sıfırla."""
@@ -1293,6 +1308,28 @@ class Baba:
             verdict.reason = f"Günlük max otomatik işlem ({risk_params.max_daily_trades}) doldu"
             return verdict
 
+        # 9.5 Hesap seviyesi toplam pozisyon limiti (v5.5.1)
+        # OĞUL(5) + H-Engine(3) + Manuel(3) = 11 teorik max → 8 ile sınırla
+        MAX_TOTAL_POSITIONS = 8
+        try:
+            total_positions = len(self._mt5.get_positions() or [])
+            if total_positions >= MAX_TOTAL_POSITIONS:
+                verdict.can_trade = False
+                verdict.reason = (
+                    f"Toplam pozisyon limiti: {total_positions}/{MAX_TOTAL_POSITIONS} "
+                    f"(tüm motorlar toplamı)"
+                )
+                return verdict
+        except Exception as exc:
+            # Fail-Safe (Anayasa 4.9): MT5 hatası → pozisyon sayısı bilinemiyor → işlem açma
+            logger.error(
+                "check_risk_limits: MT5 pozisyon sorgusu başarısız (%s) → can_trade=False (fail-safe)",
+                exc,
+            )
+            verdict.can_trade = False
+            verdict.reason = f"MT5 pozisyon sorgusu başarısız: {exc} (fail-safe kilitleme)"
+            return verdict
+
         # 10. Cooldown (üst üste kayıp)
         if self._is_in_cooldown():
             verdict.can_trade = False
@@ -1359,10 +1396,13 @@ class Baba:
         today = date.today()
         monday = today - timedelta(days=today.weekday())
         # Baseline: eski veriler risk hesabını etkilemesin
-        since_str = max(
-            f"{monday.isoformat()}T00:00:00",
-            _baseline_to_iso(self._risk_baseline_date),
+        # Fix Y8: String max yerine datetime karşılaştırma (leksikografik hata riski)
+        monday_dt = datetime.combine(monday, time.min)
+        baseline_dt = datetime.fromisoformat(
+            _baseline_to_iso(self._risk_baseline_date)
         )
+        since_dt = max(monday_dt, baseline_dt)
+        since_str = since_dt.isoformat(timespec="seconds")
         snapshots = self._db.get_risk_snapshots(
             since=since_str, limit=1, oldest_first=True,
         )
@@ -1744,6 +1784,7 @@ class Baba:
         """Kill-switch'i etkinleştir.
 
         Sadece yukarı yönlü geçiş (L1→L2 olur ama L2→L1 olmaz).
+        Thread-safe: _ks_lock ile korunur (Anayasa 4.3 — monotonluk garantisi).
 
         Args:
             level: Seviye (1, 2, 3).
@@ -1751,19 +1792,20 @@ class Baba:
             message: Log/event mesajı.
             symbols: L1 için etkilenen semboller.
         """
-        if level <= self._kill_switch_level:
-            return
+        with self._ks_lock:
+            if level <= self._kill_switch_level:
+                return
 
-        self._kill_switch_level = level
-        self._kill_switch_details = {
-            "reason": reason,
-            "message": message,
-            "triggered_at": datetime.now().isoformat(),
-            "symbols": symbols or [],
-        }
+            self._kill_switch_level = level
+            self._kill_switch_details = {
+                "reason": reason,
+                "message": message,
+                "triggered_at": datetime.now().isoformat(),
+                "symbols": symbols or [],
+            }
 
-        if level == KILL_SWITCH_L1 and symbols:
-            self._killed_symbols.update(symbols)
+            if level == KILL_SWITCH_L1 and symbols:
+                self._killed_symbols.update(symbols)
 
         severity = {1: "WARNING", 2: "ERROR", 3: "CRITICAL"}.get(level, "CRITICAL")
 
@@ -1781,13 +1823,16 @@ class Baba:
     def _clear_kill_switch(self, reason: str) -> None:
         """Kill-switch'i temizle.
 
+        Thread-safe: _ks_lock ile korunur.
+
         Args:
             reason: Temizleme nedeni.
         """
-        old_level = self._kill_switch_level
-        self._kill_switch_level = KILL_SWITCH_NONE
-        self._kill_switch_details = {}
-        self._killed_symbols.clear()
+        with self._ks_lock:
+            old_level = self._kill_switch_level
+            self._kill_switch_level = KILL_SWITCH_NONE
+            self._kill_switch_details = {}
+            self._killed_symbols.clear()
 
         logger.info(f"Kill-switch temizlendi (L{old_level}→L0): {reason}")
         self._log_kill_event(
@@ -2291,12 +2336,13 @@ class Baba:
         Returns:
             FakeLayerResult.
         """
-        history = self._spread_history.get(symbol, [])
-        if len(history) < 5:
+        buf = self._spread_history.get(symbol)
+        if buf is None or len(buf) < 5:
             return FakeLayerResult(
                 "spread", False, FAKE_WEIGHT_SPREAD, 0,
                 "yetersiz spread verisi",
             )
+        history = list(buf)  # deque → list atomik snapshot
 
         current = history[-1]
         lookback = min(FAKE_VOLUME_LOOKBACK, len(history) - 1)
@@ -2513,24 +2559,22 @@ class Baba:
         return "C"
 
     def _current_spread_multiple(self, symbol: str) -> float:
-        """Mevcut spread / ortalama spread."""
-        history = self._spread_history.get(symbol, [])
-        if len(history) < 5:
+        """Mevcut spread / ortalama spread (thread-safe snapshot)."""
+        buf = self._spread_history.get(symbol)
+        if buf is None or len(buf) < 5:
             return 1.0
-        current = history[-1]
-        avg = float(np.mean(history[:-1]))
+        snapshot = list(buf)  # deque → list atomik snapshot
+        current = snapshot[-1]
+        avg = float(np.mean(snapshot[:-1]))
         return current / avg if avg > 0 else 1.0
 
     def _update_spread_history(self, pipeline) -> None:
-        """Son tick spread'lerini ring buffer'a ekle."""
+        """Son tick spread'lerini ring buffer'a ekle (deque ile otomatik trim)."""
         for symbol in WATCHED_SYMBOLS:
             tick = pipeline.latest_ticks.get(symbol)
             if tick is None:
                 continue
-            buf = self._spread_history[symbol]
-            buf.append(tick.spread)
-            if len(buf) > self._spread_history_len:
-                self._spread_history[symbol] = buf[-self._spread_history_len:]
+            self._spread_history[symbol].append(tick.spread)
 
     def _update_usdtry_history(self) -> None:
         """USD/TRY fiyat geçmişini MT5'ten güncelle."""

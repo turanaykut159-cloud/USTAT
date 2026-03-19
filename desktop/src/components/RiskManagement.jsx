@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.5 — Risk Yönetimi sayfası.
+ * ÜSTAT v5.6 — Risk Yönetimi sayfası.
  *
  * Layout:
  *   Üst:   Durum banner (işlem izni, kill-switch, rejim)

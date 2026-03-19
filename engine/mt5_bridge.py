@@ -151,12 +151,14 @@ class MT5Bridge:
                 return False
             elapsed = _time.monotonic() - self._cb_tripped_at
             if elapsed >= CB_COOLDOWN_SECS:
-                # Cooldown doldu — probe denemesi için izin ver
+                # Fix M9: Cooldown doldu — sadece 1 probe'a izin ver
+                # _cb_tripped_at'ı güncelle → diğer thread'ler yeni cooldown bekler
+                self._cb_tripped_at = _time.monotonic()
                 logger.info(
                     f"Circuit breaker cooldown doldu ({elapsed:.0f}s) — "
-                    f"probe denemesi yapılacak"
+                    f"tek probe denemesi yapılacak"
                 )
-                return False  # probe denesin
+                return False  # bu thread probe denesin
             return True  # hâlâ açık
 
     @property
@@ -197,24 +199,54 @@ class MT5Bridge:
                 f"(cooldown: {CB_COOLDOWN_SECS}s)"
             )
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(func, *args, **kwargs)
+        # v5.5.1: order_send yazma işlemlerini ana thread'de çağır.
+        # MT5 C extension, order_send'i worker thread'den reddediyor.
+        # Okuma fonksiyonları (copy_rates, symbol_info vb.) thread-safe.
+        _is_write_op = func.__name__ == "order_send"
+
+        if _is_write_op:
+            # ── YAZMA: Doğrudan çağrı (ThreadPoolExecutor YOK) ──
+            # v3: func(*args, **kwargs) yerine func(args[0]) kullan.
+            # Python 3.14 vectorcall + MT5 C extension uyumsuzluğu:
+            # **kwargs (boş bile olsa) geçildiğinde C extension reddediyor.
             try:
-                result = future.result(timeout=timeout)
+                result = func(args[0]) if args else func()
                 self._cb_record_success()
                 return result
-            except concurrent.futures.TimeoutError:
+            except Exception as exc:
                 self._cb_record_failure()
                 logger.error(
-                    f"MT5 API TIMEOUT ({timeout}s): {func.__name__}({args}) — "
-                    f"terminal donmuş olabilir, reconnect tetiklenecek"
+                    f"MT5 order_send EXCEPTION: {func.__name__}({args}) — "
+                    f"{type(exc).__name__}: {exc}"
                 )
-                self._connected = False
-                if self._health:
-                    self._health.record_disconnect()
-                raise TimeoutError(
-                    f"MT5 {func.__name__} çağrısı {timeout}s içinde yanıt vermedi"
-                )
+                raise
+        else:
+            # ── OKUMA: ThreadPoolExecutor ile timeout korumalı ──
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(lambda: func(*args, **kwargs))
+                try:
+                    result = future.result(timeout=timeout)
+                    self._cb_record_success()
+                    return result
+                except concurrent.futures.TimeoutError:
+                    self._cb_record_failure()
+                    logger.error(
+                        f"MT5 API TIMEOUT ({timeout}s): {func.__name__}({args}) — "
+                        f"terminal donmuş olabilir, reconnect tetiklenecek"
+                    )
+                    self._connected = False
+                    if self._health:
+                        self._health.record_disconnect()
+                    raise TimeoutError(
+                        f"MT5 {func.__name__} çağrısı {timeout}s içinde yanıt vermedi"
+                    )
+                except Exception as exc:
+                    self._cb_record_failure()
+                    logger.error(
+                        f"MT5 API EXCEPTION: {func.__name__}({args}) — "
+                        f"{type(exc).__name__}: {exc}"
+                    )
+                    raise
 
     # ── property ─────────────────────────────────────────────────────
     @property
@@ -863,12 +895,20 @@ class MT5Bridge:
                             _time.sleep(min(0.1 * attempt, 0.5))  # 0.1, 0.2, ..., 0.5s
                             by_symbol = self._safe_call(mt5.positions_get, symbol=mt5_name)
                             if by_symbol and len(by_symbol) > 0:
-                                position_ticket = getattr(by_symbol[0], "ticket", 0)
+                                # En yüksek ticket = en son açılan pozisyon (netting güvenliği)
+                                best = max(by_symbol, key=lambda p: getattr(p, "ticket", 0))
+                                position_ticket = getattr(best, "ticket", 0)
                                 if position_ticket:
-                                    logger.debug(
-                                        f"SL/TP için pozisyon ticket sembolden alındı "
-                                        f"(deneme {attempt}): {position_ticket}"
-                                    )
+                                    if len(by_symbol) > 1:
+                                        logger.warning(
+                                            f"SL/TP [{symbol}]: {len(by_symbol)} pozisyon bulundu, "
+                                            f"en yüksek ticket seçildi: {position_ticket}"
+                                        )
+                                    else:
+                                        logger.debug(
+                                            f"SL/TP için pozisyon ticket sembolden alındı "
+                                            f"(deneme {attempt}): {position_ticket}"
+                                        )
                                     break
                         if position_ticket == 0:
                             logger.error(
@@ -965,13 +1005,25 @@ class MT5Bridge:
 
                     if not sltp_applied:
                         # 5 deneme de başarısız — pozisyonu kapat (korumasız bırakma)
+                        # Anayasa 4.4: Korumasız pozisyon YASAK
                         logger.error(
                             f"SL/TP {SLTP_MAX_RETRIES} denemede eklenemedi [{symbol}] "
                             f"— pozisyon korumasız, kapatılıyor"
                         )
-                        self.close_position(position_ticket)
+                        close_result = self.close_position(position_ticket)
+                        close_ok = (
+                            close_result is not None
+                            and close_result.get("success", False)
+                        )
                         order_result["sl_tp_applied"] = False
-                        order_result["force_closed"] = True
+                        order_result["force_closed"] = close_ok
+                        if not close_ok:
+                            # Kapatma da başarısız — KRİTİK: korumasız pozisyon açık!
+                            logger.critical(
+                                f"KORUMASIZ POZİSYON AÇIK [{symbol}] ticket={position_ticket} "
+                                f"— SL/TP eklenemedi VE kapatılamadı! Manuel müdahale gerekli."
+                            )
+                            order_result["unprotected_position"] = True
 
                 # Health: başarılı emir kaydı
                 if self._health:
@@ -1085,15 +1137,18 @@ class MT5Bridge:
 
             result = self._safe_call(mt5.order_send, request, timeout=15.0)
             if result is None:
-                logger.error(
-                    f"Kapanış emri None [{ticket}]: {mt5.last_error()}"
+                # Fix Y10: CRITICAL — pozisyon hâlâ açık, manuel müdahale gerekebilir
+                logger.critical(
+                    f"POZİSYON KAPATILAMADI [{ticket}]: order_send None döndü, "
+                    f"last_error={mt5.last_error()} — POZİSYON HÂLÂ AÇIK!"
                 )
                 return None
 
             if result.retcode != mt5.TRADE_RETCODE_DONE:
-                logger.error(
-                    f"Kapanış reddedildi [{ticket}]: retcode={result.retcode}, "
-                    f"comment={result.comment}"
+                # Fix Y10: CRITICAL — pozisyon hâlâ açık, manuel müdahale gerekebilir
+                logger.critical(
+                    f"POZİSYON KAPATILAMADI [{ticket}]: retcode={result.retcode}, "
+                    f"comment={result.comment} — POZİSYON HÂLÂ AÇIK!"
                 )
                 return None
 
@@ -1105,7 +1160,7 @@ class MT5Bridge:
             return close_result
 
         except Exception as exc:
-            logger.error(f"close_position istisnası [ticket={ticket}]: {exc}")
+            logger.critical(f"POZİSYON KAPATILAMADI [ticket={ticket}]: {exc} — POZİSYON HÂLÂ AÇIK!")
             return None
 
     # ── close_position_partial ─────────────────────────────────────────

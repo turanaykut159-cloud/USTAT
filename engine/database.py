@@ -258,8 +258,9 @@ class Database:
         backup_path = db_path.parent / f"trades_backup_{ts}.db"
         try:
             backup_conn = sqlite3.connect(str(backup_path))
-            with self._lock:
-                self._conn.backup(backup_conn)
+            # Fix M10: WAL modda backup okuyucu olarak çalışır —
+            # parçalı kopyalama ile yazma lock'unu uzun süre tutmayı önle
+            self._conn.backup(backup_conn, pages=100, sleep=0.005)
             backup_conn.close()
             logger.info(f"DB yedekleme tamamlandı (sqlite3.backup): {backup_path}")
         except Exception as exc:
@@ -584,137 +585,142 @@ class Database:
         """
         added = 0
         updated = 0
-        for t in trades:
-            pos_id = t.get("mt5_position_id")
+        # Fix Y9: Tüm döngüyü try/except ile sar — hata durumunda rollback yap
+        try:
+            for t in trades:
+                pos_id = t.get("mt5_position_id")
 
-            # 1) mt5_position_id ile birebir eşleşme → komisyon/swap/pnl MT5'ten güncelle
-            #    (OĞUL kapanışta get_deal_summary bazen None döner, sync ile doldurulur)
-            if pos_id:
-                existing = self._fetch_one(
-                    "SELECT id, commission, swap, pnl FROM trades WHERE mt5_position_id=?",
-                    (pos_id,),
-                )
-                if existing:
-                    # Hibrit pozisyon kontrolü — strategy düzelt
-                    hp_row = self._execute(
-                        "SELECT 1 FROM hybrid_positions WHERE ticket=?",
+                # 1) mt5_position_id ile birebir eşleşme → komisyon/swap/pnl MT5'ten güncelle
+                #    (OĞUL kapanışta get_deal_summary bazen None döner, sync ile doldurulur)
+                if pos_id:
+                    existing = self._fetch_one(
+                        "SELECT id, commission, swap, pnl FROM trades WHERE mt5_position_id=?",
                         (pos_id,),
-                        commit=False,
-                    ).fetchone()
-                    strategy_update = ", strategy='hibrit'" if hp_row else ""
-                    # MT5 verisiyle commission/swap/pnl güncelle (eksikse veya her zaman)
+                    )
+                    if existing:
+                        # Fix Y12: Hibrit kontrolü + UPDATE tek atomik SQL
+                        # (eski: ayrı SELECT + UPDATE → race condition)
+                        self._execute(
+                            """UPDATE trades SET pnl=?, commission=?, swap=?,
+                               exit_time=COALESCE(exit_time, ?),
+                               exit_price=COALESCE(exit_price, ?),
+                               strategy = CASE
+                                   WHEN EXISTS(SELECT 1 FROM hybrid_positions WHERE ticket=?)
+                                   THEN 'hibrit' ELSE strategy END
+                               WHERE id=?""",
+                            (
+                                t.get("pnl"), t.get("commission"), t.get("swap"),
+                                t.get("exit_time"), t.get("exit_price"),
+                                pos_id,
+                                existing["id"],
+                            ),
+                            commit=False,
+                        )
+                        updated += 1
+                        continue
+
+                # 2) OĞUL kaydı eşleştirme: mt5_position_id NULL + symbol + direction
+                #    Strateji A: entry_time ±5 dk tolerans
+                #    Strateji B: exit_price + PnL eşleşmesi (timezone farkı durumu)
+                entry_time = t.get("entry_time")
+                ogul_match = None
+                if pos_id and entry_time:
+                    ogul_match = self._fetch_one(
+                        """SELECT id FROM trades
+                           WHERE mt5_position_id IS NULL
+                             AND symbol=? AND direction=?
+                             AND entry_time IS NOT NULL
+                             AND ABS(
+                                 CAST(strftime('%%s', entry_time) AS INTEGER)
+                               - CAST(strftime('%%s', ?) AS INTEGER)
+                             ) <= 300
+                           ORDER BY id LIMIT 1""",
+                        (t["symbol"], t["direction"], entry_time),
+                    )
+
+                # Strateji B: exit_price + PnL (timezone farkı yakalamak için)
+                if not ogul_match and pos_id and t.get("exit_price") is not None:
+                    sync_pnl = t.get("pnl") or 0.0
+                    ogul_match = self._fetch_one(
+                        """SELECT id FROM trades
+                           WHERE mt5_position_id IS NULL
+                             AND symbol=? AND direction=?
+                             AND exit_price=?
+                             AND pnl IS NOT NULL
+                             AND ABS(pnl - ?) <= 5.0
+                           ORDER BY id LIMIT 1""",
+                        (t["symbol"], t["direction"],
+                         t["exit_price"], sync_pnl),
+                    )
+
+                if ogul_match:
+                    # Mevcut OĞUL kaydını MT5 verileriyle güncelle
                     self._execute(
-                        f"""UPDATE trades SET pnl=?, commission=?, swap=?,
-                           exit_time=COALESCE(exit_time, ?), exit_price=COALESCE(exit_price, ?)
-                           {strategy_update}
+                        """UPDATE trades SET
+                             pnl=?, commission=?, swap=?,
+                             mt5_position_id=?,
+                             exit_time=?, exit_price=?,
+                             entry_price=?, lot=?
                            WHERE id=?""",
                         (
                             t.get("pnl"), t.get("commission"), t.get("swap"),
+                            pos_id,
                             t.get("exit_time"), t.get("exit_price"),
-                            existing["id"],
+                            t.get("entry_price"), t["lot"],
+                            ogul_match["id"],
                         ),
                         commit=False,
                     )
                     updated += 1
-                    continue
-
-            # 2) OĞUL kaydı eşleştirme: mt5_position_id NULL + symbol + direction
-            #    Strateji A: entry_time ±5 dk tolerans
-            #    Strateji B: exit_price + PnL eşleşmesi (timezone farkı durumu)
-            entry_time = t.get("entry_time")
-            ogul_match = None
-            if pos_id and entry_time:
-                ogul_match = self._fetch_one(
-                    """SELECT id FROM trades
-                       WHERE mt5_position_id IS NULL
-                         AND symbol=? AND direction=?
-                         AND entry_time IS NOT NULL
-                         AND ABS(
-                             CAST(strftime('%%s', entry_time) AS INTEGER)
-                           - CAST(strftime('%%s', ?) AS INTEGER)
-                         ) <= 300
-                       ORDER BY id LIMIT 1""",
-                    (t["symbol"], t["direction"], entry_time),
-                )
-
-            # Strateji B: exit_price + PnL (timezone farkı yakalamak için)
-            if not ogul_match and pos_id and t.get("exit_price") is not None:
-                sync_pnl = t.get("pnl") or 0.0
-                ogul_match = self._fetch_one(
-                    """SELECT id FROM trades
-                       WHERE mt5_position_id IS NULL
-                         AND symbol=? AND direction=?
-                         AND exit_price=?
-                         AND pnl IS NOT NULL
-                         AND ABS(pnl - ?) <= 5.0
-                       ORDER BY id LIMIT 1""",
-                    (t["symbol"], t["direction"],
-                     t["exit_price"], sync_pnl),
-                )
-
-            if ogul_match:
-                # Mevcut OĞUL kaydını MT5 verileriyle güncelle
-                self._execute(
-                    """UPDATE trades SET
-                         pnl=?, commission=?, swap=?,
-                         mt5_position_id=?,
-                         exit_time=?, exit_price=?,
-                         entry_price=?, lot=?
-                       WHERE id=?""",
-                    (
-                        t.get("pnl"), t.get("commission"), t.get("swap"),
-                        pos_id,
-                        t.get("exit_time"), t.get("exit_price"),
-                        t.get("entry_price"), t["lot"],
-                        ogul_match["id"],
-                    ),
-                    commit=False,
-                )
-                updated += 1
-                logger.debug(
-                    f"Sync: OĞUL kaydı güncellendi id={ogul_match['id']} "
-                    f"→ mt5_position_id={pos_id}"
-                )
-            else:
-                # 3) Yeni kayıt ekle — hibrit pozisyon kontrolü
-                strategy = t.get("strategy", "manual")
-                if pos_id:
-                    hp_row = self._execute(
-                        "SELECT 1 FROM hybrid_positions WHERE ticket=?",
-                        (pos_id,),
+                    logger.debug(
+                        f"Sync: OĞUL kaydı güncellendi id={ogul_match['id']} "
+                        f"→ mt5_position_id={pos_id}"
+                    )
+                else:
+                    # 3) Yeni kayıt ekle
+                    # Fix Y12: Hibrit kontrolü atomik subquery ile
+                    base_strategy = t.get("strategy", "manual")
+                    self._execute(
+                        """INSERT INTO trades
+                           (strategy, symbol, direction, entry_time, exit_time,
+                            entry_price, exit_price, lot, pnl, slippage,
+                            commission, swap, regime, fake_score, exit_reason,
+                            mt5_position_id)
+                           VALUES (
+                            CASE WHEN ? IS NOT NULL
+                                      AND EXISTS(SELECT 1 FROM hybrid_positions WHERE ticket=?)
+                                 THEN 'hibrit' ELSE ? END,
+                            ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (
+                            pos_id, pos_id, base_strategy,
+                            t["symbol"], t["direction"],
+                            t.get("entry_time"), t.get("exit_time"),
+                            t.get("entry_price"), t.get("exit_price"),
+                            t["lot"], t.get("pnl"), t.get("slippage"),
+                            t.get("commission"), t.get("swap"),
+                            t.get("regime"), t.get("fake_score"),
+                            t.get("exit_reason"), pos_id,
+                        ),
                         commit=False,
-                    ).fetchone()
-                    if hp_row:
-                        strategy = "hibrit"
-                self._execute(
-                    """INSERT INTO trades
-                       (strategy, symbol, direction, entry_time, exit_time,
-                        entry_price, exit_price, lot, pnl, slippage,
-                        commission, swap, regime, fake_score, exit_reason,
-                        mt5_position_id)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    (
-                        strategy,
-                        t["symbol"], t["direction"],
-                        t.get("entry_time"), t.get("exit_time"),
-                        t.get("entry_price"), t.get("exit_price"),
-                        t["lot"], t.get("pnl"), t.get("slippage"),
-                        t.get("commission"), t.get("swap"),
-                        t.get("regime"), t.get("fake_score"),
-                        t.get("exit_reason"), pos_id,
-                    ),
-                    commit=False,
-                )
-                added += 1
+                    )
+                    added += 1
 
-        # Tüm değişiklikleri tek commit ile yaz (I/O optimizasyonu)
-        if added or updated:
+            # Tüm değişiklikleri tek commit ile yaz (I/O optimizasyonu)
+            if added or updated:
+                with self._lock:
+                    self._conn.commit()
+                logger.info(
+                    f"MT5 sync: {added} yeni eklendi, "
+                    f"{updated} mevcut kayıt güncellendi"
+                )
+        except Exception as exc:
             with self._lock:
-                self._conn.commit()
-            logger.info(
-                f"MT5 sync: {added} yeni eklendi, "
-                f"{updated} mevcut kayıt güncellendi"
+                self._conn.rollback()
+            logger.error(
+                f"MT5 sync hatası — rollback yapıldı "
+                f"(added={added}, updated={updated}): {exc}"
             )
+            raise
         return added + updated
 
     def update_trade(self, trade_id: int, fields: dict[str, Any]) -> bool:
@@ -856,6 +862,7 @@ class Database:
         since: str | None = None,
         limit: int = 100,
         closed_only: bool = True,
+        exit_since: str | None = None,
     ) -> list[dict[str, Any]]:
         """İşlem listesi getir (filtreli).
 
@@ -866,6 +873,8 @@ class Database:
             limit: Maksimum satır.
             closed_only: True ise yalnızca kapanmış işlemler (exit_time dolu).
                          False ise açık/kapanmamış kayıtlar da dahil.
+            exit_since: Filtre: bu tarihten sonra kapatılan işlemler (exit_time bazlı).
+                        MT5 tarzı günlük realized P/L hesaplaması için kullanılır.
 
         Returns:
             İşlem sözlüklerinin listesi.
@@ -883,6 +892,9 @@ class Database:
         if since:
             clauses.append("entry_time>=?")
             params.append(since)
+        if exit_since:
+            clauses.append("exit_time>=?")
+            params.append(exit_since)
 
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         params.append(limit)

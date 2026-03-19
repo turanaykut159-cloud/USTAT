@@ -1,12 +1,21 @@
 /**
- * ÜSTAT v5.5 — Hata Takip Paneli (Error Tracker Dashboard).
+ * ÜSTAT v5.6 — Hata Takip Paneli (Error Tracker Dashboard).
  *
  * Özellikler:
  *   - Özet kartları (bugünkü hatalar, uyarılar, açık gruplar)
  *   - Kategori bazlı dağılım çubuğu
- *   - Saatlik/günlük trend grafiği (recharts)
+ *   - Saatlik/günlük trend grafiği
  *   - Hata grupları tablosu (filtrelenebilir, çözümlenebilir)
  *   - Toplu çözümleme
+ *   - EOD geri sayım göstergesi
+ *   - Mesaj tooltip (kesilen mesajlar için)
+ *
+ * v5.5 Güncelleme:
+ *   - handleResolve/handleResolveAll'da try/catch eklendi
+ *   - Mesaj sütununda hover tooltip eklendi
+ *   - EOD kapanış geri sayım göstergesi eklendi
+ *   - API hata durumunda sonsuz yükleme düzeltildi
+ *   - Trend chart veri alanı tutarlılığı düzeltildi
  *
  * API endpoint'leri:
  *   GET  /api/errors/summary
@@ -49,6 +58,14 @@ const SEVERITY_LABELS = {
   WARNING: 'UYARI',
 };
 
+// ── EOD Sabitleri ──
+const EOD_CLOSE_HOUR = 17;
+const EOD_CLOSE_MIN = 45;
+const VIOP_OPEN_HOUR = 9;
+const VIOP_OPEN_MIN = 30;
+const VIOP_CLOSE_HOUR = 18;
+const VIOP_CLOSE_MIN = 15;
+
 // ── Yardımcılar ──
 
 function timeAgo(isoStr) {
@@ -73,6 +90,38 @@ function shortTime(isoStr) {
   } catch { return isoStr; }
 }
 
+function getEodInfo() {
+  const now = new Date();
+  const day = now.getDay(); // 0=Pazar, 6=Cumartesi
+  const nowMins = now.getHours() * 60 + now.getMinutes();
+  const openMins = VIOP_OPEN_HOUR * 60 + VIOP_OPEN_MIN;
+  const closeMins = VIOP_CLOSE_HOUR * 60 + VIOP_CLOSE_MIN;
+  const eodMins = EOD_CLOSE_HOUR * 60 + EOD_CLOSE_MIN;
+
+  // Hafta sonu
+  if (day === 0 || day === 6) {
+    return { isOpen: false, eodRemaining: null, label: 'PİYASA KAPALI' };
+  }
+
+  // Piyasa saatleri dışında
+  if (nowMins < openMins || nowMins >= closeMins) {
+    return { isOpen: false, eodRemaining: null, label: 'PİYASA KAPALI' };
+  }
+
+  // EOD sonrası (17:45 - 18:15 arası)
+  if (nowMins >= eodMins) {
+    return { isOpen: true, eodRemaining: 0, label: 'EOD KAPANIŞ AKTİF' };
+  }
+
+  // Piyasa açık, EOD'ye kalan süre
+  const remaining = eodMins - nowMins;
+  const hours = Math.floor(remaining / 60);
+  const mins = remaining % 60;
+  const label = hours > 0 ? `${hours}sa ${mins}dk` : `${mins}dk`;
+
+  return { isOpen: true, eodRemaining: remaining, label };
+}
+
 // ═══════════════════════════════════════════════════════════════════
 //  ANA BİLEŞEN
 // ═══════════════════════════════════════════════════════════════════
@@ -87,10 +136,21 @@ export default function ErrorTracker() {
   const [filterSeverity, setFilterSeverity] = useState('');
   const [filterResolved, setFilterResolved] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [eod, setEod] = useState(getEodInfo());
+  const [resolveMsg, setResolveMsg] = useState(null);
+  const [hoveredMsg, setHoveredMsg] = useState(null);
+
+  // ── EOD geri sayım güncelle (her dakika) ──
+  useEffect(() => {
+    const timer = setInterval(() => setEod(getEodInfo()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
 
   // ── Veri çekme ──
   const fetchAll = useCallback(async () => {
     try {
+      setError(null);
       const [sum, grp, trd] = await Promise.all([
         getErrorSummary(),
         getErrorGroups({
@@ -105,6 +165,7 @@ export default function ErrorTracker() {
       setTrends(trd?.data || []);
     } catch (err) {
       console.error('[ErrorTracker] fetch:', err?.message);
+      setError('API bağlantı hatası — veriler güncel olmayabilir');
     } finally {
       setLoading(false);
     }
@@ -116,15 +177,35 @@ export default function ErrorTracker() {
     return () => clearInterval(timer);
   }, [fetchAll]);
 
-  // ── Çözümleme ──
+  // ── Çözümleme (try/catch ile) ──
   const handleResolve = useCallback(async (errorType, messagePrefix) => {
-    await resolveError(errorType, messagePrefix);
-    fetchAll();
+    try {
+      const result = await resolveError(errorType, messagePrefix);
+      if (result?.success) {
+        setResolveMsg({ type: 'success', text: `${errorType} çözümlendi` });
+      } else {
+        setResolveMsg({ type: 'error', text: result?.message || 'Çözümleme başarısız' });
+      }
+      fetchAll();
+    } catch (err) {
+      setResolveMsg({ type: 'error', text: `Çözümleme hatası: ${err?.message}` });
+    }
+    setTimeout(() => setResolveMsg(null), 3000);
   }, [fetchAll]);
 
   const handleResolveAll = useCallback(async () => {
-    await resolveAllErrors();
-    fetchAll();
+    try {
+      const result = await resolveAllErrors();
+      if (result?.success) {
+        setResolveMsg({ type: 'success', text: `${result.resolved_count} grup çözümlendi` });
+      } else {
+        setResolveMsg({ type: 'error', text: 'Toplu çözümleme başarısız' });
+      }
+      fetchAll();
+    } catch (err) {
+      setResolveMsg({ type: 'error', text: `Toplu çözümleme hatası: ${err?.message}` });
+    }
+    setTimeout(() => setResolveMsg(null), 3000);
   }, [fetchAll]);
 
   // ── Yükleniyor ──
@@ -137,27 +218,53 @@ export default function ErrorTracker() {
   }
 
   const s = summary || {};
-  const maxTrendCount = Math.max(1, ...trends.map(t => t.count || t.errors || 0));
+  const maxTrendCount = Math.max(1, ...trends.map(t => t.count ?? t.errors ?? 0));
 
   return (
     <div className="error-tracker" style={{ padding: '20px 24px', overflow: 'auto' }}>
 
-      {/* ── BAŞLIK ──────────────────────────────────────────────── */}
+      {/* ── BAŞLIK + EOD GERİ SAYIM ────────────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
         <h2 style={{ margin: 0, fontSize: 18, color: '#e5e7eb' }}>
-          🔍 Hata Takip Paneli
+          Hata Takip Paneli
         </h2>
-        <button
-          onClick={handleResolveAll}
-          style={{
-            background: '#065f46', color: '#34d399', border: '1px solid #059669',
-            borderRadius: 6, padding: '6px 14px', fontSize: 12, cursor: 'pointer',
-          }}
-          title="Tüm açık hataları çözümlendi olarak işaretle"
-        >
-          Tümünü Çözümle ({s.open_groups || 0})
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {/* EOD Geri Sayım */}
+          <EodBadge eod={eod} />
+          <button
+            onClick={handleResolveAll}
+            style={{
+              background: '#065f46', color: '#34d399', border: '1px solid #059669',
+              borderRadius: 6, padding: '6px 14px', fontSize: 12, cursor: 'pointer',
+            }}
+            title="Tüm açık hataları çözümlendi olarak işaretle"
+          >
+            Tümünü Çözümle ({s.open_groups || 0})
+          </button>
+        </div>
       </div>
+
+      {/* ── HATA/UYARI BANNER ────────────────────────────────── */}
+      {error && (
+        <div style={{
+          background: '#7f1d1d22', border: '1px solid #7f1d1d', borderRadius: 6,
+          padding: '8px 14px', marginBottom: 14, fontSize: 12, color: '#fca5a5',
+        }}>
+          {error}
+        </div>
+      )}
+
+      {/* ── ÇÖZÜMLEME GERİ BİLDİRİM ─────────────────────────── */}
+      {resolveMsg && (
+        <div style={{
+          background: resolveMsg.type === 'success' ? '#065f4622' : '#7f1d1d22',
+          border: `1px solid ${resolveMsg.type === 'success' ? '#059669' : '#7f1d1d'}`,
+          borderRadius: 6, padding: '8px 14px', marginBottom: 14, fontSize: 12,
+          color: resolveMsg.type === 'success' ? '#34d399' : '#fca5a5',
+        }}>
+          {resolveMsg.text}
+        </div>
+      )}
 
       {/* ── ÖZET KARTLARI ──────────────────────────────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 20 }}>
@@ -222,13 +329,13 @@ export default function ErrorTracker() {
         </div>
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 60 }}>
           {trends.map((t, i) => {
-            const val = t.count ?? t.errors ?? 0;
+            const val = t.count ?? 0;
             const pct = (val / maxTrendCount) * 100;
             const color = val > 5 ? '#ef4444' : val > 2 ? '#f59e0b' : '#22c55e';
             return (
               <div
                 key={i}
-                title={`${t.hour || t.date}: ${val} hata`}
+                title={`${t.hour || t.date || ''}: ${val} hata`}
                 style={{
                   flex: 1, background: color, borderRadius: '2px 2px 0 0',
                   height: `${Math.max(pct, 2)}%`, minHeight: 2,
@@ -341,11 +448,33 @@ export default function ErrorTracker() {
                   <td style={{ ...tdStyle, color: '#94a3b8', fontFamily: 'monospace', fontSize: 11 }}>
                     {g.error_type}
                   </td>
-                  <td style={{ ...tdStyle, textAlign: 'left', color: '#e5e7eb', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <td
+                    style={{
+                      ...tdStyle, textAlign: 'left', color: '#e5e7eb',
+                      maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap', cursor: 'pointer', position: 'relative',
+                    }}
+                    title={g.message}
+                    onMouseEnter={() => setHoveredMsg(i)}
+                    onMouseLeave={() => setHoveredMsg(null)}
+                  >
                     {g.message}
+                    {/* Tooltip */}
+                    {hoveredMsg === i && g.message && g.message.length > 40 && (
+                      <div style={{
+                        position: 'absolute', bottom: '100%', left: 0,
+                        background: '#0f172a', border: '1px solid #475569',
+                        borderRadius: 6, padding: '8px 12px', maxWidth: 450,
+                        whiteSpace: 'normal', wordBreak: 'break-word',
+                        fontSize: 11, color: '#e5e7eb', zIndex: 100,
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+                      }}>
+                        {g.message}
+                      </div>
+                    )}
                   </td>
                   <td style={{ ...tdStyle, fontWeight: 700, color: g.count > 5 ? '#ef4444' : g.count > 2 ? '#f59e0b' : '#94a3b8' }}>
-                    {g.count}×
+                    {g.count}x
                   </td>
                   <td style={{ ...tdStyle, color: '#64748b', fontSize: 11 }}>
                     {timeAgo(g.last_seen)}
@@ -421,6 +550,49 @@ function CategoryBadge({ category, count }) {
       }} />
       <span style={{ fontSize: 12, color }}>{category}</span>
       <span style={{ fontSize: 12, fontWeight: 700, color }}>{count}</span>
+    </div>
+  );
+}
+
+function EodBadge({ eod }) {
+  if (!eod.isOpen) {
+    return (
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 6,
+        background: '#33415522', border: '1px solid #334155',
+        borderRadius: 6, padding: '4px 12px', fontSize: 11, color: '#64748b',
+      }}>
+        <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#64748b' }} />
+        {eod.label}
+      </div>
+    );
+  }
+
+  if (eod.eodRemaining === 0) {
+    return (
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 6,
+        background: '#7f1d1d22', border: '1px solid #ef4444',
+        borderRadius: 6, padding: '4px 12px', fontSize: 11, color: '#ef4444',
+        fontWeight: 700,
+      }}>
+        <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#ef4444', animation: 'pulse 1s infinite' }} />
+        EOD KAPANIŞ AKTİF
+      </div>
+    );
+  }
+
+  // Renk: 30dk'dan az kaldıysa turuncu, 15dk'dan az kaldıysa kırmızı
+  const color = eod.eodRemaining <= 15 ? '#ef4444' : eod.eodRemaining <= 30 ? '#f59e0b' : '#22c55e';
+
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 6,
+      background: color + '18', border: `1px solid ${color}44`,
+      borderRadius: 6, padding: '4px 12px', fontSize: 11, color,
+    }}>
+      <span style={{ width: 6, height: 6, borderRadius: '50%', background: color }} />
+      EOD: {eod.label}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.5 — MT5 Yönetim Modülü (Main Process).
+ * ÜSTAT v5.6 — MT5 Yönetim Modülü (Main Process).
  *
  * Sorumluluklar:
  *   1. MT5 terminal64.exe spawn (normal kullanıcı, fire-and-forget)

@@ -39,6 +39,11 @@ class RiskParams:
     max_same_sector_direction: int = 2  # aynı sektörde aynı yönde max
     max_index_weight_score: float = 0.25  # endeks ağırlık skoru limiti
 
+    # ── ÜSTAT bildirim kuyruğu ────────────────────────────────────
+    # ÜSTAT parametreleri değiştirdiğinde buraya mesaj ekler.
+    # BABA her cycle başında bu kuyruğu okur ve loglar, sonra temizler.
+    ustat_notifications: list[str] = field(default_factory=list)
+
 
 @dataclass
 class RiskVerdict:

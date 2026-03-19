@@ -149,15 +149,15 @@ class DataPipeline:
         self.fetch_all_ticks_parallel()
         self.fetch_all_symbols_parallel()
 
-        # Spike kontrolü — OHLCV uzadıysa risk snapshot'ı atla
+        # Spike kontrolü — OHLCV uzadıysa logla ama risk snapshot HER ZAMAN çalışsın
         elapsed = (datetime.now() - t_start).total_seconds()
         if elapsed > CYCLE_TIMEOUT_SEC:
             logger.warning(
                 f"Cycle timeout: {elapsed:.1f}s > {CYCLE_TIMEOUT_SEC}s — "
-                f"risk snapshot atlandı"
+                f"OHLCV yavaş ama risk snapshot yine de çalışacak"
             )
-            return
 
+        # Risk snapshot her zaman güncellenir (BABA stale cache'den korunur)
         self.update_risk_snapshot()
 
         total = (datetime.now() - t_start).total_seconds()
@@ -696,28 +696,38 @@ class DataPipeline:
             return None
 
     def _calculate_daily_pnl(self, current_equity: float) -> float:
-        """Günlük PnL hesapla.
+        """Günlük realized PnL hesapla (MT5 tarzı).
 
-        Bugünün ilk risk snapshot'ındaki equity'yi baz alır.
+        Bugün kapatılan işlemlerin (pnl + commission + swap) toplamını döndürür.
+        Equity değişimi yerine realized profit kullanılır — MT5'in
+        HistoryDealGetDouble(DEAL_PROFIT + DEAL_COMMISSION + DEAL_SWAP)
+        mantığıyla aynı.
 
         Args:
-            current_equity: Mevcut equity.
+            current_equity: Mevcut equity (artık kullanılmıyor, imza uyumu için).
 
         Returns:
-            Günlük PnL tutarı.
+            Günlük realized PnL tutarı.
         """
         today = datetime.now().strftime("%Y-%m-%d")
-        snapshots = self._db.get_risk_snapshots(
-            since=f"{today}T00:00:00", limit=1, oldest_first=True,
+        trades = self._db.get_trades(
+            exit_since=f"{today}T00:00:00",
+            closed_only=True,
+            limit=1000,
         )
 
-        if not snapshots:
+        if not trades:
             return 0.0
 
-        # En eski snapshot = gün başı (oldest_first=True ile ASC sıralı)
-        first = snapshots[0]
-        start_equity = first.get("equity", current_equity)
-        return round(current_equity - start_equity, 2)
+        # MT5 tarzı: pnl + commission + swap toplamı
+        total = 0.0
+        for t in trades:
+            pnl = t.get("pnl") or 0.0
+            commission = t.get("commission") or 0.0
+            swap = t.get("swap") or 0.0
+            total += pnl + commission + swap
+
+        return round(total, 2)
 
     def _validate_peak_equity(self) -> None:
         """Peak equity'yi RISK_BASELINE_DATE'e göre doğrula.

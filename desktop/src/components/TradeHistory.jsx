@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.5 — İşlem Geçmişi ekranı.
+ * ÜSTAT v5.6 — İşlem Geçmişi ekranı.
  *
  * Layout:
  *   1. Zaman filtre butonları (Varsayılan | Bugün | Bu Hafta | Bu Ay | 3 Ay | 6 Ay | 1 Yıl)

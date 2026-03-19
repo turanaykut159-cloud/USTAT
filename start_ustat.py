@@ -1,5 +1,5 @@
 """
-USTAT v5.5 - Baslatici
+USTAT v5.6 - Baslatici
 
 API + Vite + Electron baslatir.
 Her adimi PORT KONTROLU ile dogrulayarak ilerler.
@@ -297,9 +297,33 @@ def start_electron():
 
 
 HEARTBEAT_FILE = os.path.join(USTAT_DIR, "engine.heartbeat")
+SHUTDOWN_SIGNAL_FILE = os.path.join(USTAT_DIR, "shutdown.signal")  # v5.5: Electron kasıtlı kapanış sinyali
 WATCHDOG_STALE_SECS = 45       # v5.4.1: heartbeat bu kadar saniye eskiyse engine ölmüş kabul et
 WATCHDOG_CHECK_INTERVAL = 15   # v5.4.1: kontrol aralığı (saniye)
 MAX_AUTO_RESTARTS = 5          # v5.4.1: maksimum ardışık otomatik yeniden başlatma
+
+
+def check_shutdown_signal():
+    """v5.5: Electron kasıtlı kapanış sinyali kontrolü.
+
+    Electron 'safeQuit' ile kapanırken shutdown.signal dosyası oluşturur.
+    Bu dosya varsa kullanıcı kasıtlı kapatmış demektir → watchdog durmalı.
+
+    Returns:
+        True ise kasıtlı kapanış (watchdog durmalı), False ise değil.
+    """
+    try:
+        if os.path.exists(SHUTDOWN_SIGNAL_FILE):
+            log(f"[WATCHDOG] shutdown.signal bulundu — kullanici kasitli kapatti")
+            # Signal dosyasını temizle
+            try:
+                os.remove(SHUTDOWN_SIGNAL_FILE)
+            except Exception:
+                pass
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def check_heartbeat():
@@ -341,10 +365,20 @@ def watchdog_loop():
     while True:
         time.sleep(WATCHDOG_CHECK_INTERVAL)
 
+        # v5.5: Önce kasıtlı kapanış sinyali kontrol et
+        if check_shutdown_signal():
+            log("[WATCHDOG] Kullanici kasitli kapatti — watchdog durduruluyor")
+            break
+
         if not port_open(8000):
             # API portu kapalı — kullanıcı sistemi kapattı
             if not port_open(5173):
                 log("[WATCHDOG] API ve Vite kapali — kullanici cikis yapmis, watchdog durduruluyor")
+                break
+            # Tekrar kontrol: belki shutdown signal gecikmeli yazıldı
+            time.sleep(2)
+            if check_shutdown_signal():
+                log("[WATCHDOG] Kullanici kasitli kapatti (gecikmeli sinyal) — watchdog durduruluyor")
                 break
             # Sadece API düştü
             log("[WATCHDOG] API portu kapali — engine crash tespit edildi")
@@ -401,9 +435,17 @@ def main():
 
     is_prod = "--prod" in sys.argv
     is_watchdog = "--no-watchdog" not in sys.argv  # v5.4.1
-    log(f"=== USTAT v5.5 Baslatici {'(PRODUCTION)' if is_prod else '(DEVELOPMENT)'} ===")
+    log(f"=== USTAT v5.6 Baslatici {'(PRODUCTION)' if is_prod else '(DEVELOPMENT)'} ===")
     log(f"Python: {sys.executable}")
     log(f"Watchdog: {'AKTIF' if is_watchdog else 'DEVRE DISI'}")
+
+    # v5.5: Eski shutdown sinyalini temizle (yeni başlatma)
+    try:
+        if os.path.exists(SHUTDOWN_SIGNAL_FILE):
+            os.remove(SHUTDOWN_SIGNAL_FILE)
+            log("Eski shutdown.signal temizlendi")
+    except Exception:
+        pass
 
     # 0. Hizli temizlik (minimum bekleme)
     cleanup()

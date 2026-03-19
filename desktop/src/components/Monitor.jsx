@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.5 — System Monitor bileşeni.
+ * ÜSTAT v5.6 — System Monitor bileşeni.
  *
  * Eski: SystemHealth + SystemLog → Yeni: tek Monitor sayfası.
  * Tüm modüllerin durumu, emir akışı, log, performans, risk panelleri.
@@ -29,11 +29,10 @@ import { formatMoney } from '../utils/formatters';
 // ── Renk paleti (modül bazlı) ────────────────────────────────────
 const COLORS = {
   baba: '#e74c3c',
-  ogul: '#f39c12',
   ustat: '#4a9eff',
+  ogul: '#f39c12',
   hengine: '#00d4aa',
   manuel: '#ff6b9d',
-  hibrit: '#a855f7',
   mt5: '#7c4dff',
 };
 
@@ -69,28 +68,29 @@ const StatCard = memo(function StatCard({ label, value, sub, color }) {
   );
 });
 
-function ModBox({ name, role, color, status, metric, metricLabel, details, fill }) {
+function ModBox({ name, role, color, status, metric, metricLabel, details, fill, width = 152 }) {
   const [hov, setHov] = useState(false);
   return (
     <div
       style={{
-        width: 128, background: '#111828', border: `1.5px solid ${color}`,
-        borderRadius: 10, padding: '12px 10px 10px', position: 'relative',
+        width: width, height: '100%', background: '#111828', border: `1.5px solid ${color}`,
+        borderRadius: 10, padding: '14px 12px 12px', position: 'relative',
         boxShadow: `0 0 18px -6px ${color}`, cursor: 'pointer',
         transform: hov ? 'translateY(-3px)' : 'none', transition: 'transform 0.2s',
+        display: 'flex', flexDirection: 'column',
       }}
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
     >
       <div style={{ position: 'absolute', top: -1, left: 8, right: 8, height: 2, background: color, borderRadius: 2, opacity: 0.6 }} />
       <div style={{ position: 'absolute', top: 7, right: 7 }}><Badge status={status} /></div>
-      <div style={{ fontSize: 12, fontWeight: 'bold', color, letterSpacing: 3, textAlign: 'center', marginBottom: 2 }}>{name}</div>
-      <div style={{ fontSize: 7, color: '#c8dae8', letterSpacing: 2, textAlign: 'center', marginBottom: 8 }}>{role}</div>
-      <div style={{ fontSize: 18, fontWeight: 'bold', color: '#e0eeff', textAlign: 'center', marginBottom: 1 }}>{metric}</div>
-      <div style={{ fontSize: 7, color: '#c8dae8', textAlign: 'center', letterSpacing: 1, marginBottom: 8 }}>{metricLabel}</div>
-      <div style={{ borderTop: '1px solid #1a2540', paddingTop: 6, display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <div style={{ fontSize: 13, fontWeight: 'bold', color, letterSpacing: 3, textAlign: 'center', marginBottom: 2 }}>{name}</div>
+      <div style={{ fontSize: 8, color: '#c8dae8', letterSpacing: 2, textAlign: 'center', marginBottom: 8 }}>{role}</div>
+      <div style={{ fontSize: 20, fontWeight: 'bold', color: '#e0eeff', textAlign: 'center', marginBottom: 1 }}>{metric}</div>
+      <div style={{ fontSize: 8, color: '#c8dae8', textAlign: 'center', letterSpacing: 1, marginBottom: 8 }}>{metricLabel}</div>
+      <div style={{ borderTop: '1px solid #1a2540', paddingTop: 6, display: 'flex', flexDirection: 'column', gap: 3, flex: 1 }}>
         {details.map(([k, v, vc], i) => (
-          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 8, color: '#c8dae8' }}>
+          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: '#c8dae8' }}>
             <span>{k}</span><span style={{ color: vc || '#8ab0d0' }}>{v}</span>
           </div>
         ))}
@@ -217,27 +217,25 @@ export default function Monitor() {
   const uptimeSec = sysInfo?.engine_uptime_seconds ?? status?.uptime_seconds ?? 0;
 
   // ── Modül hata sayacı (event'lerden) ──────────────────────────
-  const errorCounts = { baba: 0, ogul: 0, ustat: 0, hengine: 0, manuel: 0, hibrit: 0 };
+  const errorCounts = { baba: 0, ustat: 0, ogul: 0, hengine: 0, manuel: 0 };
   (health?.recent_events || []).forEach(ev => {
     if (ev.severity === 'ERROR' || ev.severity === 'CRITICAL') {
       const msg = (ev.message || '').toLowerCase();
       if (msg.includes('baba')) errorCounts.baba++;
-      else if (msg.includes('ogul') || msg.includes('oğul')) errorCounts.ogul++;
       else if (msg.includes('ustat') || msg.includes('üstat')) errorCounts.ustat++;
-      else if (msg.includes('h-engine') || msg.includes('h_engine')) errorCounts.hengine++;
+      else if (msg.includes('ogul') || msg.includes('oğul')) errorCounts.ogul++;
+      else if (msg.includes('h-engine') || msg.includes('h_engine') || msg.includes('hibrit') || msg.includes('hybrid')) errorCounts.hengine++;
       else if (msg.includes('manuel') || msg.includes('manual')) errorCounts.manuel++;
-      else if (msg.includes('hibrit') || msg.includes('hybrid')) errorCounts.hibrit++;
     }
   });
 
   // ── Modül durumları ──────────────────────────────────────────
   const modStatus = {
     baba: killLevel >= 3 ? 'err' : killLevel > 0 ? 'warn' : 'ok',
-    ogul: layers?.ogul?.daily_loss_stop ? 'err' : 'ok',
     ustat: sysInfo?.cache_stale ? 'warn' : 'ok',
+    ogul: layers?.ogul?.daily_loss_stop ? 'err' : (orders?.reject_count ?? 0) > 0 || (orders?.timeout_count ?? 0) > 0 ? 'warn' : 'ok',
     hengine: (layers?.h_engine?.active_hybrid_count ?? 0) > 0 ? 'warn' : 'ok',
     manuel: 'ok',
-    hibrit: 'ok',
   };
 
   // ── Yardımcı fonksiyonlar ────────────────────────────────────
@@ -395,175 +393,259 @@ export default function Monitor() {
         />
       </div>
 
-      {/* ═══ [C] FLOW DIAGRAM ════════════════════════════════════ */}
+      {/* ═══ [C] FLOW DIAGRAM — GERÇEK MİMARİ ═════════════════════════ */}
       <div style={{
         background: '#0d1220', border: '1px solid #1a2540', borderRadius: 10,
-        padding: '26px 28px 20px', marginBottom: 14, position: 'relative',
+        padding: '26px 20px 20px', marginBottom: 14, position: 'relative',
       }}>
         <div style={{ position: 'absolute', top: 9, left: 16, fontSize: 8, letterSpacing: 3, color: '#a0bcd4' }}>
-          MODÜL MİMARİSİ · CANLI DURUM
+          MODÜL MİMARİSİ · CANLI DURUM · EMİR AKIŞI
         </div>
 
-        {/* MT5 kutusu (üst) */}
-        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 0 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-            <div style={{
-              background: '#111828', border: `1.5px solid ${COLORS.mt5}`, borderRadius: 10,
-              padding: '9px 28px', boxShadow: `0 0 16px -6px ${COLORS.mt5}`,
-              minWidth: 260, textAlign: 'center',
-            }}>
-              <div style={{ fontSize: 11, fontWeight: 'bold', color: COLORS.mt5, letterSpacing: 3, marginBottom: 2 }}>
-                MT5 · GCM MENKUL
+        {/* ══ SATIR 1: MT5 KUTUSU ═══════════════════════════════════ */}
+        <div style={{
+          background: '#111828', border: `1.5px solid ${COLORS.mt5}`, borderRadius: 10,
+          padding: '12px 24px', boxShadow: `0 0 20px -6px ${COLORS.mt5}`,
+          textAlign: 'center', marginBottom: 0,
+        }}>
+          <div style={{ fontSize: 13, fontWeight: 'bold', color: COLORS.mt5, letterSpacing: 4, marginBottom: 6 }}>
+            MT5 · GCM MENKUL KIYMETLER
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 40 }}>
+            {[
+              ['BAĞLANTI', mt5Connected ? '✓ CANLI' : '✗ KOPUK', mt5Connected ? '#2ecc71' : '#e74c3c'],
+              ['PİNG', `${mt5Ping}ms`, mt5Ping < 10 ? '#2ecc71' : '#f39c12'],
+              ['KOPMA', `${mt5?.disconnect_count ?? 0}`, (mt5?.disconnect_count ?? 0) > 0 ? '#f39c12' : '#9a80ff'],
+              ['UPTIME', fmtUptime(mt5?.mt5_uptime_seconds ?? 0), '#9a80ff'],
+            ].map(([k, v, c], i) => (
+              <div key={i} style={{ fontSize: 9, color: '#c8dae8', textAlign: 'center' }}>
+                <div style={{ color: '#b8cce0', marginBottom: 2, letterSpacing: 2 }}>{k}</div>
+                <div style={{ color: c, fontWeight: 'bold', fontSize: 11 }}>{v}</div>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: 4 }}>
-                {[
-                  ['BAĞLANTI', mt5Connected ? '✓ CANLI' : '✗ KOPUK', mt5Connected ? '#2ecc71' : '#e74c3c'],
-                  ['PİNG', `${mt5Ping}ms`, '#9a80ff'],
-                  ['KOPMA', `${mt5?.disconnect_count ?? 0}`, '#9a80ff'],
-                  ['UPTIME', fmtUptime(mt5?.mt5_uptime_seconds ?? 0), '#9a80ff'],
-                ].map(([k, v, c], i) => (
-                  <div key={i} style={{ fontSize: 8, color: '#c8dae8', textAlign: 'center' }}>
-                    <div style={{ color: '#b8cce0', marginBottom: 2 }}>{k}</div>
-                    <div style={{ color: c }}>{v}</div>
-                  </div>
-                ))}
+            ))}
+          </div>
+        </div>
+
+        {/* ══ SATIR 2: 4 KOLON (MT5 ok + kart) + ARASI YATAY OKLAR ══ */}
+        <div style={{ display: 'flex', alignItems: 'stretch', justifyContent: 'center', gap: 0, marginTop: 0 }}>
+
+          {/* ─── BABA KOLONU ─── */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, height: 32 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                <div style={{ fontSize: 6, color: COLORS.baba, letterSpacing: 1, lineHeight: 1, fontWeight: 'bold' }}>VERİ ↓</div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', height: '100%' }}>
+                <div style={{ width: 2, flex: 1, background: `linear-gradient(180deg,${COLORS.mt5},${COLORS.baba})`, position: 'relative', overflow: 'hidden' }}>
+                  <div style={{ position: 'absolute', left: 0, top: '-40%', width: '100%', height: '40%', background: 'linear-gradient(180deg,transparent,rgba(255,255,255,0.6),transparent)', animation: 'mnFlowV 1.5s linear infinite' }} />
+                </div>
+                <div style={{ width: 0, height: 0, borderLeft: '4px solid transparent', borderRight: '4px solid transparent', borderTop: `5px solid ${COLORS.baba}` }} />
               </div>
             </div>
+            <ModBox name="BABA" role="RİSK YÖNETİMİ" color={COLORS.baba}
+              status={modStatus.baba} metric={`L${killLevel}`} metricLabel="KİLL-SWİTCH"
+              details={[
+                ['BLOKE', `${(layers?.baba?.killed_symbols || []).length} sembol`],
+                ['DD LİMİT', `%${ddLimit}`],
+                ['REJİM', layers?.baba?.regime ?? '—'],
+                ['HATA', `${errorCounts.baba} bugün`, errorCounts.baba > 0 ? '#f39c12' : undefined],
+              ]}
+              fill={Math.min(killLevel * 33, 100)}
+            />
+          </div>
 
-            {/* MT5 ↔ OĞUL/MANUEL/HİBRİT çift yönlü oklar */}
-            <div style={{ display: 'flex', gap: 50, marginTop: 0 }}>
-              {[['OĞUL', COLORS.ogul], ['MANUEL', COLORS.manuel], ['HİBRİT', COLORS.hibrit]].map(([lbl, c]) => (
-                <div key={lbl} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                  <div style={{ display: 'flex', alignItems: 'stretch', gap: 6 }}>
-                    {/* Yukarı ok — EMİR → MT5 */}
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                      <div style={{ width: 0, height: 0, borderLeft: '4px solid transparent', borderRight: '4px solid transparent', borderBottom: `6px solid ${COLORS.mt5}` }} />
-                      <div style={{
-                        width: 2, height: 20,
-                        background: `linear-gradient(0deg,${c},${COLORS.mt5})`,
-                        position: 'relative', overflow: 'hidden',
-                      }}>
-                        <div style={{
-                          position: 'absolute', left: 0, bottom: '-40%', width: '100%', height: '40%',
-                          background: 'linear-gradient(0deg,transparent,rgba(255,255,255,0.6),transparent)',
-                          animation: 'mnFlowVUp 1.5s linear infinite',
-                        }} />
-                      </div>
-                    </div>
-                    {/* Etiketler */}
-                    <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 2 }}>
-                      <div style={{ fontSize: 6, color: COLORS.mt5, letterSpacing: 1, lineHeight: 1 }}>EMİR ↑</div>
-                      <div style={{ fontSize: 6, color: c, letterSpacing: 1, lineHeight: 1 }}>VERİ ↓</div>
-                    </div>
-                    {/* Aşağı ok — VERİ → Modül */}
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                      <div style={{
-                        width: 2, height: 20,
-                        background: `linear-gradient(180deg,${COLORS.mt5},${c})`,
-                        position: 'relative', overflow: 'hidden',
-                      }}>
-                        <div style={{
-                          position: 'absolute', left: 0, top: '-40%', width: '100%', height: '40%',
-                          background: 'linear-gradient(180deg,transparent,rgba(255,255,255,0.6),transparent)',
-                          animation: 'mnFlowV 1.5s linear infinite',
-                        }} />
-                      </div>
-                      <div style={{ width: 0, height: 0, borderLeft: '4px solid transparent', borderRight: '4px solid transparent', borderTop: `6px solid ${c}` }} />
-                    </div>
-                  </div>
-                  <div style={{ fontSize: 8, color: c, letterSpacing: 1, marginTop: 3, fontWeight: 'bold' }}>{lbl}</div>
+          {/* → RİSK → */}
+          <div style={{ display: 'flex', alignItems: 'center', paddingLeft: 4, paddingRight: 4, marginTop: 32 }}>
+            <Arrow c1={COLORS.baba} c2={COLORS.ogul} label="RİSK" />
+          </div>
+
+          {/* ─── OĞUL KOLONU ─── */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'stretch', gap: 4, height: 32 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <div style={{ width: 0, height: 0, borderLeft: '4px solid transparent', borderRight: '4px solid transparent', borderBottom: `5px solid ${COLORS.mt5}` }} />
+                <div style={{ width: 2, flex: 1, background: `linear-gradient(0deg,${COLORS.ogul},${COLORS.mt5})`, position: 'relative', overflow: 'hidden' }}>
+                  <div style={{ position: 'absolute', left: 0, bottom: '-40%', width: '100%', height: '40%', background: 'linear-gradient(0deg,transparent,rgba(255,255,255,0.6),transparent)', animation: 'mnFlowVUp 1.5s linear infinite' }} />
                 </div>
-              ))}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 1 }}>
+                <div style={{ fontSize: 6, color: COLORS.mt5, letterSpacing: 1, lineHeight: 1, fontWeight: 'bold' }}>EMİR ↑</div>
+                <div style={{ fontSize: 6, color: COLORS.ogul, letterSpacing: 1, lineHeight: 1, fontWeight: 'bold' }}>VERİ ↓</div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <div style={{ width: 2, flex: 1, background: `linear-gradient(180deg,${COLORS.mt5},${COLORS.ogul})`, position: 'relative', overflow: 'hidden' }}>
+                  <div style={{ position: 'absolute', left: 0, top: '-40%', width: '100%', height: '40%', background: 'linear-gradient(180deg,transparent,rgba(255,255,255,0.6),transparent)', animation: 'mnFlowV 1.5s linear infinite' }} />
+                </div>
+                <div style={{ width: 0, height: 0, borderLeft: '4px solid transparent', borderRight: '4px solid transparent', borderTop: `5px solid ${COLORS.ogul}` }} />
+              </div>
+            </div>
+            <ModBox name="OĞUL" role="SİNYAL + EMİR" color={COLORS.ogul}
+              status={modStatus.ogul} metric={String(layers?.ogul?.active_trade_count ?? 0)} metricLabel="AKTİF İŞLEM"
+              details={[
+                ['SEMBOLLER', `${(layers?.ogul?.active_symbols || []).length} adet`],
+                ['KAYIP STOP', layers?.ogul?.daily_loss_stop ? 'AKTİF' : 'KAPALI', layers?.ogul?.daily_loss_stop ? '#e74c3c' : undefined],
+                ['EMİR OK', `${orders?.success_count ?? 0}`, (orders?.success_count ?? 0) > 0 ? '#2ecc71' : undefined],
+                ['RED/TMOUT', `${orders?.reject_count ?? 0}/${orders?.timeout_count ?? 0}`, (orders?.reject_count ?? 0) + (orders?.timeout_count ?? 0) > 0 ? '#e74c3c' : undefined],
+                ['HATA', `${errorCounts.ogul} bugün`, errorCounts.ogul > 0 ? '#f39c12' : undefined],
+              ]}
+              fill={Math.min((layers?.ogul?.active_trade_count ?? 0) * 20, 100)}
+            />
+          </div>
+
+          {/* → SYNC → */}
+          <div style={{ display: 'flex', alignItems: 'center', paddingLeft: 4, paddingRight: 4, marginTop: 32 }}>
+            <Arrow c1={COLORS.ogul} c2={COLORS.hengine} label="SYNC" />
+          </div>
+
+          {/* ─── H-ENGINE KOLONU ─── */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'stretch', gap: 4, height: 32 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <div style={{ width: 0, height: 0, borderLeft: '4px solid transparent', borderRight: '4px solid transparent', borderBottom: `5px solid ${COLORS.mt5}` }} />
+                <div style={{ width: 2, flex: 1, background: `linear-gradient(0deg,${COLORS.hengine},${COLORS.mt5})`, position: 'relative', overflow: 'hidden' }}>
+                  <div style={{ position: 'absolute', left: 0, bottom: '-40%', width: '100%', height: '40%', background: 'linear-gradient(0deg,transparent,rgba(255,255,255,0.6),transparent)', animation: 'mnFlowVUp 1.5s linear infinite' }} />
+                </div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 1 }}>
+                <div style={{ fontSize: 6, color: COLORS.mt5, letterSpacing: 1, lineHeight: 1, fontWeight: 'bold' }}>EMİR ↑</div>
+                <div style={{ fontSize: 6, color: COLORS.hengine, letterSpacing: 1, lineHeight: 1, fontWeight: 'bold' }}>VERİ ↓</div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <div style={{ width: 2, flex: 1, background: `linear-gradient(180deg,${COLORS.mt5},${COLORS.hengine})`, position: 'relative', overflow: 'hidden' }}>
+                  <div style={{ position: 'absolute', left: 0, top: '-40%', width: '100%', height: '40%', background: 'linear-gradient(180deg,transparent,rgba(255,255,255,0.6),transparent)', animation: 'mnFlowV 1.5s linear infinite' }} />
+                </div>
+                <div style={{ width: 0, height: 0, borderLeft: '4px solid transparent', borderRight: '4px solid transparent', borderTop: `5px solid ${COLORS.hengine}` }} />
+              </div>
+            </div>
+            <ModBox name="H-ENGINE" role="HİBRİT YÖNETİM" color={COLORS.hengine}
+              status={modStatus.hengine} metric={String(layers?.h_engine?.active_hybrid_count ?? 0)} metricLabel="HİBRİT POZ."
+              details={[
+                ['GÜNLÜK P&L', `${layers?.h_engine?.daily_pnl ?? 0} TL`],
+                ['LİMİT', `${layers?.h_engine?.daily_limit ?? 0} TL`],
+                ['HATA', `${errorCounts.hengine} bugün`, errorCounts.hengine > 0 ? '#f39c12' : undefined],
+              ]}
+              fill={layers?.h_engine?.daily_limit
+                ? Math.min(Math.abs(layers?.h_engine?.daily_pnl ?? 0) / layers.h_engine.daily_limit * 100, 100)
+                : 0}
+            />
+          </div>
+
+          {/* → SYNC → */}
+          <div style={{ display: 'flex', alignItems: 'center', paddingLeft: 4, paddingRight: 4, marginTop: 32 }}>
+            <Arrow c1={COLORS.hengine} c2={COLORS.manuel} label="SYNC" />
+          </div>
+
+          {/* ─── MANUEL KOLONU ─── */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'stretch', gap: 4, height: 32 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <div style={{ width: 0, height: 0, borderLeft: '4px solid transparent', borderRight: '4px solid transparent', borderBottom: `5px solid ${COLORS.mt5}` }} />
+                <div style={{ width: 2, flex: 1, background: `linear-gradient(0deg,${COLORS.manuel},${COLORS.mt5})`, position: 'relative', overflow: 'hidden' }}>
+                  <div style={{ position: 'absolute', left: 0, bottom: '-40%', width: '100%', height: '40%', background: 'linear-gradient(0deg,transparent,rgba(255,255,255,0.6),transparent)', animation: 'mnFlowVUp 1.5s linear infinite' }} />
+                </div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 1 }}>
+                <div style={{ fontSize: 6, color: COLORS.mt5, letterSpacing: 1, lineHeight: 1, fontWeight: 'bold' }}>EMİR ↑</div>
+                <div style={{ fontSize: 6, color: COLORS.manuel, letterSpacing: 1, lineHeight: 1, fontWeight: 'bold' }}>VERİ ↓</div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <div style={{ width: 2, flex: 1, background: `linear-gradient(180deg,${COLORS.mt5},${COLORS.manuel})`, position: 'relative', overflow: 'hidden' }}>
+                  <div style={{ position: 'absolute', left: 0, top: '-40%', width: '100%', height: '40%', background: 'linear-gradient(180deg,transparent,rgba(255,255,255,0.6),transparent)', animation: 'mnFlowV 1.5s linear infinite' }} />
+                </div>
+                <div style={{ width: 0, height: 0, borderLeft: '4px solid transparent', borderRight: '4px solid transparent', borderTop: `5px solid ${COLORS.manuel}` }} />
+              </div>
+            </div>
+            <ModBox name="MANUEL" role="MANUEL MOTOR" color={COLORS.manuel}
+              status={modStatus.manuel} metric={String(risk?.daily_trade_count ?? 0)} metricLabel="GÜNLÜK EMİR"
+              details={[
+                ['MAKSİMUM', `${risk?.max_daily_trades ?? 5} emir`],
+                ['ARD. KAYIP', `${risk?.consecutive_losses ?? 0}/${risk?.consecutive_loss_limit ?? 3}`],
+                ['HATA', `${errorCounts.manuel} bugün`, errorCounts.manuel > 0 ? '#f39c12' : undefined],
+              ]}
+              fill={risk?.max_daily_trades
+                ? Math.min((risk?.daily_trade_count ?? 0) / risk.max_daily_trades * 100, 100)
+                : 0}
+            />
+          </div>
+        </div>
+
+        {/* ══ BABA RİSK HATTI ═══════════════════════════════════════ */}
+        <div style={{ display: 'flex', justifyContent: 'center', marginTop: 8 }}>
+          <div style={{ width: '90%', position: 'relative' }}>
+            <div style={{ height: 2, background: `linear-gradient(90deg, ${COLORS.baba}, ${COLORS.baba}44)`, borderRadius: 1, position: 'relative', overflow: 'hidden' }}>
+              <div style={{ position: 'absolute', top: 0, left: '-30%', width: '30%', height: '100%', background: 'linear-gradient(90deg,transparent,rgba(255,255,255,0.5),transparent)', animation: 'mnFlowH 3s linear infinite' }} />
+            </div>
+            <div style={{ textAlign: 'right', marginTop: 3, paddingRight: 4 }}>
+              <span style={{ fontSize: 7, color: COLORS.baba, letterSpacing: 2, fontWeight: 'bold' }}>BABA RİSK HATTI</span>
+              <span style={{ fontSize: 7, color: '#556680', marginLeft: 8 }}>→ OĞUL · H-ENGINE · MANUEL</span>
             </div>
           </div>
         </div>
 
-        {/* Modül sırası */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 4 }}>
-          <ModBox
-            name="BABA" role="RİSK YÖNETİMİ" color={COLORS.baba}
-            status={modStatus.baba}
-            metric={`L${killLevel}`} metricLabel="KİLL-SWİTCH"
-            details={[
-              ['BLOKE', `${(layers?.baba?.killed_symbols || []).length} sembol`],
-              ['DD LİMİT', `%${ddLimit}`],
-              ['HATA', `${errorCounts.baba} bugün`, errorCounts.baba > 0 ? '#f39c12' : undefined],
-            ]}
-            fill={Math.min(killLevel * 33, 100)}
-          />
-          <Arrow c1={COLORS.baba} c2={COLORS.ogul} label="ONAY" />
+        {/* ══ SATIR 3: GENİŞ ÜSTAT + DİKEY ÇİFT YÖN CONNECTORS ═════ */}
+        <div style={{ display: 'flex', justifyContent: 'center', marginTop: 0 }}>
+          <div style={{ width: 782, position: 'relative', paddingTop: 36 }}>
+            {/* SVG overlay — düz dikey çift yön connectors */}
+            <svg width="782" height="100%" style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none', overflow: 'visible' }}>
 
-          <ModBox
-            name="OĞUL" role="SİNYAL YÜRÜTME" color={COLORS.ogul}
-            status={modStatus.ogul}
-            metric={String(layers?.ogul?.active_trade_count ?? 0)} metricLabel="AKTİF İŞLEM"
-            details={[
-              ['SEMBOLLER', `${(layers?.ogul?.active_symbols || []).length} adet`],
-              ['KAYIP STOP', layers?.ogul?.daily_loss_stop ? 'AKTİF' : 'KAPALI', layers?.ogul?.daily_loss_stop ? '#e74c3c' : undefined],
-              ['HATA', `${errorCounts.ogul} bugün`, errorCounts.ogul > 0 ? '#f39c12' : undefined],
-            ]}
-            fill={Math.min((layers?.ogul?.active_trade_count ?? 0) * 20, 100)}
-          />
-          <Arrow c1={COLORS.ogul} c2={COLORS.ustat} label="KONTRAT" />
+              {/* ═══ BABA ↔ ÜSTAT: DİKEY ÇİFT YÖN (x=76 bölgesi) ═══ */}
+              {/* BABA → ÜSTAT (kırmızı düz hat, aşağı) */}
+              <line x1="72" y1="-6" x2="72" y2="30" stroke={COLORS.baba} strokeWidth={2} opacity={0.8} />
+              <polygon points="68,28 76,28 72,36" fill={COLORS.baba} opacity={0.8} />
+              {/* ÜSTAT → BABA (mavi kesikli hat, yukarı) */}
+              <line x1="82" y1="30" x2="82" y2="-6" stroke={COLORS.ustat} strokeWidth={2} opacity={0.6} strokeDasharray="4 3" />
+              <polygon points="78,-4 86,-4 82,-11" fill={COLORS.ustat} opacity={0.8} />
+              {/* Animasyonlu akış: aşağı */}
+              <circle r="3" fill="white" opacity="0.5">
+                <animateMotion dur="1.5s" repeatCount="indefinite" path="M 72 -6 V 30" />
+              </circle>
+              {/* Animasyonlu akış: yukarı */}
+              <circle r="2.5" fill={COLORS.ustat} opacity="0.6">
+                <animateMotion dur="1.8s" repeatCount="indefinite" path="M 82 30 V -6" />
+              </circle>
+              {/* Etiketler — okların soluna ve sağına yerleştirildi */}
+              <text x="32" y="16" fill={COLORS.baba} fontSize="7" fontWeight="bold" letterSpacing="1" fontFamily="inherit">REJİM</text>
+              <text x="32" y="26" fill={COLORS.baba} fontSize="6" opacity="0.7" fontFamily="inherit">↓</text>
+              <text x="94" y="16" fill={COLORS.ustat} fontSize="7" fontWeight="bold" letterSpacing="1" fontFamily="inherit">STRATEJİ</text>
+              <text x="94" y="26" fill={COLORS.ustat} fontSize="6" opacity="0.7" fontFamily="inherit">↑</text>
 
-          <ModBox
-            name="ÜSTAT" role="KONTRAT SEÇİMİ" color={COLORS.ustat}
-            status={modStatus.ustat}
-            metric={sysInfo?.cache_stale ? '⚠' : '✓'} metricLabel="CACHE DURUMU"
-            details={[
-              ['SON ÇALIŞMA', layers?.ustat?.last_run_time || '—'],
-              ['DB BOYUT', `${sysInfo?.db_file_size_mb ?? 0} MB`],
-              ['HATA', `${errorCounts.ustat} bugün`, errorCounts.ustat > 0 ? '#f39c12' : undefined],
-            ]}
-            fill={sysInfo?.cache_stale ? 30 : 90}
-          />
-          <Arrow c1={COLORS.ustat} c2={COLORS.hengine} label="H-SYNC" />
+              {/* ═══ OĞUL ↔ ÜSTAT: DİKEY ÇİFT YÖN (x=286 bölgesi) ═══ */}
+              {/* OĞUL → ÜSTAT (turuncu düz hat, aşağı) */}
+              <line x1="282" y1="-6" x2="282" y2="30" stroke={COLORS.ogul} strokeWidth={2} opacity={0.8} />
+              <polygon points="278,28 286,28 282,36" fill={COLORS.ogul} opacity={0.8} />
+              {/* ÜSTAT → OĞUL (mavi kesikli hat, yukarı) */}
+              <line x1="292" y1="30" x2="292" y2="-6" stroke={COLORS.ustat} strokeWidth={2} opacity={0.6} strokeDasharray="4 3" />
+              <polygon points="288,-4 296,-4 292,-11" fill={COLORS.ustat} opacity={0.8} />
+              {/* Animasyonlu akış: aşağı */}
+              <circle r="3" fill="white" opacity="0.5">
+                <animateMotion dur="1.5s" repeatCount="indefinite" path="M 282 -6 V 30" />
+              </circle>
+              {/* Animasyonlu akış: yukarı */}
+              <circle r="2.5" fill={COLORS.ustat} opacity="0.6">
+                <animateMotion dur="1.8s" repeatCount="indefinite" path="M 292 30 V -6" />
+              </circle>
+              {/* Etiketler — okların soluna ve sağına yerleştirildi */}
+              <text x="240" y="16" fill={COLORS.ogul} fontSize="7" fontWeight="bold" letterSpacing="1" fontFamily="inherit" textAnchor="end">İŞLEM</text>
+              <text x="240" y="26" fill={COLORS.ogul} fontSize="6" opacity="0.7" fontFamily="inherit" textAnchor="end">↓</text>
+              <text x="304" y="16" fill={COLORS.ustat} fontSize="7" fontWeight="bold" letterSpacing="1" fontFamily="inherit">PROFİL</text>
+              <text x="304" y="26" fill={COLORS.ustat} fontSize="6" opacity="0.7" fontFamily="inherit">↑</text>
+            </svg>
 
-          <ModBox
-            name="H-ENGINE" role="HYBRID MOD" color={COLORS.hengine}
-            status={modStatus.hengine}
-            metric={String(layers?.h_engine?.active_hybrid_count ?? 0)} metricLabel="HİBRİT POZ."
-            details={[
-              ['GÜNLÜK P&L', `${layers?.h_engine?.daily_pnl ?? 0} TL`],
-              ['LİMİT', `${layers?.h_engine?.daily_limit ?? 0} TL`],
-              ['HATA', `${errorCounts.hengine} bugün`, errorCounts.hengine > 0 ? '#f39c12' : undefined],
-            ]}
-            fill={layers?.h_engine?.daily_limit
-              ? Math.min(Math.abs(layers?.h_engine?.daily_pnl ?? 0) / layers.h_engine.daily_limit * 100, 100)
-              : 0}
-          />
-          <Arrow c1={COLORS.hengine} c2={COLORS.manuel} label="SYNC" />
-
-          <ModBox
-            name="MANUEL" role="MANUEL MOTOR" color={COLORS.manuel}
-            status={modStatus.manuel}
-            metric={String(risk?.daily_trade_count ?? 0)} metricLabel="GÜNLÜK EMİR"
-            details={[
-              ['MAKSİMUM', `${risk?.max_daily_trades ?? 5} emir`],
-              ['ARD. KAYIP', `${risk?.consecutive_losses ?? 0}/${risk?.consecutive_loss_limit ?? 3}`],
-              ['HATA', `${errorCounts.manuel} bugün`, errorCounts.manuel > 0 ? '#f39c12' : undefined],
-            ]}
-            fill={risk?.max_daily_trades
-              ? Math.min((risk?.daily_trade_count ?? 0) / risk.max_daily_trades * 100, 100)
-              : 0}
-          />
-          <Arrow c1={COLORS.manuel} c2={COLORS.hibrit} label="SYNC" />
-
-          <ModBox
-            name="HİBRİT" role="HİBRİT MOTOR" color={COLORS.hibrit}
-            status={modStatus.hibrit}
-            metric={String(orders?.success_count ?? 0)} metricLabel="BAŞARILI EMİR"
-            details={[
-              ['RED', `${orders?.reject_count ?? 0}`],
-              ['TIMEOUT', `${orders?.timeout_count ?? 0}`],
-              ['HATA', `${errorCounts.hibrit} bugün`, errorCounts.hibrit > 0 ? '#f39c12' : undefined],
-            ]}
-            fill={
-              (orders?.success_count ?? 0) + (orders?.reject_count ?? 0) + (orders?.timeout_count ?? 0) > 0
-                ? Math.min((orders.success_count / ((orders.success_count ?? 0) + (orders.reject_count ?? 0) + (orders.timeout_count ?? 0))) * 100, 100)
-                : 0
-            }
-          />
+            {/* GENİŞ ÜSTAT card — BABA solundan OĞUL sağına kadar (0 → 362px) */}
+            <div style={{ width: 362 }}>
+              <ModBox name="ÜSTAT" role="STRATEJİ BEYNİ · BABA & OĞUL YÖNLENDİRME" color={COLORS.ustat}
+                width={362}
+                status={modStatus.ustat} metric={sysInfo?.cache_stale ? '⚠' : '✓'} metricLabel="CACHE DURUMU"
+                details={[
+                  ['SON ÇALIŞMA', layers?.ustat?.last_run_time ? fmtTime(layers.ustat.last_run_time) : '—'],
+                  ['DB BOYUT', `${sysInfo?.db_file_size_mb ?? 0} MB`],
+                  ['MT5', 'BAĞLANTI YOK', '#556680'],
+                  ['HATA', `${errorCounts.ustat} bugün`, errorCounts.ustat > 0 ? '#f39c12' : undefined],
+                ]}
+                fill={sysInfo?.cache_stale ? 30 : 90}
+              />
+            </div>
+          </div>
         </div>
       </div>
 

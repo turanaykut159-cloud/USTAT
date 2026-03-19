@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 class StatusResponse(BaseModel):
     """GET /api/status — Sistem durumu."""
-    version: str = "5.5.0"
+    version: str = "5.6.0"
     engine_running: bool = False
     mt5_connected: bool = False
     regime: str = "TREND"          # TREND / RANGE / VOLATILE / OLAY
@@ -674,6 +674,7 @@ class UstatBrainResponse(BaseModel):
     next_day_analyses: list[NextDayAnalysis] = []
     strategy_pool: StrategyPool = StrategyPool()
     regulation_suggestions: list[RegulationSuggestion] = []
+    trade_categorization_engine: dict = {}  # ÜSTAT engine çok boyutlu kategorizasyon özeti
 
 
 # ═══════════════════════════════════════════════════════════════════

@@ -1,4 +1,4 @@
-' USTAT v5.5 — Baslatici (Admin Elevated)
+' USTAT v5.6 — Baslatici (Admin Elevated)
 '
 ' NEDEN ADMIN (RUNAS):
 '   MT5 admin olarak calisiyor (C:\Program Files altinda).

@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.5 — Backend API çağrıları.
+ * ÜSTAT v5.6 — Backend API çağrıları.
  *
  * FastAPI sunucusuyla iletişim (REST + WebSocket).
  * Tüm endpoint'ler: /api/status, /api/account, /api/positions,
@@ -549,7 +549,10 @@ export async function resolveError(errorType, messagePrefix = '', resolvedBy = '
 
 export async function resolveAllErrors(resolvedBy = 'operator') {
   try {
-    const { data } = await client.post(`/errors/resolve-all?resolved_by=${resolvedBy}`);
+    const { data } = await client.post('/errors/resolve-all', {
+      error_type: '*',
+      resolved_by: resolvedBy,
+    });
     return data;
   } catch (err) {
     console.error('[ÜSTAT API] resolveAllErrors:', err?.message ?? err);

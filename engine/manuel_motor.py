@@ -295,6 +295,29 @@ class ManuelMotor:
             "lot": 0.0,
         }
 
+        # 0. Netting kilit kontrolü (v5.5.1: cross-motor race condition önlemi)
+        from engine.netting_lock import acquire_symbol, release_symbol
+        if not acquire_symbol(symbol, owner="manuel"):
+            result["message"] = f"{symbol} başka motor tarafından işleniyor (netting lock)"
+            return result
+
+        try:
+            return self._open_manual_trade_locked(
+                symbol, direction, lot, sl, tp, result
+            )
+        finally:
+            release_symbol(symbol, owner="manuel")
+
+    def _open_manual_trade_locked(
+        self,
+        symbol: str,
+        direction: str,
+        lot: float,
+        sl: float | None,
+        tp: float | None,
+        result: dict,
+    ) -> dict:
+        """Netting lock alındıktan sonra çağrılır (iç metod)."""
         # 1. Tekrar risk kontrolü (race condition önlemi)
         check = self.check_manual_trade(symbol, direction)
         if not check["can_trade"]:

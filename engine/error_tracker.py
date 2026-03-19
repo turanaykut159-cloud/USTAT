@@ -1,4 +1,4 @@
-"""ÜSTAT v5.4 — Hata Takip Motoru (Error Tracker).
+"""ÜSTAT v5.6 — Hata Takip Motoru (Error Tracker).
 
 Mevcut events tablosunu kullanarak hata agregasyonu, gruplama,
 trend analizi ve dashboard istatistikleri sağlar.

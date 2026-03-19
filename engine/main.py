@@ -129,6 +129,12 @@ class Engine:
         # OĞUL'a ÜSTAT referansı ver (strateji havuzu + kontrat profilleri)
         self.ogul.ustat = self.ustat
 
+        # ÜSTAT'a risk_params referansı ver (BABA risk parametreleri ayarlaması)
+        self.ustat._risk_params = self.risk_params
+
+        # BABA'ya risk_params referansı ver (ÜSTAT bildirim kuyruğu okuma)
+        self.baba._risk_params_ref = self.risk_params
+
         # ManuelMotor (Bağımsız Manuel İşlem Motoru — v14.0)
         from engine.manuel_motor import ManuelMotor
         self.manuel_motor = ManuelMotor(

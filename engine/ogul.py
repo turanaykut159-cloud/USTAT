@@ -18,6 +18,7 @@ Rejim → Aktif sinyaller:
 from __future__ import annotations
 
 import math
+import threading
 import time as _time
 from datetime import date, datetime, time, timedelta
 from typing import Any
@@ -374,6 +375,7 @@ class Ogul:
         self.baba = baba
         self.risk_params = risk_params or RiskParams()
         self.active_trades: dict[str, Trade] = {}
+        self._trade_lock = threading.Lock()  # Pozisyon limiti atomik kontrolü
         self.last_signals: dict[str, str] = {}  # symbol → "BUY"|"SELL"|"BEKLE"
         self.h_engine: Any | None = None  # HEngine referansı (main.py tarafından atanır)
         self.manuel_motor: Any | None = None  # ManuelMotor referansı (main.py tarafından atanır)
@@ -419,7 +421,17 @@ class Ogul:
             return fallback
         try:
             params = self.ustat.get_active_params()
-            return float(params.get(key, fallback))
+            # Fix M14: None değer kontrolü — float(None) crash önleme
+            val = params.get(key)
+            if val is None:
+                return fallback
+            return float(val)
+        except (TypeError, ValueError) as exc:
+            logger.warning(
+                f"ÜSTAT param dönüşüm hatası [{key}]={val!r}: {exc} "
+                f"→ fallback={fallback}"
+            )
+            return fallback
         except Exception:
             return fallback
 
@@ -441,6 +453,25 @@ class Ogul:
             return self.ustat.get_contract_profile(symbol)
         except Exception:
             return None
+
+    def _get_ustat_strategy_hint(self) -> str:
+        """ÜSTAT'tan tercih edilen strateji yönlendirmesini oku.
+
+        ÜSTAT rejim ve geçmiş verilere dayalı olarak hangi stratejinin
+        mevcut koşullarda daha etkili olacağını belirler. OĞUL bu bilgiyi
+        sinyal gücü hesaplamasında bonus olarak kullanır.
+
+        Returns:
+            Tercih edilen strateji adı (trend_follow/mean_reversion/breakout)
+            veya boş string (ÜSTAT erişilemezse).
+        """
+        if self.ustat is None:
+            return ""
+        try:
+            params = self.ustat.get_active_params()
+            return str(params.get("preferred_strategy", ""))
+        except Exception:
+            return ""
 
     # ═════════════════════════════════════════════════════════════════
     #  ANA GİRİŞ
@@ -910,6 +941,22 @@ class Ogul:
 
         if not candidates:
             return None
+
+        # ── ÜSTAT strateji yönlendirmesi: tercih edilen stratejiye bonus ──
+        # ÜSTAT'ın rejim ve geçmiş veriye dayalı strateji tercihi,
+        # eşleşen sinyallerin strength'ine eklenir.
+        ustat_pref = self._get_ustat_strategy_hint()
+        if ustat_pref:
+            bonus = self._get_ustat_param("strategy_bonus", 10) / 100.0
+            strategy_name_map = {
+                StrategyType.TREND_FOLLOW: "trend_follow",
+                StrategyType.MEAN_REVERSION: "mean_reversion",
+                StrategyType.BREAKOUT: "breakout",
+            }
+            for cand in candidates:
+                cand_name = strategy_name_map.get(cand.strategy, "")
+                if cand_name == ustat_pref:
+                    cand.strength = min(1.0, cand.strength + bonus)
 
         # En güçlü sinyali seç (SE2 bonusu ile SE2 sinyali tercih edilir)
         best = max(candidates, key=lambda s: s.strength)
@@ -1479,6 +1526,14 @@ class Ogul:
         # SL / TP — ÜSTAT strateji havuzundan dinamik parametre
         bo_sl_mult = self._get_ustat_param("sl_atr_mult", BO_SL_ATR_MULT)
         range_width = high_20 - low_20
+        # Fix M15: Çok dar range → TP=entry olur, anlamsız işlem → reddet
+        if range_width < atr_val * 0.5:
+            logger.warning(
+                f"Breakout range çok dar [{symbol}]: "
+                f"range={range_width:.4f} < ATR*0.5={atr_val*0.5:.4f} "
+                f"→ sinyal reddedildi"
+            )
+            return None
 
         if direction == SignalType.BUY:
             sl = last_close - bo_sl_mult * atr_val
@@ -1614,22 +1669,25 @@ class Ogul:
             self._log_cancelled_trade(trade)
             return
 
-        # Eş zamanlı pozisyon limiti
+        # Eş zamanlı pozisyon limiti (atomik kontrol — race condition önlemi)
         active_states = (
-            TradeState.FILLED, TradeState.SENT,
+            TradeState.PENDING, TradeState.FILLED, TradeState.SENT,
             TradeState.PARTIAL, TradeState.MARKET_RETRY,
         )
-        active_count = sum(
-            1 for t in self.active_trades.values()
-            if t.state in active_states
-        )
-        if active_count >= MAX_CONCURRENT:
-            trade.state = TradeState.CANCELLED
-            trade.cancel_reason = (
-                f"concurrent_limit ({active_count}/{MAX_CONCURRENT})"
+        with self._trade_lock:
+            active_count = sum(
+                1 for t in self.active_trades.values()
+                if t.state in active_states
             )
-            self._log_cancelled_trade(trade)
-            return
+            if active_count >= MAX_CONCURRENT:
+                trade.state = TradeState.CANCELLED
+                trade.cancel_reason = (
+                    f"concurrent_limit ({active_count}/{MAX_CONCURRENT})"
+                )
+                self._log_cancelled_trade(trade)
+                return
+            # Lock içinde trade'i aktif olarak işaretle (slot ayır)
+            trade.state = TradeState.PENDING
 
         # Teminat kontrolü
         account = self.mt5.get_account_info()
@@ -1690,22 +1748,30 @@ class Ogul:
             except Exception:
                 pass
             if lot <= 0:
-                # Fix 2: pre-fraction lot yeterliyse vol_min uygula
+                # Fix 2+: fraction sonrası lot 0 → vol_min fallback
+                # Doğru kontrol: fraction uygulanmış lot v_min'in yarısından büyükse
+                # v_min'e yuvarla. Aksi halde emir iptal.
                 try:
                     sym_info_f = self.mt5.get_symbol_info(signal.symbol)
                     v_min = sym_info_f.volume_min if sym_info_f else 1.0
                 except Exception:
                     v_min = 1.0
-                if lot_before_fraction >= v_min:
+                fractioned_lot = lot_before_fraction * fraction
+                if fractioned_lot >= v_min * 0.5:
                     lot = v_min
                     logger.info(
                         f"ENTRY_LOT_FRACTION floor [{signal.symbol}]: "
                         f"lot=0→vol_min={v_min} "
-                        f"(pre_frac={lot_before_fraction:.2f})"
+                        f"(pre_frac={lot_before_fraction:.2f}, "
+                        f"frac_lot={fractioned_lot:.2f})"
                     )
                 else:
                     trade.state = TradeState.CANCELLED
                     trade.cancel_reason = "lot_zero_after_fraction"
+                    logger.info(
+                        f"ENTRY_LOT_FRACTION iptal [{signal.symbol}]: "
+                        f"frac_lot={fractioned_lot:.2f} < v_min*0.5={v_min*0.5:.2f}"
+                    )
                     self._log_cancelled_trade(trade)
                     return
 
@@ -1728,6 +1794,22 @@ class Ogul:
                 limit_price = signal.price + LIMIT_OFFSET_ATR * atr_val
         else:
             limit_price = signal.price
+
+        # Fix M16: Limit fiyat güncel piyasadan çok uzaksa düzelt
+        tick_check = self.mt5.get_tick(symbol)
+        if tick_check and atr_val and atr_val > 0:
+            market_price = tick_check.ask if direction == "BUY" else tick_check.bid
+            distance = abs(limit_price - market_price)
+            if distance > atr_val * 2:
+                logger.warning(
+                    f"Limit fiyat piyasadan uzak [{symbol}]: "
+                    f"limit={limit_price:.4f} market={market_price:.4f} "
+                    f"distance={distance:.4f} > 2×ATR={atr_val*2:.4f} → düzeltildi"
+                )
+                if direction == "BUY":
+                    limit_price = market_price - LIMIT_OFFSET_ATR * atr_val
+                else:
+                    limit_price = market_price + LIMIT_OFFSET_ATR * atr_val
 
         trade.limit_price = limit_price
         result = self.mt5.send_order(
@@ -1856,7 +1938,7 @@ class Ogul:
 
                 _atr_arr = calc_atr(_high, _low, _close, ATR_PERIOD)
                 _atr = last_valid(_atr_arr)
-                if _atr and _atr > 0:
+                if _atr is not None and _atr > 0:
                     _levels = find_support_resistance(_high, _low, _close, _atr)
                     _patterns = detect_bar_patterns(_open, _high, _low, _close, _atr)
                     _trend = analyze_trend_structure(_high, _low, _close)
@@ -1877,6 +1959,14 @@ class Ogul:
                         macd_hist=_hist_val, ema_fast=_ema_f, ema_slow=_ema_s,
                         volume_ratio=_vol_ratio,
                     )
+
+                    # Fix M17: Confluence skor sınır kontrolü
+                    if conf.total_score < 0 or conf.total_score > 100:
+                        logger.warning(
+                            f"Confluence skor sınır dışı [{signal.symbol}]: "
+                            f"{conf.total_score:.0f} → clamp [0,100]"
+                        )
+                        conf.total_score = max(0.0, min(100.0, conf.total_score))
 
                     if conf.total_score >= CONVICTION_HIGH_THRESHOLD:
                         conv_mult = CONVICTION_HIGH_MULT
@@ -2037,10 +2127,19 @@ class Ogul:
         if order_status == "filled":
             trade.state = TradeState.FILLED
             # Netting modda position_ticket kullan (close_position bunu bekler)
-            trade.ticket = status.get(
-                "position_ticket",
-                status.get("deal_ticket", trade.order_ticket),
-            )
+            # Fix Y5: position_ticket yoksa uyarı logla — fallback ticket
+            #         ile close_position başarısız olabilir
+            pos_ticket = status.get("position_ticket")
+            if pos_ticket:
+                trade.ticket = pos_ticket
+            else:
+                fallback_ticket = status.get("deal_ticket", trade.order_ticket)
+                trade.ticket = fallback_ticket
+                logger.warning(
+                    f"Netting: position_ticket yok [{symbol}], "
+                    f"fallback ticket={fallback_ticket} kullanılıyor — "
+                    f"close_position başarısız olabilir"
+                )
             trade.filled_volume = status.get(
                 "filled_volume", trade.volume,
             )
@@ -2163,11 +2262,27 @@ class Ogul:
             trade: TIMEOUT state'teki Trade.
             regime: Mevcut rejim.
         """
-        # Bekleyen emri iptal et
-        try:
-            self.mt5.cancel_order(trade.order_ticket)
-        except Exception as exc:
-            logger.error(f"cancel_order hatası [{symbol}] ticket={trade.order_ticket}: {exc}")
+        # Bekleyen emri iptal et (v5.5.1: 3 deneme ile retry)
+        cancel_ok = False
+        for _cancel_try in range(1, 4):
+            try:
+                self.mt5.cancel_order(trade.order_ticket)
+                cancel_ok = True
+                break
+            except Exception as exc:
+                logger.error(
+                    f"cancel_order hatası [{symbol}] ticket={trade.order_ticket} "
+                    f"deneme {_cancel_try}/3: {exc}"
+                )
+                if _cancel_try < 3:
+                    import time as _time
+                    _time.sleep(0.5)
+
+        if not cancel_ok:
+            logger.error(
+                f"cancel_order 3 denemede başarısız [{symbol}] "
+                f"ticket={trade.order_ticket} — sync_positions düzeltmeli"
+            )
 
         # VOLATILE/OLAY rejimde market emir yasak
         if trade.regime_at_entry in ("VOLATILE", "OLAY"):
@@ -2433,13 +2548,15 @@ class Ogul:
                 logger.error(f"EOD hibrit kapatma başarısız: {failed}")
 
         # Manuel pozisyonları da kapat (EOD) — v14.1 düzeltme
-        if self.manuel_motor and self.manuel_motor.active_trades:
-            manual_count = len(self.manuel_motor.active_trades)
+        # Fix Y6: manuel_motor referansını yerel değişkene al (race condition koruması)
+        _mm = self.manuel_motor
+        if _mm and _mm.active_trades:
+            trades_snapshot = dict(_mm.active_trades)  # snapshot al
+            manual_count = len(trades_snapshot)
             logger.warning(
                 f"EOD: {manual_count} manuel pozisyon kapatılıyor"
             )
-            for sym in list(self.manuel_motor.active_trades):
-                trade = self.manuel_motor.active_trades[sym]
+            for sym, trade in trades_snapshot.items():
                 if trade.ticket:
                     try:
                         self.mt5.close_position(trade.ticket)
@@ -2451,7 +2568,7 @@ class Ogul:
             # sync_positions bir sonraki cycle'da kapanışları tespit edecek
             # ama hemen de sync çağırabiliriz
             try:
-                self.manuel_motor.sync_positions()
+                _mm.sync_positions()
             except Exception as exc:
                 logger.error(f"EOD ManuelMotor sync hatası: {exc}")
 
@@ -2644,11 +2761,18 @@ class Ogul:
                 trade.entry_price = pos_entry
                 sync_needed = True
             if sync_needed and trade.db_id > 0:
-                self.db.update_trade(trade.db_id, {
-                    "lot": trade.volume,
-                    "entry_price": trade.entry_price,
-                    "mt5_position_id": trade.ticket,
-                })
+                # Fix Y7: DB sync hatasını yakala — sessiz veri kaybını önle
+                try:
+                    self.db.update_trade(trade.db_id, {
+                        "lot": trade.volume,
+                        "entry_price": trade.entry_price,
+                        "mt5_position_id": trade.ticket,
+                    })
+                except Exception as exc:
+                    logger.error(
+                        f"DB sync başarısız [{symbol}] db_id={trade.db_id}: {exc} "
+                        f"— bellek/MT5 ile DB arasında tutarsızlık olabilir"
+                    )
 
             # Pozisyon yönetimi (evrensel veya eski strateji bazlı)
             if USE_UNIVERSAL_MANAGEMENT:
@@ -3017,7 +3141,6 @@ class Ogul:
             return None  # patlama yok
 
         # Aleyhine hareket kontrolü
-        last_close = volume[-1]  # dummy — asıl fiyat hareketi
         if trade.direction == "BUY":
             profit = current_price - trade.entry_price
         else:

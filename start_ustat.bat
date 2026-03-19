@@ -1,5 +1,5 @@
 @echo off
-:: USTAT v5.5 — Tek tikla baslatici (tasinabilir)
+:: USTAT v5.6 — Tek tikla baslatici (tasinabilir)
 :: API ve Vite arka planda, Electron gorunur baslar.
 
 :: Otomatik: BAT dosyasinin bulundugu klasoru kullan
