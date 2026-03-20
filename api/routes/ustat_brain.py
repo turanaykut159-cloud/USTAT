@@ -47,8 +47,8 @@ def _calc_duration_minutes(entry_time: str | None, exit_time: str | None) -> flo
         return 0.0
     try:
         fmt = "%Y-%m-%d %H:%M:%S"
-        entry = datetime.strptime(entry_time[:19], fmt)
-        exit_ = datetime.strptime(exit_time[:19], fmt)
+        entry = datetime.strptime(entry_time[:19].replace("T", " "), fmt)
+        exit_ = datetime.strptime(exit_time[:19].replace("T", " "), fmt)
         return max((exit_ - entry).total_seconds() / 60.0, 0.0)
     except (ValueError, TypeError):
         return 0.0

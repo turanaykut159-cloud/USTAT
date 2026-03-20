@@ -748,6 +748,17 @@ class Engine:
         days = max(1, min(90, days))
         try:
             trades = self.mt5.get_history_for_sync(days=days)
+            # Mevcut regime'i sync edilen trade'lere ekle (Bilinmeyen oranını düşürür)
+            current_regime = ""
+            if self.baba and self.baba.current_regime:
+                try:
+                    current_regime = self.baba.current_regime.regime_type.value
+                except Exception:
+                    pass
+            if current_regime:
+                for t in trades:
+                    if not t.get("regime"):
+                        t["regime"] = current_regime
             added = self.db.sync_mt5_trades(trades)
             return added
         except Exception as exc:

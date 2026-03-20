@@ -51,10 +51,15 @@ async def get_performance(
     avg_win = sum(winning) / len(winning) if winning else 0.0
     avg_loss = sum(losing) / len(losing) if losing else 0.0
 
-    # Profit factor
+    # Profit factor: kayıp yoksa ve kâr varsa sonsuz (∞), her ikisi yoksa 0
     gross_profit = sum(winning) if winning else 0.0
     gross_loss = abs(sum(losing)) if losing else 0.0
-    profit_factor = gross_profit / gross_loss if gross_loss > 0 else 0.0
+    if gross_loss > 0:
+        profit_factor = gross_profit / gross_loss
+    elif gross_profit > 0:
+        profit_factor = 999.0  # Hiç zarar yok, saf kâr → sonsuz göstergesi
+    else:
+        profit_factor = 0.0
 
     # ── Günlük PnL kırılımı ──────────────────────────────────────
     daily_pnl_map: dict[str, float] = defaultdict(float)

@@ -190,6 +190,7 @@ async def _send_all_updates(ws: WebSocket):
         })
 
     # ── 3. Pozisyon güncellemesi (cache'den, strateji OĞUL'dan) ───
+    _OTOMATIK_STRATEJILER = frozenset({"trend_follow", "mean_reversion", "breakout"})
     if cache_ok and pipeline.latest_positions is not None:
         ogul = get_ogul()
         pos_list = []
@@ -229,6 +230,10 @@ async def _send_all_updates(ws: WebSocket):
                         voting_score = getattr(trade, "voting_score", 0)
                         break
 
+            # tur alanı: Otomatik / Manuel (positions.py ile tutarlı)
+            strat_key = strategy.strip().lower()
+            tur = "Otomatik" if strat_key in _OTOMATIK_STRATEJILER else "Manuel"
+
             pos_list.append({
                 "ticket": ticket,
                 "symbol": symbol,
@@ -242,6 +247,7 @@ async def _send_all_updates(ws: WebSocket):
                 "swap": swap,
                 "open_time": open_time,
                 "strategy": strategy,
+                "tur": tur,
                 "tp1_hit": tp1_hit,
                 "breakeven_hit": breakeven_hit,
                 "cost_averaged": cost_averaged,
@@ -257,10 +263,13 @@ async def _send_all_updates(ws: WebSocket):
     # ── 4. Durum güncellemesi ─────────────────────────────────────
     if baba:
         regime = ""
+        regime_confidence = 0.0
         can_trade = True
+        risk_multiplier = 1.0
 
         if baba.current_regime:
             regime = baba.current_regime.regime_type.value
+            regime_confidence = getattr(baba.current_regime, "confidence", 0.0)
 
         engine = get_engine()
         if engine and hasattr(engine, 'risk_params'):
@@ -269,12 +278,16 @@ async def _send_all_updates(ws: WebSocket):
                 can_trade = verdict.can_trade
             except Exception:
                 pass
+            risk_multiplier = getattr(engine.risk_params, "risk_multiplier", 1.0) if hasattr(engine, "risk_params") else 1.0
 
         messages.append({
             "type": "status",
             "regime": regime,
+            "regime_confidence": regime_confidence,
             "kill_switch_level": baba._kill_switch_level,
             "can_trade": can_trade,
+            "engine_running": True,
+            "risk_multiplier": risk_multiplier,
         })
 
     # ── 5. Hibrit pozisyon güncellemesi ─────────────────────────

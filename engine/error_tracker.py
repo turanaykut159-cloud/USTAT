@@ -366,7 +366,9 @@ class ErrorTracker:
             keys_to_remove = []
             for key, group in list(self._groups.items()):
                 if group.error_type == error_type:
-                    if not message_prefix or key.endswith(message_prefix[:80]):
+                    # Eşleşme: message_prefix boşsa tüm grubu çözümle,
+                    # doluysa mesajın başında aranır (key formatı: "type::msg_prefix")
+                    if not message_prefix or message_prefix[:80] in key or message_prefix[:80] in (group.message or ""):
                         group.resolve(by)
                         keys_to_remove.append(key)
                         resolved_any = True

@@ -2,6 +2,74 @@
 
 ---
 
+## #47 — v5.6 Kırmızı Bölge: 9 Bug Düzeltmesi (3 KRİTİK, 3 YÜKSEK, 3 ORTA) (2026-03-20)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-20 |
+| **Neden** | v5.6 kapsamlı "Kırmızı Bölge" bug tarama oturumu. Canlı test ve kod incelemesi sırasında tespit edilen 9 bug giderildi. Versiyon 5.6'da kaldı (5.7'ye geçiş yok). |
+
+### Değişiklikler
+
+| Dosya | Öncelik | Ne Değişti |
+|-------|---------|-----------|
+| `api/routes/ustat_brain.py` | **KRİTİK #1** | Duration hesaplaması datetime format fix — `close_time` ve `open_time` string → datetime dönüşümünde format uyumsuzluğu düzeltildi |
+| `engine/mt5_bridge.py` + `engine/main.py` | **KRİTİK #2** | Regime alanı eklendi — MT5 bridge ve main.py'de eksik `regime` alanı trades/pozisyonlara eklendi |
+| `engine/baba.py` | **KRİTİK #3** | Volume spike flood önlendi — `>=` koşulu `>` olarak değiştirildi + 60 saniye cooldown mekanizması eklendi |
+| `desktop/src/components/Settings.jsx` + `api/routes/settings.py` + `desktop/src/services/api.js` | **YÜKSEK #4** | Bildirim toggle API bağlantısı kuruldu — Frontend toggle'ları backend API'ye bağlandı, kalıcı kaydetme sağlandı |
+| `api/routes/live.py` | **YÜKSEK #5** | WebSocket eksik alanlar tamamlandı — `tur`, `engine_running`, `regime_confidence`, `risk_multiplier` alanları eklendi |
+| `api/routes/performance.py` | **YÜKSEK #6** | Profit factor sıfıra bölme koruması — Payda 0 olduğunda `0 → 999.0` döndürme düzeltildi |
+| `desktop/src/styles/theme.css` | **ORTA #7** | Metin taşması düzeltmesi — Uzun metinlerin kart dışına taşması `overflow-wrap` + `word-break` ile önlendi |
+| `desktop/src/components/Performance.jsx` | **ORTA #8** | Win rate trend sıfıra bölme guard — Sıfır veri durumunda `NaN` yerine `0` döndürme guard eklendi |
+| `desktop/` | **ORTA #9** | Production build güncellendi — Tüm düzeltmeler dahil yeni `dist/` build çıktısı oluşturuldu |
+
+### Eklenen
+- `VOLUME_SPIKE_COOLDOWN = 60` sabiti (baba.py)
+- `regime` alanı MT5 trade ve pozisyon verilerine (mt5_bridge.py, main.py)
+- `tur`, `engine_running`, `regime_confidence`, `risk_multiplier` WebSocket payload alanları (live.py)
+- Bildirim ayarları API endpoint bağlantısı (Settings.jsx ↔ settings.py ↔ api.js)
+- Profit factor sıfıra bölme koruması (performance.py)
+- Win rate trend sıfıra bölme guard (Performance.jsx)
+- `overflow-wrap: break-word`, `word-break: break-word` CSS kuralları (theme.css)
+
+### Kaldırılan / Değiştirilen Davranışlar
+- Volume spike koşulu `>= threshold` → `> threshold` (baba.py)
+- Duration hesaplaması artık hatalı format string'e toleranslı
+- Profit factor hesaplaması artık `ZeroDivisionError` atmıyor
+
+---
+
+## #46 — Otomatik İşlem Paneli WebSocket Entegrasyonu (2026-03-20)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-20 |
+| **Neden** | Otomatik İşlem Paneli yalnızca REST polling (10sn) kullanıyordu. Dashboard ve Hibrit Panel'de mevcut olan WebSocket canlı veri akışı bu panelde yoktu. Aktif pozisyon varken K/Z ve durum bilgisi 10 saniye gecikmeli güncelleniyordu. |
+| **Tetikleyen** | Sayfa bazlı derinlemesine analiz sırasında tespit edildi. Otomatik işlemler aktif edilecek olması nedeniyle düzeltme kararı alındı. |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `desktop/src/components/AutoTrading.jsx` | **1)** `connectLiveWS` import eklendi. **2)** `useRef` import eklendi, `wsRef` state tanımlandı. **3)** `useEffect` ile WS bağlantısı kuruldu — `msg.type === 'status'` ile `engine_running`, `regime`, `regime_confidence`, `kill_switch_level`, `risk_multiplier` güncelleniyor; `msg.type === 'position'` ile `autoPositions` (`tur === 'Otomatik'` filtresi) güncelleniyor. **4)** REST polling 10sn → 30sn'ye düşürüldü (WS aradaki boşluğu kapattığı için). **5)** Dosya başlık yorumu güncellendi. |
+
+### Etki Analizi
+
+- Dokunulan dosya: TEK — `desktop/src/components/AutoTrading.jsx` (Kırmızı Bölge DIŞI)
+- Backend değişikliği: YOK — mevcut `/ws/live` endpoint zaten `status` ve `position` broadcast ediyor
+- API schema değişikliği: YOK
+- Diğer bileşen etkisi: YOK
+- Performans: REST çağrı sıklığı azaldı (10sn → 30sn), WS bağlantısı zaten sunucu tarafında broadcast — net yük azalması
+
+### Geri Alma
+
+```bash
+git revert HEAD
+cd desktop && npm run build
+```
+
+---
+
 ## #45 — Kırmızı Bölge Kapsamlı Bug Tarama ve Düzeltme: 29 Sorun Tespiti (2026-03-20)
 
 | Alan | Detay |
@@ -1578,3 +1646,4 @@ Bu düzeltmeler native SLTP çalışmadığı için sorunu çözmedi ama kod kal
 - MT5 Bridge (4 katmanlı koruma) — ✅
 - Frontend (10 sayfa, 45+ kart) — ✅
 - API (18 route + 1 WebSocket) — ✅
+

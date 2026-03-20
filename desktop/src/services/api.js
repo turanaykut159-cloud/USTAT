@@ -165,6 +165,16 @@ export async function updateRiskBaseline(newDate) {
   }
 }
 
+export async function updateNotificationPrefs(prefs) {
+  try {
+    const { data } = await client.post('/settings/notification-prefs', prefs);
+    return data;
+  } catch (err) {
+    console.error('[ÜSTAT API] updateNotificationPrefs:', err?.message ?? err);
+    return { success: false, prefs };
+  }
+}
+
 // ── Performance ──────────────────────────────────────────────────
 
 export async function getPerformance(days = 30) {

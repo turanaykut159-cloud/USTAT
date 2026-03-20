@@ -3363,12 +3363,13 @@ h2 {
 
 .pf-brain-row {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 6px;
   padding: 6px 0;
   border-bottom: 1px solid var(--border);
   font-size: 12px;
+  overflow: hidden;
 }
 
 .pf-brain-row:last-child { border-bottom: none; }
@@ -3404,6 +3405,10 @@ h2 {
   font-size: 11px;
   flex: 1;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
 }
 
 .pf-brain-dim {

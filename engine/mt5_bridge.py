@@ -1663,6 +1663,7 @@ class MT5Bridge:
                     "mt5_position_id": pos_id,
                     "strategy": "manual",
                     "exit_reason": "mt5_sync",
+                    "regime": "",  # main.py tarafından current regime ile doldurulur
                 })
 
             logger.info(

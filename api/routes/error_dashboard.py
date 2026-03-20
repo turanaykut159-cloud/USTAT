@@ -219,6 +219,43 @@ def _fetch_events_from_db(
         return []
 
 
+def _get_resolution_map() -> dict[str, dict]:
+    """error_resolutions tablosundan çözümleme kayıtlarını oku.
+
+    Returns:
+        {error_type: {"resolved_at": str, "resolved_by": str}}
+    """
+    db = get_db()
+    if not db:
+        return {}
+    try:
+        rows = db._fetch_all(
+            "SELECT error_type, resolved_at, resolved_by FROM error_resolutions"
+        )
+        return {r["error_type"]: r for r in rows}
+    except Exception:
+        return {}
+
+
+def _is_resolved(error_type: str, last_seen: str, resolutions: dict) -> tuple[bool, str | None, str]:
+    """Bir hata grubunun çözülüp çözülmediğini belirle.
+
+    Çözülme koşulu: error_type resolution tablosunda var VE
+    last_seen <= resolved_at (çözümlemeden sonra yeni event yok).
+
+    Returns:
+        (resolved, resolved_at, resolved_by)
+    """
+    res = resolutions.get(error_type)
+    if not res:
+        return False, None, ""
+    resolved_at = res.get("resolved_at", "")
+    if last_seen <= resolved_at:
+        return True, resolved_at, res.get("resolved_by", "")
+    # Çözümlemeden SONRA yeni event gelmiş → artık çözülmemiş
+    return False, None, ""
+
+
 # ── Endpoints ──
 
 @router.get("/summary", response_model=ErrorSummaryResponse)
@@ -279,20 +316,29 @@ async def get_error_summary():
                     "category": cat,
                 }
 
-        # Çözümlenmiş grup sayısı: ErrorTracker'dan al
+        # Açık/çözülmüş grup sayısı — DB tabanlı, error_type bazında gruplama
+        # Her error_type için last_seen'e bak, resolution tablosundaki zamana kıyasla
+        resolutions = _get_resolution_map()
+
+        # Bugünkü benzersiz error_type → last_seen haritası
+        type_last_seen: dict[str, str] = {}
+        for ev in events:
+            etype = ev.get("type", "")
+            ts = ev.get("timestamp", "")
+            sev = ev.get("severity", "INFO")
+            if sev not in ("WARNING", "ERROR", "CRITICAL"):
+                continue
+            if etype not in type_last_seen or ts > type_last_seen[etype]:
+                type_last_seen[etype] = ts
+
+        open_groups = 0
         resolved_groups = 0
-        open_groups = len(set(
-            ev.get("type", "") for ev in events
-            if ev.get("severity") in ("WARNING", "ERROR", "CRITICAL")
-            and ev.get("timestamp", "") >= today_start
-        ))
-        tracker = _get_tracker()
-        if tracker:
-            try:
-                tracker_summary = tracker.get_summary()
-                resolved_groups = tracker_summary.get("resolved_groups", 0)
-            except Exception:
-                pass
+        for etype, last_ts in type_last_seen.items():
+            is_res, _, _ = _is_resolved(etype, last_ts, resolutions)
+            if is_res:
+                resolved_groups += 1
+            else:
+                open_groups += 1
 
         return ErrorSummaryResponse(
             today_errors=today_errors,
@@ -333,13 +379,10 @@ async def get_error_groups(
         if not events:
             return ErrorGroupsResponse()
 
-        # Çözümlenmiş tipleri al
-        resolved_types: set[str] = set()
-        tracker = _get_tracker()
-        if tracker and hasattr(tracker, "_resolved_types"):
-            resolved_types = tracker._resolved_types
+        # Resolution tablosunu oku (çözümleme zaman damgaları)
+        resolutions = _get_resolution_map()
 
-        # Event'leri type'a göre grupla
+        # DB event'lerini error_type bazında grupla
         groups_map: dict[str, dict] = {}
 
         for ev in events:
@@ -353,18 +396,9 @@ async def get_error_groups(
             if category and cat != category:
                 continue
 
-            # Severity filtresi (zaten _fetch_events_from_db'de uygulandı ama çift kontrol)
+            # Severity filtresi
             if severity and sev != severity:
                 continue
-
-            is_resolved = etype in resolved_types
-
-            # Çözümleme filtresi
-            if resolved is not None:
-                if resolved and not is_resolved:
-                    continue
-                if not resolved and is_resolved:
-                    continue
 
             group_key = etype
 
@@ -377,7 +411,7 @@ async def get_error_groups(
                     "first_seen": ts,
                     "last_seen": ts,
                     "count": 0,
-                    "resolved": is_resolved,
+                    "resolved": False,
                     "resolved_at": None,
                     "resolved_by": "",
                     "event_count": 0,
@@ -399,6 +433,22 @@ async def get_error_groups(
             # En eski first_seen
             if ts < g["first_seen"]:
                 g["first_seen"] = ts
+
+        # Çözümleme durumunu belirle (last_seen vs resolved_at karşılaştır)
+        for g in groups_map.values():
+            is_res, res_at, res_by = _is_resolved(
+                g["error_type"], g["last_seen"], resolutions
+            )
+            g["resolved"] = is_res
+            g["resolved_at"] = res_at
+            g["resolved_by"] = res_by
+
+        # Çözümleme filtresi
+        if resolved is not None:
+            groups_map = {
+                k: g for k, g in groups_map.items()
+                if g["resolved"] == resolved
+            }
 
         # Sıralama: severity → count (desc)
         sorted_groups = sorted(
@@ -501,36 +551,91 @@ async def get_error_trends(
 
 @router.post("/resolve", response_model=ResolveResponse)
 async def resolve_error_group(req: ResolveRequest):
-    """Hata grubunu çözümlendi olarak işaretle."""
-    tracker = _get_tracker()
-    if not tracker:
-        return ResolveResponse(success=False, message="ErrorTracker aktif değil")
+    """Hata grubunu çözümlendi olarak işaretle.
 
-    try:
-        ok = tracker.resolve_group(
-            error_type=req.error_type,
-            message_prefix=req.message_prefix,
-            by=req.resolved_by,
-        )
-        if ok:
-            return ResolveResponse(success=True, message=f"{req.error_type} çözümlendi")
-        return ResolveResponse(success=False, message="Eşleşen hata grubu bulunamadı")
-    except Exception as exc:
-        logger.exception("resolve_error HATASI: %s", exc)
-        return ResolveResponse(success=False, message=str(exc))
+    İki katmanlı: hem DB error_resolutions tablosuna yaz,
+    hem de ErrorTracker bellekten temizle.
+    """
+    now_str = datetime.now().isoformat(timespec="seconds")
+    db = get_db()
+
+    # 1. DB'ye çözümleme kaydı yaz (kalıcı)
+    if db:
+        try:
+            db._execute(
+                """INSERT OR REPLACE INTO error_resolutions
+                   (error_type, resolved_at, resolved_by) VALUES (?, ?, ?)""",
+                (req.error_type, now_str, req.resolved_by),
+            )
+        except Exception as exc:
+            logger.error("resolve DB yazma hatası: %s", exc)
+            return ResolveResponse(success=False, message=str(exc))
+
+    # 2. ErrorTracker bellekten de temizle (varsa)
+    tracker = _get_tracker()
+    if tracker:
+        try:
+            tracker.resolve_group(
+                error_type=req.error_type,
+                message_prefix=req.message_prefix,
+                by=req.resolved_by,
+            )
+        except Exception:
+            pass  # DB'ye yazıldı, tracker opsiyonel
+
+    return ResolveResponse(success=True, message=f"{req.error_type} çözümlendi")
 
 
 @router.post("/resolve-all", response_model=ResolveAllResponse)
 async def resolve_all_errors(req: ResolveRequest | None = None, resolved_by: str = Query("operator")):
-    """Tüm açık hataları çözümle."""
-    tracker = _get_tracker()
-    if not tracker:
-        return ResolveAllResponse(success=False)
+    """Tüm açık hataları çözümle.
 
-    try:
-        by = req.resolved_by if req else resolved_by
-        count = tracker.resolve_all(by=by)
-        return ResolveAllResponse(success=True, resolved_count=count)
-    except Exception as exc:
-        logger.exception("resolve_all HATASI: %s", exc)
-        return ResolveAllResponse(success=False)
+    DB'deki tüm açık error_type'ları resolution tablosuna yaz.
+    """
+    by = req.resolved_by if req else resolved_by
+    now_str = datetime.now().isoformat(timespec="seconds")
+    db = get_db()
+
+    # Açık grupları bul (resolution yok veya last_seen > resolved_at)
+    resolutions = _get_resolution_map()
+    week_start = (datetime.now() - timedelta(days=7)).isoformat()
+    events = _fetch_events_from_db(since=week_start, limit=5000)
+
+    # error_type → last_seen
+    type_last_seen: dict[str, str] = {}
+    for ev in events:
+        etype = ev.get("type", "")
+        ts = ev.get("timestamp", "")
+        if etype not in type_last_seen or ts > type_last_seen[etype]:
+            type_last_seen[etype] = ts
+
+    open_types = []
+    for etype, last_ts in type_last_seen.items():
+        is_res, _, _ = _is_resolved(etype, last_ts, resolutions)
+        if not is_res:
+            open_types.append(etype)
+
+    # DB'ye yaz
+    resolved_count = 0
+    if db and open_types:
+        try:
+            for etype in open_types:
+                db._execute(
+                    """INSERT OR REPLACE INTO error_resolutions
+                       (error_type, resolved_at, resolved_by) VALUES (?, ?, ?)""",
+                    (etype, now_str, by),
+                )
+                resolved_count += 1
+        except Exception as exc:
+            logger.error("resolve_all DB hatası: %s", exc)
+            return ResolveAllResponse(success=False)
+
+    # ErrorTracker bellekten de temizle
+    tracker = _get_tracker()
+    if tracker:
+        try:
+            tracker.resolve_all(by=by)
+        except Exception:
+            pass
+
+    return ResolveAllResponse(success=True, resolved_count=resolved_count)

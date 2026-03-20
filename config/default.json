@@ -23,7 +23,7 @@
     "consecutive_loss_limit": 3,
     "cooldown_hours": 4,
     "fake_signal_threshold": 5,
-    "baseline_date": "2026-03-10T13:01:00",
+    "baseline_date": "2026-03-19 00:00",
     "sltp_max_retries": 3,
     "close_max_retries": 3
   },

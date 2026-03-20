@@ -7,13 +7,14 @@
  *   Alt:    Son Otomatik İşlemler (tam genişlik)
  *
  * Veri kaynakları:
- *   REST:  getStatus, getTop5, getPositions, getTrades (10sn poll)
+ *   REST:  getStatus, getTop5, getPositions, getTrades, getOgulActivity (30sn poll)
+ *   WS:   connectLiveWS → status + position gerçek zamanlı (2sn push)
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   getStatus, getTop5, getPositions, getTrades, reactivateSymbols,
-  getOgulActivity,
+  getOgulActivity, connectLiveWS,
 } from '../services/api';
 import { formatMoney, formatPrice, pnlClass, elapsed } from '../utils/formatters';
 
@@ -65,6 +66,7 @@ export default function AutoTrading() {
     active_strategies: [], adx_value: 0,
   });
   const [loading, setLoading] = useState(true);
+  const wsRef = useRef(null);
 
   const fetchAll = useCallback(async () => {
     const [st, t5, pos, trades, ogul] = await Promise.all([
@@ -95,9 +97,41 @@ export default function AutoTrading() {
 
   useEffect(() => {
     fetchAll();
-    const iv = setInterval(fetchAll, 10000);
+    const iv = setInterval(fetchAll, 30000); // WS aradaki boşluğu kapattığı için 30sn yeterli
     return () => clearInterval(iv);
   }, [fetchAll]);
+
+  // ── WebSocket canlı veri (status + position 2sn push) ───────────
+  useEffect(() => {
+    const { close } = connectLiveWS(
+      (messages) => {
+        const arr = Array.isArray(messages) ? messages : [messages];
+        for (const msg of arr) {
+          if (msg.type === 'status') {
+            setStatus((prev) => ({
+              ...prev,
+              engine_running: msg.engine_running ?? prev.engine_running,
+              regime: msg.regime || prev.regime,
+              regime_confidence: msg.regime_confidence ?? prev.regime_confidence,
+              kill_switch_level: msg.kill_switch_level ?? prev.kill_switch_level,
+              risk_multiplier: msg.risk_multiplier ?? prev.risk_multiplier,
+            }));
+          }
+          if (msg.type === 'position') {
+            const allPos = msg.positions || [];
+            setAutoPositions(allPos.filter((p) => p.tur === 'Otomatik'));
+          }
+        }
+      },
+      null, // onError
+      null, // onStateChange
+    );
+
+    wsRef.current = close;
+    return () => {
+      if (wsRef.current) wsRef.current();
+    };
+  }, []);
 
   // ── Hesaplamalar ─────────────────────────────────────────────────
   const regime = status.regime || 'TREND';

@@ -699,6 +699,21 @@ UstatBrainResponse.model_rebuild()
 #  SETTINGS — Risk Baseline Date
 # ═══════════════════════════════════════════════════════════════════
 
+class NotificationPrefsRequest(BaseModel):
+    """POST /api/settings/notification-prefs — Bildirim tercihlerini kaydet."""
+    soundEnabled: bool = True
+    killSwitchAlert: bool = True
+    tradeAlert: bool = True
+    drawdownAlert: bool = True
+    regimeAlert: bool = False
+
+
+class NotificationPrefsResponse(BaseModel):
+    """GET/POST /api/settings/notification-prefs response."""
+    success: bool = True
+    prefs: dict = {}
+
+
 class RiskBaselineGetResponse(BaseModel):
     """GET /api/settings/risk-baseline — Mevcut risk baseline tarihi."""
     baseline_date: str = ""

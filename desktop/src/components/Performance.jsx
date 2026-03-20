@@ -237,8 +237,8 @@ export default function Performance() {
 
   // ── Win Rate Trend (20-trade hareketli ortalama) ────────────────
   const winRateTrend = useMemo(() => {
-    if (trades.length < 5) return [];
     const window = 20;
+    if (trades.length < window) return [];
     const result = [];
     const sorted = [...trades].reverse();
     for (let i = window - 1; i < sorted.length; i++) {

@@ -139,10 +139,14 @@ RISK_BASELINE_DATE = _DEFAULT_RISK_BASELINE_DATE      # data_pipeline uyumu
 def _baseline_to_iso(baseline: str) -> str:
     """Baseline string'ini ISO karşılaştırma formatına çevir.
 
-    "2026-03-10"       → "2026-03-10T00:00:00"
-    "2026-03-10 12:00" → "2026-03-10T12:00:00"
+    "2026-03-10"              → "2026-03-10T00:00:00"
+    "2026-03-10 12:00"        → "2026-03-10T12:00:00"
+    "2026-03-10T13:01:00"     → "2026-03-10T13:01:00"  (zaten ISO)
     """
     baseline = baseline.strip()
+    if "T" in baseline:
+        # Zaten ISO formatında — olduğu gibi döndür
+        return baseline
     if " " in baseline:
         # "YYYY-MM-DD HH:MM" → "YYYY-MM-DDThh:mm:00"
         parts = baseline.split(" ", 1)
@@ -345,6 +349,9 @@ class Baba:
 
         # v13.0: "izin verdi" olay kaydı dedup (5 dk'da 1 kez)
         self._last_risk_allowed_log: datetime | None = None
+
+        # Volume spike cooldown — sembol başına son uyarı zamanı (saniye)
+        self._volume_spike_cooldowns: dict[str, float] = {}
 
     # ── public: ana cycle ────────────────────────────────────────────
     def run_cycle(self, pipeline=None) -> Regime:
@@ -894,7 +901,13 @@ class Baba:
             return None
 
         mult = current_vol / avg_vol
-        if mult >= VOLUME_SPIKE_MULT:
+        if mult > VOLUME_SPIKE_MULT:
+            import time as _time_mod
+            now = _time_mod.time()
+            last = self._volume_spike_cooldowns.get(symbol, 0.0)
+            if now - last < 60.0:  # 60 saniyelik cooldown — flood önleme
+                return None
+            self._volume_spike_cooldowns[symbol] = now
             return EarlyWarning(
                 warning_type="VOLUME_SPIKE",
                 symbol=symbol,

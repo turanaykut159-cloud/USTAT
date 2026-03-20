@@ -15,7 +15,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { getAccount, getStatus, getEvents, getRiskBaseline, updateRiskBaseline } from '../services/api';
+import { getAccount, getStatus, getEvents, getRiskBaseline, updateRiskBaseline, updateNotificationPrefs } from '../services/api';
 
 // ── Sabitler ──────────────────────────────────────────────────────
 
@@ -151,6 +151,7 @@ export default function Settings() {
     setPrefs((prev) => {
       const next = { ...prev, [key]: !prev[key] };
       localStorage.setItem('ustat_notification_prefs', JSON.stringify(next));
+      updateNotificationPrefs(next).catch(() => {/* sessiz hata — localStorage zaten güncellendi */});
       return next;
     });
   };

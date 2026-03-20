@@ -156,7 +156,7 @@ export default function ErrorTracker() {
         getErrorGroups({
           category: filterCategory || undefined,
           severity: filterSeverity || undefined,
-          resolved: filterResolved || undefined,
+          resolved: filterResolved ? undefined : false,
         }),
         getErrorTrends({ period: trendPeriod }),
       ]);

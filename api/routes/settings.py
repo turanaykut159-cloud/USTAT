@@ -15,10 +15,21 @@ from fastapi import APIRouter
 
 from api.deps import get_baba, get_db, get_engine
 from api.schemas import (
+    NotificationPrefsRequest,
+    NotificationPrefsResponse,
     RiskBaselineGetResponse,
     RiskBaselineUpdateRequest,
     RiskBaselineUpdateResponse,
 )
+
+# Bildirim tercihleri bellekte tutulur (process süresi boyunca kalıcı)
+_notification_prefs: dict = {
+    "soundEnabled": True,
+    "killSwitchAlert": True,
+    "tradeAlert": True,
+    "drawdownAlert": True,
+    "regimeAlert": False,
+}
 
 logger = logging.getLogger("ustat.api.routes.settings")
 
@@ -134,3 +145,17 @@ async def update_risk_baseline(req: RiskBaselineUpdateRequest):
         old_date=old_date,
         new_date=new_date,
     )
+
+
+@router.get("/settings/notification-prefs", response_model=NotificationPrefsResponse)
+async def get_notification_prefs():
+    """Mevcut bildirim tercihlerini döndür."""
+    return NotificationPrefsResponse(success=True, prefs=dict(_notification_prefs))
+
+
+@router.post("/settings/notification-prefs", response_model=NotificationPrefsResponse)
+async def update_notification_prefs(req: NotificationPrefsRequest):
+    """Bildirim tercihlerini güncelle."""
+    _notification_prefs.update(req.model_dump())
+    logger.info(f"Bildirim tercihleri güncellendi: {_notification_prefs}")
+    return NotificationPrefsResponse(success=True, prefs=dict(_notification_prefs))
