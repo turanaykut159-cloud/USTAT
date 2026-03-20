@@ -116,7 +116,7 @@ dist/assets/index-uS1HEHY_.js 788.74 kB │ gzip: 222.97 kB
 ## Commit Bilgisi
 
 **Branch:** main
-**Commit hash:** *(git commit sonrası güncellenecek)*
+**Commit hash:** `ca9ba30`
 **Commit mesajı:** `fix: v5.6 — 9 bug düzeltmesi (3 KRİTİK, 3 YÜKSEK, 3 ORTA)`
 
 ## Notlar
