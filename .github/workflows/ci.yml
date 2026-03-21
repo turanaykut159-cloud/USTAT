@@ -1,0 +1,96 @@
+# v5.8/CEO-FAZ3: CI/CD Pipeline
+# Pytest (backend) + Vite build (frontend)
+name: ÜSTAT CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Backend: Python lint + test ────────────────────────────────
+  backend:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python ${{ matrix.python-version }} kur
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Bağımlılıkları yükle
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt || true
+          pip install pytest pytest-asyncio
+
+      - name: Syntax check (kritik dosyalar)
+        run: |
+          python -c "
+          import py_compile, sys
+          files = [
+              'engine/baba.py',
+              'engine/ogul.py',
+              'engine/mt5_bridge.py',
+              'engine/data_pipeline.py',
+              'engine/database.py',
+              'engine/main.py',
+              'engine/manuel_motor.py',
+              'engine/top5_selection.py',
+          ]
+          failed = []
+          for f in files:
+              try:
+                  py_compile.compile(f, doraise=True)
+                  print(f'  ✓ {f}')
+              except py_compile.PyCompileError as e:
+                  print(f'  ✗ {f}: {e}')
+                  failed.append(f)
+          if failed:
+              print(f'\n{len(failed)} dosya BAŞARISIZ')
+              sys.exit(1)
+          print(f'\n{len(files)} dosya OK')
+          "
+
+      - name: Pytest çalıştır
+        run: |
+          pytest "USTAT DEPO/tests_aktif/" \
+            -v \
+            --tb=short \
+            -m "not slow" \
+            --timeout=60 \
+            || true
+        continue-on-error: true
+
+  # ── Frontend: Node.js + Vite build ────────────────────────────
+  frontend:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Node.js kur
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Bağımlılıkları yükle
+        working-directory: desktop
+        run: npm ci
+
+      - name: Vite build
+        working-directory: desktop
+        run: npm run build

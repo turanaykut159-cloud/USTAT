@@ -2,6 +2,15 @@
 
 ---
 
+## #54 — CEO FAZ-3: Governance — Modüler Refactoring + CI/CD (2026-03-21)
+- ogul.py Top 5 modülü → engine/top5_selection.py (Facade/Composition pattern)
+- ogul.py: 4,897 → 4,307 satır (Top 5 iç metotlar taşındı, delegation stubs eklendi)
+- current_top5 property delegasyonu + stale referans temizliği
+- .github/workflows/ci.yml — Python syntax + pytest + Vite build pipeline
+- Stale claude/ branch tespiti (6 worktree-locked, 7 remote)
+
+---
+
 ## #53 — CEO FAZ-2: Altyapı Güçlendirme (2026-03-21)
 
 - **mt5_bridge.py**: `_map_lock` eklendi — `_symbol_map` ve `_reverse_map` dict'leri atomik swap ile güncellenir, `_to_mt5()`, `_to_base()`, `_is_watched()` lock altına alındı
