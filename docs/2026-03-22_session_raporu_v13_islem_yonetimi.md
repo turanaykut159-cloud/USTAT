@@ -2,7 +2,7 @@
 
 **Tarih:** 2026-03-22
 **Commit:** e6fed7e
-**Versiyon:** v5.6 (değişmedi, oran %2.2 < %10)
+**Versiyon:** v5.7 (değişmedi, oran %2.2 < %10)
 
 ---
 
@@ -76,7 +76,7 @@ Dünya standartlarında kanıtlanmış 3 trade management sistemiyle (Turtle Tra
 
 - Değişiklik oranı: (905 + 357) / 57113 = %2.2
 - %10'un altında → versiyon artışı gerekmedi
-- Mevcut versiyon: v5.6
+- Mevcut versiyon: v5.7
 
 ## Build Sonucu
 
