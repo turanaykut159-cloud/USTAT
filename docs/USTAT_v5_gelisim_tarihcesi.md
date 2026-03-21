@@ -2,6 +2,28 @@
 
 ---
 
+## #50 — OĞUL Tam Mimari Dokümantasyonu (2026-03-21)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-21 |
+| **Versiyon** | 5.7.0 (değişiklik yok) |
+| **Neden** | OĞUL motorunun 4.879 satır, 52 fonksiyonluk tam mimarisi hiçbir yerde yazılı değildi. Geliştirici ve kullanıcı için kapsamlı referans dokümanı oluşturuldu. |
+| **Tetikleyen** | Kullanıcı talebi: "OĞUL'UN BANA TAM MİMARİSİNİ ÇIKARTIR MISIN. BU OĞUL KİM TANIMAK İSTİYORUM." |
+
+### Oluşturulan
+
+| Dosya | İçerik |
+|-------|--------|
+| `docs/OGUL_Mimari_v5.7.docx` | 11 bölümlük profesyonel DOCX: Kimlik, Çift Döngü Mimarisi, Sinyal Pipeline, SE2 Kaynakları, Rejim-Bazlı Eşikler, State Machine, Pozisyon Yönetimi, Oylama Sistemi, BABA Entegrasyonu, Top 5 Seçimi, v5.7 Değişiklikleri |
+
+### Notlar
+- Sadece dokümantasyon eklenmesi, engine/API/UI kodu değişmedi
+- Versiyon artırımı gerekmez
+- Desktop build gerekmez
+
+---
+
 ## #49 — M5 Sinyal Tetikleme: M15→M5 Timeframe Geçişi (2026-03-21)
 
 | Alan | Detay |
