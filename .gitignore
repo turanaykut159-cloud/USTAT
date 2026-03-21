@@ -75,6 +75,11 @@ test_trade.py
 # Claude (yerel context)
 .claude/
 
+# Pytest
+.pytest_cache/
+htmlcov/
+.coverage
+
 # Cursor (IDE context)
 .cursor/
 

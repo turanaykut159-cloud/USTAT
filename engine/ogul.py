@@ -117,7 +117,9 @@ CONTRACT_SIZE:   float = 100.0      # VİOP çarpanı (varsayılan)
 ORDER_TIMEOUT_SEC: int       = 15      # v14: 5→15 (C sınıfı düşük likidite)
 MAX_SLIPPAGE_ATR_MULT: float = 0.5     # max slippage = 0.5 × ATR
 MAX_LOT_PER_CONTRACT: float  = 1.0     # test süreci: kontrat başına max 1 lot
-MARGIN_RESERVE_PCT: float    = 0.20    # test süreci: %20 teminat ayırma
+# v5.8/CEO-FAZ2: Varsayılan değer — config'den override edilir (Ogul.__init__).
+# config/default.json → engine.margin_reserve_pct
+MARGIN_RESERVE_PCT_DEFAULT: float = 0.20
 MAX_CONCURRENT: int          = 5       # test süreci: eş zamanlı maks 5 pozisyon
 TRADING_OPEN: time           = time(9, 40)   # işlem başlangıç (açılıştan 10dk sonra)
 TRADING_CLOSE: time          = time(17, 50)  # işlem bitiş (kapanıştan 25dk önce)
@@ -378,6 +380,10 @@ class Ogul:
         self.risk_params = risk_params or RiskParams()
         self.active_trades: dict[str, Trade] = {}
         self._trade_lock = threading.Lock()  # Pozisyon limiti atomik kontrolü
+        # v5.8/CEO-FAZ2: margin_reserve_pct config'den okunuyor (hardcoded değil)
+        self._margin_reserve_pct: float = float(
+            config.get("engine.margin_reserve_pct", MARGIN_RESERVE_PCT_DEFAULT)
+        )
         self.last_signals: dict[str, str] = {}  # symbol → "BUY"|"SELL"|"BEKLE"
         self.h_engine: Any | None = None  # HEngine referansı (main.py tarafından atanır)
         self.manuel_motor: Any | None = None  # ManuelMotor referansı (main.py tarafından atanır)
@@ -1838,11 +1844,12 @@ class Ogul:
 
         equity = account.equity
         free_margin = account.free_margin
-        if equity <= 0 or free_margin < equity * MARGIN_RESERVE_PCT:
+        # v5.8/CEO-FAZ2: config'den okunan margin_reserve_pct kullanılıyor
+        if equity <= 0 or free_margin < equity * self._margin_reserve_pct:
             trade.state = TradeState.CANCELLED
             trade.cancel_reason = (
                 f"margin_insufficient (free={free_margin:.0f}, "
-                f"reserve={equity * MARGIN_RESERVE_PCT:.0f})"
+                f"reserve={equity * self._margin_reserve_pct:.0f})"
             )
             self._log_cancelled_trade(trade)
             return

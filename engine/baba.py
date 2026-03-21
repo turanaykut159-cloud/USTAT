@@ -355,6 +355,11 @@ class Baba:
         self._pending_regime: RegimeType | None = None      # Aday rejim (henüz onaylanmamış)
         self._pending_regime_count: int = 0                 # Aday kaç cycle devam etti
 
+        # v5.8/CEO-FAZ2: Margin reserve kontrolü — config'den oku
+        self._margin_reserve_pct: float = float(
+            self._config.get("engine.margin_reserve_pct", 0.20)
+        )
+
         # v13.0: "izin verdi" olay kaydı dedup (5 dk'da 1 kez)
         self._last_risk_allowed_log: datetime | None = None
 
@@ -1405,6 +1410,26 @@ class Baba:
             verdict.can_trade = False
             verdict.reason = f"MT5 pozisyon sorgusu başarısız: {exc} (fail-safe kilitleme)"
             return verdict
+
+        # 9.7 v5.8/CEO-FAZ2: Margin reserve kontrolü — BABA seviyesinde
+        # Config'deki margin_reserve_pct (%20) serbest teminat kontrolü.
+        # Daha önce sadece OĞUL/ManuelMotor emir seviyesinde kontrol ediyordu,
+        # şimdi BABA risk seviyesinde de kontrol ediyor (çift katmanlı güvenlik).
+        if self._mt5 is not None:
+            try:
+                _account = self._mt5.get_account_info()
+                if _account is not None and _account.equity > 0:
+                    if _account.free_margin < _account.equity * self._margin_reserve_pct:
+                        verdict.can_trade = False
+                        verdict.reason = (
+                            f"Yetersiz serbest teminat — "
+                            f"free={_account.free_margin:.0f} < "
+                            f"reserve={_account.equity * self._margin_reserve_pct:.0f} "
+                            f"(%{self._margin_reserve_pct*100:.0f} of equity)"
+                        )
+                        return verdict
+            except Exception as exc:
+                logger.warning(f"Margin reserve kontrolü başarısız: {exc} — devam ediliyor")
 
         # 10. Cooldown (üst üste kayıp)
         if self._is_in_cooldown():

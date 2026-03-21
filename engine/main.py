@@ -948,6 +948,16 @@ class Engine:
                     f"DB temizlik: bars={bars_del}, events={events_del}, "
                     f"snapshots={snaps_del}"
                 )
+
+            # v5.8/CEO-FAZ2: Trade arşivleme + WAL checkpoint
+            # 90 günden eski kapanmış trade'leri archive.db'ye taşı
+            maintenance = self.db.run_maintenance(archive_days=90)
+            if maintenance["archived_trades"] > 0:
+                logger.info(
+                    f"DB bakım: {maintenance['archived_trades']} trade arşivlendi, "
+                    f"checkpoint={'OK' if maintenance['wal_checkpoint'] else 'FAIL'}, "
+                    f"vacuum={'OK' if maintenance['vacuum'] else 'SKIP'}"
+                )
         except Exception as exc:
             logger.error(f"DB temizlik hatası: {exc}")
 

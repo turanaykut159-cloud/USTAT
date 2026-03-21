@@ -58,7 +58,8 @@ ATR_PERIOD: int = 14
 MIN_BARS_M15: int = 60
 CONTRACT_SIZE: float = 100.0
 MAX_LOT_PER_CONTRACT: float = 1.0
-MARGIN_RESERVE_PCT: float = 0.20
+# v5.8/CEO-FAZ2: Varsayılan — config'den override edilir (ManuelMotor.__init__)
+MARGIN_RESERVE_PCT_DEFAULT: float = 0.20
 MAX_CONCURRENT_MANUAL: int = 3
 TRADING_OPEN: time = time(9, 40)
 TRADING_CLOSE: time = time(17, 50)
@@ -98,6 +99,11 @@ class ManuelMotor:
 
         # Kendi aktif işlem sözlüğü (OĞUL'dan AYRI)
         self.active_trades: dict[str, Trade] = {}
+
+        # v5.8/CEO-FAZ2: margin_reserve_pct config'den okunuyor
+        self._margin_reserve_pct: float = float(
+            config.get("engine.margin_reserve_pct", MARGIN_RESERVE_PCT_DEFAULT)
+        )
 
         # Cross-motor referansları (Engine.__init__ tarafından atanır)
         self.ogul: Any | None = None
@@ -215,7 +221,8 @@ class ManuelMotor:
         if account is None:
             result["reason"] = "Hesap bilgisi alınamadı"
             return result
-        if account.free_margin < account.equity * MARGIN_RESERVE_PCT:
+        # v5.8/CEO-FAZ2: config'den okunan margin_reserve_pct
+        if account.free_margin < account.equity * self._margin_reserve_pct:
             result["reason"] = (
                 f"Yetersiz teminat (serbest={account.free_margin:.0f})"
             )

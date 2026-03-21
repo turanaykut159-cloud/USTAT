@@ -101,6 +101,9 @@ class MT5Bridge:
         self._connected: bool = False
         self._last_heartbeat: float = 0.0
 
+        # v5.8/CEO-FAZ2: Sembol eşleme kilidi — _resolve_symbols() sırasında
+        # diğer thread'lerin dict'ten okuma yapmasını engeller.
+        self._map_lock: threading.Lock = threading.Lock()
         # Dinamik sembol eşleme: base → MT5 gerçek ad (ör. F_THYAO → F_THYAO0226)
         self._symbol_map: dict[str, str] = {}
         # Ters eşleme: MT5 gerçek ad → base (ör. F_THYAO0226 → F_THYAO)
@@ -113,6 +116,9 @@ class MT5Bridge:
         self._last_modify_error: dict[str, Any] = {}
         # Emir gönderimi tek seferde bir çağrı (manuel + engine race önlemi)
         self._order_lock: threading.Lock = threading.Lock()
+        # v5.8/CEO-FAZ2: Tüm MT5 yazma işlemleri (close, modify) için kilit
+        # send_order zaten _order_lock ile korunuyor, ama close/modify korunmuyordu.
+        self._write_lock: threading.Lock = threading.Lock()
         # Sistem sağlığı metrikleri (Engine tarafından set edilir)
         self._health: Any = None
 
@@ -271,8 +277,10 @@ class MT5Bridge:
             logger.warning("MT5 sembol listesi alınamadı, eşleme yapılamıyor")
             return
 
-        self._symbol_map.clear()
-        self._reverse_map.clear()
+        # v5.8/CEO-FAZ2: Atomik map güncellemesi — önce geçici dict oluştur,
+        # sonra tek lock altında swap et (okuyucular eski map ile devam edebilir).
+        new_symbol_map: dict[str, str] = {}
+        new_reverse_map: dict[str, str] = {}
 
         for base in WATCHED_SYMBOLS:
             # Base ile başlayan tüm MT5 sembollerini bul
@@ -287,8 +295,8 @@ class MT5Bridge:
                 exact = [s for s in all_symbols if s.name.upper() == base.upper()]
                 if exact:
                     mt5_name = exact[0].name
-                    self._symbol_map[base] = mt5_name
-                    self._reverse_map[mt5_name] = base
+                    new_symbol_map[base] = mt5_name
+                    new_reverse_map[mt5_name] = base
                     logger.info(f"Sembol eşleme: {base} → {mt5_name} (tam eşleşme)")
                 else:
                     logger.warning(f"Sembol bulunamadı: {base}")
@@ -308,8 +316,8 @@ class MT5Bridge:
                 chosen = min(candidates, key=lambda s: len(s.name))
 
             mt5_name = chosen.name
-            self._symbol_map[base] = mt5_name
-            self._reverse_map[mt5_name] = base
+            new_symbol_map[base] = mt5_name
+            new_reverse_map[mt5_name] = base
             logger.info(f"Sembol eşleme: {base} → {mt5_name} (visible={chosen.visible})")
 
         # USDTRY — BABA şok kontrolü için gerekli
@@ -320,10 +328,15 @@ class MT5Bridge:
         ]
         if usdtry_candidates:
             usdtry_sym = min(usdtry_candidates, key=lambda s: len(s.name))
-            self._symbol_map["USDTRY"] = usdtry_sym.name
+            new_symbol_map["USDTRY"] = usdtry_sym.name
             logger.info(f"Sembol eşleme: USDTRY → {usdtry_sym.name}")
         else:
             logger.warning("USDTRY sembolü bulunamadı — şok kontrolü pasif kalacak")
+
+        # v5.8/CEO-FAZ2: Atomik swap — tüm map'ler hazır, tek lock ile değiştir
+        with self._map_lock:
+            self._symbol_map = new_symbol_map
+            self._reverse_map = new_reverse_map
 
         resolved = len(self._symbol_map)
         total = len(WATCHED_SYMBOLS) + 1  # +1 USDTRY
@@ -333,19 +346,26 @@ class MT5Bridge:
         """Base sembol adını MT5 gerçek adına çevir.
 
         Eşleme yoksa base'in kendisini döndürür (geriye uyumluluk).
+        v5.8/CEO-FAZ2: _map_lock ile thread-safe.
         """
-        return self._symbol_map.get(base_symbol, base_symbol)
+        with self._map_lock:
+            return self._symbol_map.get(base_symbol, base_symbol)
 
     def _to_base(self, mt5_symbol: str) -> str | None:
         """MT5 sembol adını base'e çevir.
 
         Eşleme yoksa None döndürür (izlenmeyen sembol).
+        v5.8/CEO-FAZ2: _map_lock ile thread-safe.
         """
-        return self._reverse_map.get(mt5_symbol)
+        with self._map_lock:
+            return self._reverse_map.get(mt5_symbol)
 
     def _is_watched(self, mt5_symbol: str) -> bool:
-        """MT5 sembolü izlenen kontratlardan biri mi?"""
-        return mt5_symbol in self._reverse_map
+        """MT5 sembolü izlenen kontratlardan biri mi?
+        v5.8/CEO-FAZ2: _map_lock ile thread-safe.
+        """
+        with self._map_lock:
+            return mt5_symbol in self._reverse_map
 
     # ── Reconnect yardımcı ───────────────────────────────────────────
     def _ensure_connection(self) -> bool:
@@ -701,7 +721,7 @@ class MT5Bridge:
         self._last_order_error = {}
         _order_start = _time.perf_counter()
 
-        with self._order_lock:
+        with self._order_lock, self._write_lock:
             if not self._ensure_connection():
                 self._last_order_error = {
                     "reason": "MT5 bağlantısı kurulamadı",
@@ -1072,6 +1092,8 @@ class MT5Bridge:
         kapatılır (partial close). Bu, kullanıcının dışarıdan eklediği
         lotların engine tarafından kapatılmasını önler.
 
+        v5.8/CEO-FAZ2: _write_lock ile thread-safe.
+
         Args:
             ticket: Pozisyon ticket numarası.
             expected_volume: Engine'in yönettiği lot miktarı (opsiyonel).
@@ -1080,88 +1102,89 @@ class MT5Bridge:
         Returns:
             Kapanış sonuç sözlüğü veya None.
         """
-        if not self._ensure_connection():
-            return None
-
-        try:
-            positions = self._safe_call(mt5.positions_get, ticket=ticket)
-            if positions is None or len(positions) == 0:
-                logger.error(f"Pozisyon bulunamadı: ticket={ticket}")
+        with self._write_lock:
+            if not self._ensure_connection():
                 return None
 
-            pos = positions[0]
-            symbol = pos.symbol
-            lot = pos.volume
+            try:
+                positions = self._safe_call(mt5.positions_get, ticket=ticket)
+                if positions is None or len(positions) == 0:
+                    logger.error(f"Pozisyon bulunamadı: ticket={ticket}")
+                    return None
 
-            # ── Netting hacim koruması ───────────────────────────────
-            if expected_volume is not None and lot != expected_volume:
-                logger.warning(
-                    f"Hacim uyuşmazlığı [ticket={ticket} {symbol}]: "
-                    f"MT5={lot} lot, engine={expected_volume} lot — "
-                    f"sadece engine hacmi kapatılacak (partial close)"
+                pos = positions[0]
+                symbol = pos.symbol
+                lot = pos.volume
+
+                # ── Netting hacim koruması ───────────────────────────────
+                if expected_volume is not None and lot != expected_volume:
+                    logger.warning(
+                        f"Hacim uyuşmazlığı [ticket={ticket} {symbol}]: "
+                        f"MT5={lot} lot, engine={expected_volume} lot — "
+                        f"sadece engine hacmi kapatılacak (partial close)"
+                    )
+                    # Kullanıcı dışarıdan lot eklemiş — sadece kendi lotumuz kapatılır
+                    return self.close_position_partial(ticket, expected_volume)
+
+                # Ters yön
+                if pos.type == mt5.ORDER_TYPE_BUY:
+                    close_type = mt5.ORDER_TYPE_SELL
+                    tick = self._safe_call(mt5.symbol_info_tick, symbol)
+                    price = tick.bid if tick else 0.0
+                else:
+                    close_type = mt5.ORDER_TYPE_BUY
+                    tick = self._safe_call(mt5.symbol_info_tick, symbol)
+                    price = tick.ask if tick else 0.0
+
+                if price == 0.0:
+                    logger.error(
+                        f"Kapanış fiyatı alınamadı [{symbol}]: {mt5.last_error()}"
+                    )
+                    return None
+
+                request: dict[str, Any] = {
+                    "action": mt5.TRADE_ACTION_DEAL,
+                    "symbol": symbol,
+                    "volume": lot,
+                    "type": close_type,
+                    "price": price,
+                    "position": ticket,
+                    "type_filling": mt5.ORDER_FILLING_IOC,
+                    "comment": "USTAT_CLOSE",
+                }
+
+                logger.info(
+                    f"Pozisyon kapatılıyor: ticket={ticket}, "
+                    f"{symbol} {lot} lot @ {price:.4f}"
                 )
-                # Kullanıcı dışarıdan lot eklemiş — sadece kendi lotumuz kapatılır
-                return self.close_position_partial(ticket, expected_volume)
 
-            # Ters yön
-            if pos.type == mt5.ORDER_TYPE_BUY:
-                close_type = mt5.ORDER_TYPE_SELL
-                tick = self._safe_call(mt5.symbol_info_tick, symbol)
-                price = tick.bid if tick else 0.0
-            else:
-                close_type = mt5.ORDER_TYPE_BUY
-                tick = self._safe_call(mt5.symbol_info_tick, symbol)
-                price = tick.ask if tick else 0.0
+                result = self._safe_call(mt5.order_send, request, timeout=15.0)
+                if result is None:
+                    # Fix Y10: CRITICAL — pozisyon hâlâ açık, manuel müdahale gerekebilir
+                    logger.critical(
+                        f"POZİSYON KAPATILAMADI [{ticket}]: order_send None döndü, "
+                        f"last_error={mt5.last_error()} — POZİSYON HÂLÂ AÇIK!"
+                    )
+                    return None
 
-            if price == 0.0:
-                logger.error(
-                    f"Kapanış fiyatı alınamadı [{symbol}]: {mt5.last_error()}"
+                if result.retcode != mt5.TRADE_RETCODE_DONE:
+                    # Fix Y10: CRITICAL — pozisyon hâlâ açık, manuel müdahale gerekebilir
+                    logger.critical(
+                        f"POZİSYON KAPATILAMADI [{ticket}]: retcode={result.retcode}, "
+                        f"comment={result.comment} — POZİSYON HÂLÂ AÇIK!"
+                    )
+                    return None
+
+                close_result = result._asdict()
+                logger.info(
+                    f"Pozisyon kapatıldı: ticket={ticket}, "
+                    f"order={close_result.get('order')}"
                 )
+                return close_result
+
+            except Exception as exc:
+                logger.critical(f"POZİSYON KAPATILAMADI [ticket={ticket}]: {exc} — POZİSYON HÂLÂ AÇIK!")
                 return None
-
-            request: dict[str, Any] = {
-                "action": mt5.TRADE_ACTION_DEAL,
-                "symbol": symbol,
-                "volume": lot,
-                "type": close_type,
-                "price": price,
-                "position": ticket,
-                "type_filling": mt5.ORDER_FILLING_IOC,
-                "comment": "USTAT_CLOSE",
-            }
-
-            logger.info(
-                f"Pozisyon kapatılıyor: ticket={ticket}, "
-                f"{symbol} {lot} lot @ {price:.4f}"
-            )
-
-            result = self._safe_call(mt5.order_send, request, timeout=15.0)
-            if result is None:
-                # Fix Y10: CRITICAL — pozisyon hâlâ açık, manuel müdahale gerekebilir
-                logger.critical(
-                    f"POZİSYON KAPATILAMADI [{ticket}]: order_send None döndü, "
-                    f"last_error={mt5.last_error()} — POZİSYON HÂLÂ AÇIK!"
-                )
-                return None
-
-            if result.retcode != mt5.TRADE_RETCODE_DONE:
-                # Fix Y10: CRITICAL — pozisyon hâlâ açık, manuel müdahale gerekebilir
-                logger.critical(
-                    f"POZİSYON KAPATILAMADI [{ticket}]: retcode={result.retcode}, "
-                    f"comment={result.comment} — POZİSYON HÂLÂ AÇIK!"
-                )
-                return None
-
-            close_result = result._asdict()
-            logger.info(
-                f"Pozisyon kapatıldı: ticket={ticket}, "
-                f"order={close_result.get('order')}"
-            )
-            return close_result
-
-        except Exception as exc:
-            logger.critical(f"POZİSYON KAPATILAMADI [ticket={ticket}]: {exc} — POZİSYON HÂLÂ AÇIK!")
-            return None
 
     # ── close_position_partial ─────────────────────────────────────────
     def close_position_partial(
@@ -1289,178 +1312,171 @@ class MT5Bridge:
 
         Returns:
             Değiştirme sonuç sözlüğü veya None.
-        """
-        if not self._ensure_connection():
-            return None
 
-        try:
-            positions = self._safe_call(mt5.positions_get, ticket=ticket)
-            if positions is None or len(positions) == 0:
-                logger.error(f"Pozisyon bulunamadı (modify): ticket={ticket}")
+        v5.8/CEO-FAZ2: _write_lock ile thread-safe.
+        """
+        # v5.8/CEO-FAZ2: modify de write_lock altına alındı
+        with self._write_lock:
+            if not self._ensure_connection():
                 return None
 
-            pos = positions[0]
-            new_sl = sl if sl is not None else pos.sl
-            new_tp = tp if tp is not None else pos.tp
+            try:
+                positions = self._safe_call(mt5.positions_get, ticket=ticket)
+                if positions is None or len(positions) == 0:
+                    logger.error(f"Pozisyon bulunamadı (modify): ticket={ticket}")
+                    return None
 
-            # tick_size'a yuvarla (send_order ile aynı mantık)
-            sym_info = self._safe_call(mt5.symbol_info, pos.symbol)
-            if sym_info is not None:
-                tick_size = getattr(sym_info, "trade_tick_size", 0) or 0
-                if tick_size <= 0:
-                    tick_size = getattr(sym_info, "point", 0) or 0
-                if tick_size > 0:
-                    new_sl = (
-                        round(new_sl / tick_size) * tick_size
-                        if new_sl > 0 else 0.0
-                    )
-                    new_tp = (
-                        round(new_tp / tick_size) * tick_size
-                        if new_tp > 0 else 0.0
-                    )
+                pos = positions[0]
+                new_sl = sl if sl is not None else pos.sl
+                new_tp = tp if tp is not None else pos.tp
+
+                # tick_size'a yuvarla (send_order ile aynı mantık)
+                sym_info = self._safe_call(mt5.symbol_info, pos.symbol)
+                if sym_info is not None:
+                    tick_size = getattr(sym_info, "trade_tick_size", 0) or 0
+                    if tick_size <= 0:
+                        tick_size = getattr(sym_info, "point", 0) or 0
+                    if tick_size > 0:
+                        new_sl = (
+                            round(new_sl / tick_size) * tick_size
+                            if new_sl > 0 else 0.0
+                        )
+                        new_tp = (
+                            round(new_tp / tick_size) * tick_size
+                            if new_tp > 0 else 0.0
+                        )
+                    else:
+                        new_sl = round(new_sl, 5) if new_sl > 0 else 0.0
+                        new_tp = round(new_tp, 5) if new_tp > 0 else 0.0
                 else:
-                    # tick_size yoksa VİOP için 5 ondalık (broker reddini önlemek)
                     new_sl = round(new_sl, 5) if new_sl > 0 else 0.0
                     new_tp = round(new_tp, 5) if new_tp > 0 else 0.0
-            else:
-                # sembol bilgisi alınamadıysa yine de ondalık hassasiyeti düşür
-                new_sl = round(new_sl, 5) if new_sl > 0 else 0.0
-                new_tp = round(new_tp, 5) if new_tp > 0 else 0.0
 
-            self._last_modify_error = {}
+                self._last_modify_error = {}
 
-            # ── stops_level kontrolü (modify) ─────────────────────
-            if sym_info is not None:
-                stops_level = getattr(sym_info, "trade_stops_level", 0) or 0
-                if stops_level > 0:
-                    t_size = (getattr(sym_info, "trade_tick_size", 0) or 0)
-                    if t_size <= 0:
-                        t_size = getattr(sym_info, "point", 0) or 0.01
-                    min_dist = stops_level * t_size
-                    current_price = pos.price_current
-                    pos_type = pos.type  # 0=BUY, 1=SELL
+                # ── stops_level kontrolü (modify) ─────────────────────
+                if sym_info is not None:
+                    stops_level = getattr(sym_info, "trade_stops_level", 0) or 0
+                    if stops_level > 0:
+                        t_size = (getattr(sym_info, "trade_tick_size", 0) or 0)
+                        if t_size <= 0:
+                            t_size = getattr(sym_info, "point", 0) or 0.01
+                        min_dist = stops_level * t_size
+                        current_price = pos.price_current
+                        pos_type = pos.type  # 0=BUY, 1=SELL
 
-                    if new_sl > 0:
-                        if pos_type == 0 and current_price - new_sl < min_dist:  # BUY
-                            new_sl = round((current_price - min_dist) / t_size) * t_size
+                        if new_sl > 0:
+                            if pos_type == 0 and current_price - new_sl < min_dist:
+                                new_sl = round((current_price - min_dist) / t_size) * t_size
+                                logger.warning(
+                                    f"Modify SL stops_level ayarı [{pos.symbol}]: "
+                                    f"SL={new_sl:.4f} (min mesafe={min_dist:.4f}, fiyat={current_price:.4f})"
+                                )
+                            elif pos_type == 1 and new_sl - current_price < min_dist:
+                                new_sl = round((current_price + min_dist) / t_size) * t_size
+                                logger.warning(
+                                    f"Modify SL stops_level ayarı [{pos.symbol}]: "
+                                    f"SL={new_sl:.4f} (min mesafe={min_dist:.4f}, fiyat={current_price:.4f})"
+                                )
+
+                        if new_tp > 0:
+                            if pos_type == 0 and new_tp - current_price < min_dist:
+                                new_tp = round((current_price + min_dist) / t_size) * t_size
+                                logger.warning(
+                                    f"Modify TP stops_level ayarı [{pos.symbol}]: "
+                                    f"TP={new_tp:.4f} (min mesafe={min_dist:.4f})"
+                                )
+                            elif pos_type == 1 and current_price - new_tp < min_dist:
+                                new_tp = round((current_price - min_dist) / t_size) * t_size
+                                logger.warning(
+                                    f"Modify TP stops_level ayarı [{pos.symbol}]: "
+                                    f"TP={new_tp:.4f} (min mesafe={min_dist:.4f})"
+                                )
+
+                # ── Freeze level kontrolü (modify) ──────────────────
+                if sym_info is not None:
+                    freeze_level = getattr(sym_info, "trade_freeze_level", 0) or 0
+                    if freeze_level > 0:
+                        t_size_f = (getattr(sym_info, "trade_tick_size", 0) or 0)
+                        if t_size_f <= 0:
+                            t_size_f = getattr(sym_info, "point", 0) or 0.01
+                        freeze_dist = freeze_level * t_size_f
+                        cp = pos.price_current
+                        if new_sl > 0 and abs(cp - new_sl) < freeze_dist:
+                            if pos.type == 0:  # BUY
+                                new_sl = round((cp - freeze_dist - t_size_f) / t_size_f) * t_size_f
+                            else:  # SELL
+                                new_sl = round((cp + freeze_dist + t_size_f) / t_size_f) * t_size_f
                             logger.warning(
-                                f"Modify SL stops_level ayarı [{pos.symbol}]: "
-                                f"SL={new_sl:.4f} (min mesafe={min_dist:.4f}, fiyat={current_price:.4f})"
-                            )
-                        elif pos_type == 1 and new_sl - current_price < min_dist:  # SELL
-                            new_sl = round((current_price + min_dist) / t_size) * t_size
-                            logger.warning(
-                                f"Modify SL stops_level ayarı [{pos.symbol}]: "
-                                f"SL={new_sl:.4f} (min mesafe={min_dist:.4f}, fiyat={current_price:.4f})"
+                                f"Modify SL freeze ayarı [{pos.symbol}]: "
+                                f"SL={new_sl:.4f} (freeze={freeze_dist:.4f})"
                             )
 
-                    if new_tp > 0:
-                        if pos_type == 0 and new_tp - current_price < min_dist:  # BUY
-                            new_tp = round((current_price + min_dist) / t_size) * t_size
-                            logger.warning(
-                                f"Modify TP stops_level ayarı [{pos.symbol}]: "
-                                f"TP={new_tp:.4f} (min mesafe={min_dist:.4f})"
-                            )
-                        elif pos_type == 1 and current_price - new_tp < min_dist:  # SELL
-                            new_tp = round((current_price - min_dist) / t_size) * t_size
-                            logger.warning(
-                                f"Modify TP stops_level ayarı [{pos.symbol}]: "
-                                f"TP={new_tp:.4f} (min mesafe={min_dist:.4f})"
-                            )
+                # Mevcut SL/TP ile aynıysa gereksiz modify yapma (10035 önleme)
+                if abs(new_sl - pos.sl) < 1e-8 and abs(new_tp - pos.tp) < 1e-8:
+                    logger.debug(
+                        f"Modify atlandı [{pos.symbol}]: SL/TP zaten aynı "
+                        f"(SL={new_sl:.4f}, TP={new_tp:.4f})"
+                    )
+                    return {"retcode": 0, "comment": "no_change"}
 
-            # ── Freeze level kontrolü (modify) ──────────────────
-            if sym_info is not None:
-                freeze_level = getattr(sym_info, "trade_freeze_level", 0) or 0
-                if freeze_level > 0:
-                    t_size_f = (getattr(sym_info, "trade_tick_size", 0) or 0)
-                    if t_size_f <= 0:
-                        t_size_f = getattr(sym_info, "point", 0) or 0.01
-                    freeze_dist = freeze_level * t_size_f
-                    cp = pos.price_current
-                    if new_sl > 0 and abs(cp - new_sl) < freeze_dist:
-                        if pos.type == 0:  # BUY
-                            new_sl = round((cp - freeze_dist - t_size_f) / t_size_f) * t_size_f
-                        else:  # SELL
-                            new_sl = round((cp + freeze_dist + t_size_f) / t_size_f) * t_size_f
+                position_ticket = int(getattr(pos, "ticket", ticket))
+                request: dict[str, Any] = {
+                    "action": mt5.TRADE_ACTION_SLTP,
+                    "symbol": pos.symbol,
+                    "position": position_ticket,
+                    "sl": float(new_sl),
+                    "tp": float(new_tp),
+                    "type_filling": mt5.ORDER_FILLING_RETURN,
+                    "type_time": mt5.ORDER_TIME_GTC,
+                }
+
+                logger.info(
+                    f"Modify SL/TP: ticket={ticket} position={position_ticket} "
+                    f"pos.symbol={pos.symbol} SL={new_sl:.4f} TP={new_tp:.4f}"
+                )
+
+                MODIFY_MAX_RETRIES = 5
+                for attempt in range(1, MODIFY_MAX_RETRIES + 1):
+                    result = self._safe_call(mt5.order_send, request, timeout=10.0)
+
+                    if result is not None and result.retcode == mt5.TRADE_RETCODE_DONE:
+                        self._last_modify_error = {}
+                        mod_result = result._asdict()
+                        logger.info(
+                            f"Pozisyon değiştirildi (deneme {attempt}): ticket={ticket}, "
+                            f"SL={new_sl:.4f}, TP={new_tp:.4f}"
+                        )
+                        return mod_result
+
+                    if result is not None:
+                        ret = int(result.retcode)
+                        comment = str(result.comment) if result.comment else ""
+                        self._last_modify_error = {"retcode": ret, "comment": comment}
                         logger.warning(
-                            f"Modify SL freeze ayarı [{pos.symbol}]: "
-                            f"SL={new_sl:.4f} (freeze={freeze_dist:.4f})"
+                            f"Modify deneme {attempt}/{MODIFY_MAX_RETRIES} başarısız [{ticket}]: "
+                            f"retcode={ret}, comment={comment}"
+                        )
+                    else:
+                        err = mt5.last_error()
+                        self._last_modify_error = {"last_error": str(err) if err else "Bilinmeyen hata"}
+                        logger.warning(
+                            f"Modify deneme {attempt}/{MODIFY_MAX_RETRIES} None [{ticket}]: {err}"
                         )
 
-            # Mevcut SL/TP ile aynıysa gereksiz modify yapma (10035 önleme)
-            if abs(new_sl - pos.sl) < 1e-8 and abs(new_tp - pos.tp) < 1e-8:
-                logger.debug(
-                    f"Modify atlandı [{pos.symbol}]: SL/TP zaten aynı "
-                    f"(SL={new_sl:.4f}, TP={new_tp:.4f})"
+                    if attempt < MODIFY_MAX_RETRIES:
+                        _time.sleep(0.5)
+
+                logger.error(
+                    f"Modify {MODIFY_MAX_RETRIES} denemede başarısız [{ticket}]: "
+                    f"{self._last_modify_error}"
                 )
-                return {"retcode": 0, "comment": "no_change"}
+                return None
 
-            # TRADE_ACTION_SLTP için position alanı zorunlu (MT5 API gereksinimi).
-            # GCM VİOP exchange modunda SLTP istekleri sunucu tarafında bağlı
-            # bekleyen emirlere dönüştürülüyor — type_filling ve type_time zorunlu,
-            # yoksa 10035 Invalid order dönüyor.
-            position_ticket = int(getattr(pos, "ticket", ticket))
-            request: dict[str, Any] = {
-                "action": mt5.TRADE_ACTION_SLTP,
-                "symbol": pos.symbol,
-                "position": position_ticket,
-                "sl": float(new_sl),    # float zorunlu (int → silent fail)
-                "tp": float(new_tp),    # float zorunlu
-                "type_filling": mt5.ORDER_FILLING_RETURN,
-                "type_time": mt5.ORDER_TIME_GTC,
-            }
-
-            logger.info(
-                f"Modify SL/TP: ticket={ticket} position={position_ticket} "
-                f"pos.symbol={pos.symbol} SL={new_sl:.4f} TP={new_tp:.4f}"
-            )
-
-            # order_check kullanmıyoruz — eski MT5 build'larda (4755<5200)
-            # SLTP için false-negative dönebiliyor. Doğrudan order_send + retry.
-            MODIFY_MAX_RETRIES = 5
-            for attempt in range(1, MODIFY_MAX_RETRIES + 1):
-                result = self._safe_call(mt5.order_send, request, timeout=10.0)
-
-                if result is not None and result.retcode == mt5.TRADE_RETCODE_DONE:
-                    self._last_modify_error = {}
-                    mod_result = result._asdict()
-                    logger.info(
-                        f"Pozisyon değiştirildi (deneme {attempt}): ticket={ticket}, "
-                        f"SL={new_sl:.4f}, TP={new_tp:.4f}"
-                    )
-                    return mod_result
-
-                # Hata detayını kaydet
-                if result is not None:
-                    ret = int(result.retcode)
-                    comment = str(result.comment) if result.comment else ""
-                    self._last_modify_error = {"retcode": ret, "comment": comment}
-                    logger.warning(
-                        f"Modify deneme {attempt}/{MODIFY_MAX_RETRIES} başarısız [{ticket}]: "
-                        f"retcode={ret}, comment={comment}"
-                    )
-                else:
-                    err = mt5.last_error()
-                    self._last_modify_error = {"last_error": str(err) if err else "Bilinmeyen hata"}
-                    logger.warning(
-                        f"Modify deneme {attempt}/{MODIFY_MAX_RETRIES} None [{ticket}]: {err}"
-                    )
-
-                # Son deneme değilse bekle ve tekrar dene
-                if attempt < MODIFY_MAX_RETRIES:
-                    _time.sleep(0.5)
-
-            # Tüm denemeler başarısız
-            logger.error(
-                f"Modify {MODIFY_MAX_RETRIES} denemede başarısız [{ticket}]: "
-                f"{self._last_modify_error}"
-            )
-            return None
-
-        except Exception as exc:
-            self._last_modify_error = {"exception": str(exc)}
-            logger.error(f"modify_position istisnası [ticket={ticket}]: {exc}")
-            return None
+            except Exception as exc:
+                self._last_modify_error = {"exception": str(exc)}
+                logger.error(f"modify_position istisnası [ticket={ticket}]: {exc}")
+                return None
 
     # ── get_positions ────────────────────────────────────────────────
     def get_positions(self) -> list[dict[str, Any]]:

@@ -1380,3 +1380,161 @@ class Database:
             (limit,),
         )
 
+    # ═════════════════════════════════════════════════════════════════
+    #  v5.8/CEO-FAZ2: ARŞİVLEME VE BAKIM
+    # ═════════════════════════════════════════════════════════════════
+
+    def archive_old_trades(self, days: int = 90) -> int:
+        """90 günden eski işlemleri archive.db'ye taşı.
+
+        Trades tablosu hiç temizlenmiyordu — DB sınırsız büyüyordu.
+        Bu metot eski trade'leri ayrı bir arşiv DB'ye kopyalar ve
+        ana DB'den siler.
+
+        Args:
+            days: Bu günden eski trade'ler arşivlenir (varsayılan 90).
+
+        Returns:
+            Arşivlenen trade sayısı.
+        """
+        from datetime import timedelta
+        cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+        archive_path = Path(self._db_path).parent / "trades_archive.db"
+
+        with self._lock:
+            try:
+                # 1. Arşivlenecek trade sayısını kontrol et
+                row = self._conn.execute(
+                    "SELECT COUNT(*) FROM trades WHERE exit_time IS NOT NULL AND exit_time < ?",
+                    (cutoff,),
+                ).fetchone()
+                count = row[0] if row else 0
+                if count == 0:
+                    return 0
+
+                # 2. Arşiv DB'ye bağlan ve tablo oluştur
+                archive_conn = sqlite3.connect(str(archive_path))
+                archive_conn.execute("PRAGMA journal_mode=WAL")
+
+                # Ana DB'deki trades tablosu şemasını kopyala
+                schema_row = self._conn.execute(
+                    "SELECT sql FROM sqlite_master WHERE type='table' AND name='trades'"
+                ).fetchone()
+                if schema_row and schema_row[0]:
+                    # CREATE TABLE IF NOT EXISTS yaparak idempotent ol
+                    create_sql = schema_row[0].replace(
+                        "CREATE TABLE trades",
+                        "CREATE TABLE IF NOT EXISTS trades",
+                    )
+                    archive_conn.execute(create_sql)
+                    archive_conn.commit()
+
+                # 3. Eski trade'leri arşive kopyala
+                old_trades = self._conn.execute(
+                    "SELECT * FROM trades WHERE exit_time IS NOT NULL AND exit_time < ?",
+                    (cutoff,),
+                ).fetchall()
+
+                if old_trades:
+                    # Kolon sayısını al
+                    col_count = len(old_trades[0])
+                    placeholders = ",".join(["?"] * col_count)
+                    archive_conn.executemany(
+                        f"INSERT OR IGNORE INTO trades VALUES ({placeholders})",
+                        old_trades,
+                    )
+                    archive_conn.commit()
+
+                archive_conn.close()
+
+                # 4. Ana DB'den sil
+                self._conn.execute(
+                    "DELETE FROM trades WHERE exit_time IS NOT NULL AND exit_time < ?",
+                    (cutoff,),
+                )
+                self._conn.commit()
+
+                logger.info(
+                    f"Trade arşivleme tamamlandı: {count} trade → {archive_path} "
+                    f"(cutoff: {cutoff})"
+                )
+                return count
+
+            except Exception as exc:
+                logger.error(f"Trade arşivleme hatası: {exc}")
+                return 0
+
+    def wal_checkpoint(self) -> bool:
+        """WAL dosyasını ana DB'ye checkpoint et.
+
+        WAL dosyası (trades.db-wal) büyüyebilir. Periyodik checkpoint
+        WAL içeriğini ana DB'ye yazar ve WAL boyutunu küçültür.
+
+        Returns:
+            Checkpoint başarılı ise True.
+        """
+        with self._lock:
+            try:
+                # TRUNCATE modu: WAL'ı ana DB'ye yaz ve WAL dosyasını sıfırla
+                result = self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+                if result:
+                    busy, log_pages, checkpointed = result
+                    logger.info(
+                        f"WAL checkpoint tamamlandı: "
+                        f"busy={busy}, log_pages={log_pages}, "
+                        f"checkpointed={checkpointed}"
+                    )
+                    return busy == 0
+                return True
+            except Exception as exc:
+                logger.error(f"WAL checkpoint hatası: {exc}")
+                return False
+
+    def vacuum(self) -> bool:
+        """VACUUM çalıştırarak boş alanı geri kazan.
+
+        DELETE sonrası SQLite dosya boyutu küçülmez — VACUUM gerekir.
+        DİKKAT: Kısa süreliğine DB kilitlenir, sadece piyasa kapalıyken çalıştırın.
+
+        Returns:
+            VACUUM başarılı ise True.
+        """
+        with self._lock:
+            try:
+                self._conn.execute("VACUUM")
+                logger.info("DB VACUUM tamamlandı — boş alan geri kazanıldı")
+                return True
+            except Exception as exc:
+                logger.error(f"DB VACUUM hatası: {exc}")
+                return False
+
+    def run_maintenance(self, archive_days: int = 90) -> dict[str, Any]:
+        """Kapsamlı bakım: arşivle → checkpoint → vacuum.
+
+        Sadece piyasa kapalıyken çağrılmalıdır (Anayasa: Barış zamanı kuralları).
+
+        Args:
+            archive_days: Bu günden eski trade'ler arşivlenir.
+
+        Returns:
+            Bakım sonuç raporu.
+        """
+        report: dict[str, Any] = {
+            "archived_trades": 0,
+            "wal_checkpoint": False,
+            "vacuum": False,
+        }
+
+        # 1. Trade arşivleme
+        report["archived_trades"] = self.archive_old_trades(archive_days)
+
+        # 2. WAL checkpoint
+        report["wal_checkpoint"] = self.wal_checkpoint()
+
+        # 3. VACUUM (arşivleme + silme sonrası yer kazanma)
+        if report["archived_trades"] > 0:
+            report["vacuum"] = self.vacuum()
+
+        logger.info(f"DB bakım raporu: {report}")
+        return report
+

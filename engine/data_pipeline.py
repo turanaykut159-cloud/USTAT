@@ -34,7 +34,12 @@ from engine.utils.indicators import calculate_indicators
 logger = get_logger(__name__)
 
 # ── Paralel çekme ayarları ─────────────────────────────────────────
-MAX_WORKERS: int = 4          # MT5 thread-safe değil ama GIL altında 4 iş parçacığı güvenli
+# v5.8/CEO-FAZ2: MT5 C++ DLL thread-safe DEĞİL — paralel çağrılar
+# race condition ve DLL corruption riski taşır. Worker sayısı 1'e
+# düşürülerek sıralı çalışma garanti altına alındı.
+# Eski yorum: "GIL altında güvenli" — YANLIŞ: GIL yalnızca Python
+# nesnelerini korur, C extension içindeki shared state'i KORUMAZ.
+MAX_WORKERS: int = 1          # v5.8/CEO-FAZ2: MT5 DLL thread safety → serialized
 CYCLE_TIMEOUT_SEC: float = 8.0  # run_cycle maksimum süresi (spike koruması)
 
 # ── MT5 timeframe → etiket eşlemesi ─────────────────────────────────

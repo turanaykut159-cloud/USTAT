@@ -2,6 +2,23 @@
 
 ---
 
+## #53 — CEO FAZ-2: Altyapı Güçlendirme (2026-03-21)
+
+- **mt5_bridge.py**: `_map_lock` eklendi — `_symbol_map` ve `_reverse_map` dict'leri atomik swap ile güncellenir, `_to_mt5()`, `_to_base()`, `_is_watched()` lock altına alındı
+- **mt5_bridge.py**: `_write_lock` eklendi — `close_position()` ve `modify_position()` artık `send_order()` ile aynı sıraya girer (concurrent write koruması)
+- **data_pipeline.py**: `MAX_WORKERS` 4 → 1 — MT5 C++ DLL thread-safe değil, GIL korumaz; paralel çağrılar serileştirildi
+- **baba.py**: Margin reserve kontrolü `check_risk_limits()` seviyesine eklendi — config'den okunan `margin_reserve_pct` (%20) çift katmanlı güvenlik
+- **ogul.py + manuel_motor.py**: `MARGIN_RESERVE_PCT` hardcoded → `config.get("engine.margin_reserve_pct")` ile config'den okunuyor
+- **database.py**: `archive_old_trades(90)` — 90 günden eski kapanmış trade'leri `trades_archive.db`'ye taşır, ana DB'den siler
+- **database.py**: `wal_checkpoint()` — WAL dosyasını ana DB'ye checkpoint eder (WAL boyut kontrolü)
+- **database.py**: `vacuum()` — silme sonrası boş alanı geri kazanır
+- **database.py**: `run_maintenance()` — arşivle → checkpoint → vacuum pipeline'ı
+- **main.py**: `_run_daily_cleanup()` günlük bakıma trade arşivleme + WAL checkpoint eklendi
+- **pytest.ini**: Test suite aktivasyonu — `USTAT DEPO/tests_aktif/` yolunu pytest'e tanıttı
+- **.gitignore**: `.pytest_cache/`, `htmlcov/`, `.coverage` eklendi
+
+---
+
 ## #52 — CEO FAZ-1: Kritik Güvenlik Yamaları (2026-03-21)
 
 - **baba.py**: L3 kill-switch onayı, kapatılamayan pozisyon varsa reddedilir (`acknowledge_kill_switch` + `_last_l3_failed_tickets` kontrolü)
