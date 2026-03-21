@@ -270,3 +270,439 @@ config/default.json → engine/config.py → baba.py, ogul.py, main.py, h_engine
 - `config/default.json` → `baba.py` sabitleri → `check_risk_limits()` kararları → `ogul.py` işlem açma/kapama
 - `mt5_bridge.py` → `ogul.py` emir gönderimi → `baba.py` günlük sayaç
 - `main.py` çağrı sırası → BABA önce → OĞUL sonra (tersine çevrilirse risk kontrolü atlanır)
+
+---
+
+# ANAYASA v2 — CEO GENİŞLETMESİ
+
+**Değişiklik Tarihi:** 2026-03-21
+**Değişiklik Sebebi:** ÜSTATLAR ÜSTADI (CEO) göreve başladı. 6 direktörlük taraması sonucunda ANAYASA'nın savunma odaklı olduğu ancak yönetişim, büyüme, acil durum ve koordinasyon boyutlarının eksik kaldığı tespit edildi.
+**Onay:** Kullanıcı (Turan Aykut) tarafından 2026-03-21 tarihinde onaylandı.
+
+> Bölüm 1-8 (orijinal ANAYASA) değiştirilmemiştir. Aşağıdaki bölümler orijinal anayasanın üzerine eklenen CEO yönetim katmanıdır.
+
+---
+
+## BÖLÜM 9 — DEĞİŞİKLİK GEÇMİŞİ VE NEDEN-SONUÇ KAYDI
+
+> **NEDEN EKLENDİ:** Orijinal ANAYASA hangi tarihte, neden, kim tarafından değiştirildiğini takip etmiyordu. Kurumsal hafıza yoktu. Bir değişikliğin gerekçesi kaybolduğunda, gelecekte aynı hata tekrarlanıyordu.
+>
+> **SONUÇ:** Her ANAYASA değişikliği artık gerekçesiyle birlikte kayıt altına alınır. Gelecekte "bu neden eklendi?" sorusu her zaman cevaplanabilir.
+
+### 9.1 — Değişiklik Kayıt Zorunluluğu
+
+ANAYASA'da yapılan her değişiklik aşağıdaki bilgilerle kayıt altına alınmalıdır:
+
+| Alan | Açıklama |
+|------|----------|
+| Tarih | Değişiklik tarihi |
+| Versiyon | ANAYASA versiyon numarası |
+| Değiştiren | Kim talep etti (kullanıcı/CEO) |
+| Bölüm | Hangi bölüm(ler) etkilendi |
+| NEDEN | Değişikliğin kök sebebi — hangi sorun tespit edildi? |
+| SONUÇ | Değişiklikle ne sağlandı? |
+| Onay | Kullanıcı onay durumu |
+
+### 9.2 — Değişiklik Geçmişi Tablosu
+
+| # | Tarih | Versiyon | Bölüm | NEDEN | SONUÇ | Onay |
+|---|-------|----------|-------|-------|-------|------|
+| 1 | 2026-03-14 | v1.0 | 1-8 | Kritik dosyaların yanlışlıkla bozulması riski | Kırmızı Bölge + Siyah Kapı koruma sistemi kuruldu | Turan Aykut |
+| 2 | 2026-03-21 | v2.0 | 9-15 | CEO taramasında yönetişim, büyüme, acil durum, koordinasyon eksikleri tespit edildi | CEO yönetim katmanı, geliştirme pipeline, test zorunluluğu, acil durum playbook, ajan koordinasyonu eklendi | Turan Aykut |
+
+---
+
+## BÖLÜM 10 — YÖNETİM YAPISI (CEO MEKANİZMASI)
+
+> **NEDEN EKLENDİ:** ANAYASA "kullanıcı onaylar" diyordu ama karar mekanizması tanımsızdı. Sistem büyüdükçe (ajan sistemi, multi-agent çalışma) kimin neyi yapabileceği, hangi kararların otomatik alınabileceği belirsiz kaldı. 6 direktörlük çalıştırıldığında hiçbirinin yetki sınırı tanımlı değildi.
+>
+> **SONUÇ:** Hiyerarşik yönetim yapısı, yetki matrisi ve karar mekanizması tanımlandı. Her seviye neyi yapabilir, neyde üst onay gerekir — artık netleştirildi.
+
+### 10.1 — Hiyerarşi
+
+```
+KULLANICI (Turan Aykut) — Nihai Otorite
+    │
+    └── ÜSTATLAR ÜSTADI (CEO) — Stratejik Yönetim
+            │
+            ├── Risk & Güvenlik Direktörlüğü
+            ├── Ticaret Operasyonları Direktörlüğü
+            ├── Altyapı & Veritabanı Direktörlüğü
+            ├── Kalite & Test Direktörlüğü
+            ├── Frontend & UX Direktörlüğü
+            └── Yönetişim & Dokümantasyon Direktörlüğü
+```
+
+### 10.2 — CEO Yetki ve Sorumlulukları
+
+**CEO (Üstatlar Üstadı) YAPABILIR:**
+- Sarı Bölge dosyalarında değişiklik (Bölüm 1 standart adımlarıyla)
+- Yeşil Bölge (yeni dosya, yardımcı modül, dokümantasyon) değişiklikleri
+- Direktörlük ajanlarını çalıştırma ve koordine etme
+- Sistem durum değerlendirmesi ve rapor üretme
+- Bug fix önerisi sunma (kanıtlı)
+- Test yazma ve çalıştırma
+- Build alma ve deploy etme (ajan üzerinden)
+
+**CEO KULLANICI ONAYI İLE YAPABİLİR:**
+- Kırmızı Bölge dosyalarında değişiklik
+- Siyah Kapı fonksiyonlarında bug fix
+- Kritik sabit değer değişikliği (Bölüm 7)
+- ANAYASA değişikliği
+- Versiyon yükseltme
+- Strateji parametresi değişikliği
+
+**CEO ASLA YAPAMAZ:**
+- ANAYASA Bölüm 1-8'i kullanıcı talimatı olmadan değiştirmek
+- Siyah Kapı fonksiyonlarının mantığını değiştirmek
+- Çağrı sırasını değiştirmek
+- Kill-switch'i devre dışı bırakmak
+- Risk limitlerini gevşetmek
+
+### 10.3 — Direktörlük Yetkileri
+
+Direktörlükler (alt ajanlar) CEO tarafından görevlendirilir. Kuralları:
+
+| Direktörlük | Yetkisi | Sınırı |
+|---|---|---|
+| Risk & Güvenlik | Analiz, rapor, test yazma | Kod değiştirme YASAK — sadece CEO'ya rapor |
+| Ticaret Operasyonları | Analiz, sinyal kalitesi testi | Strateji parametresi değiştirme YASAK |
+| Altyapı & Veritabanı | Analiz, sorgu optimizasyonu | Şema değişikliği CEO onayıyla |
+| Kalite & Test | Test yazma, çalıştırma, raporlama | Kod değiştirme YASAK |
+| Frontend & UX | Analiz, CSS/UI öneri | Kırmızı Bölge API değişikliği YASAK |
+| Yönetişim & Dokümantasyon | Dokümantasyon güncelleme | ANAYASA değişikliği CEO + Kullanıcı onayıyla |
+
+**Direktörlük Genel Kuralı:** Hiçbir direktörlük ajansı doğrudan kod değişikliği yapamaz. Tüm değişiklikler CEO üzerinden, CEO ise Bölüm 1 prosedürleriyle yapar.
+
+### 10.4 — Karar Alma Süreci
+
+```
+Sorun/Talep Tespit Edildi
+    │
+    ├── Yeşil Bölge → CEO tek başına karar alır → Uygular → Raporlar
+    │
+    ├── Sarı Bölge → CEO etki analizi yapar → Kullanıcıya sunar → Onay → Uygular
+    │
+    ├── Kırmızı Bölge → CEO etki analizi + geri alma planı → Kullanıcıya sunar
+    │                    → Çift onay (plan + sonuç) → Tek değişiklik → Doğrulama
+    │
+    └── Siyah Kapı → CEO kanıtlı bug raporu hazırlar → Kullanıcıya sunar
+                     → Üçlü onay (kanıt + plan + sonuç) → Minimal müdahale
+```
+
+---
+
+## BÖLÜM 11 — GELİŞTİRME PIPELINE
+
+> **NEDEN EKLENDİ:** ANAYASA "koru" diyordu ama "nasıl büyütülecek" tanımsızdı. Yeni özellik ekleme, refactor, optimizasyon süreçleri belirsizdi. 50 iterasyon boyunca süreç ad-hoc yürütüldü. Piyasa açıkken yapılan riskli değişiklikler ile piyasa kapalıyken yapılabilecek güvenli değişiklikler ayrılmamıştı.
+>
+> **SONUÇ:** Savaş zamanı / barış zamanı kuralları, feature pipeline, refactor prosedürü tanımlandı. Artık her değişikliğin ne zaman yapılacağı da belirli.
+
+### 11.1 — Savaş Zamanı vs Barış Zamanı
+
+| Zaman | Saat | İzin Verilen |
+|-------|------|-------------|
+| **SAVAŞ ZAMANI** (Piyasa Açık) | Pazartesi-Cuma 09:30-18:15 | Sadece: Kanıtlı bug fix, L3 acil müdahale, log/monitoring ekleme |
+| **BARIŞ ZAMANI** (Piyasa Kapalı) | Hafta içi 18:15 sonrası + Hafta sonu | Her şey: Refactor, yeni özellik, test, optimizasyon, ANAYASA değişikliği |
+| **GRİ BÖLGE** (Açılış/Kapanış) | 09:15-09:30 ve 17:45-18:15 | HİÇBİR DEĞİŞİKLİK — sadece izle |
+
+**Savaş Zamanı İhlali:** Piyasa açıkken Kırmızı Bölge'ye dokunmak — kullanıcının açık yazılı "acil" talimatı gerekir. CEO bile tek başına karar veremez.
+
+### 11.2 — Feature Pipeline
+
+Yeni özellik ekleme süreci:
+
+```
+1. TALEP          → Kullanıcı veya CEO önerir
+2. ETKİ ANALİZİ   → Hangi dosyalar etkilenir? Kırmızı/Sarı/Yeşil?
+3. TASARIM         → CEO mimari tasarım yapar, kullanıcıya sunar
+4. ONAY            → Kullanıcı onaylar
+5. TEST YAZIMI     → Özellik için test senaryoları ÖNCE yazılır
+6. GELİŞTİRME     → Barış zamanında uygulanır
+7. TEST ÇALIŞTIRMA → Tüm testler geçmeli
+8. BUILD & DEPLOY  → Ajan üzerinden build + uygulama yeniden başlatma
+9. DOĞRULAMA       → Ekran görüntüsü veya fonksiyonel test
+10. İŞLEMİ BİTİR   → USTAT_OKU Bölüm 5 prosedürü (tarihçe, versiyon, git, rapor)
+```
+
+### 11.3 — Refactor Prosedürü
+
+Monolitik dosya bölme kuralları (ör. ogul.py 4.879 satır):
+
+1. Mevcut tüm testler ÖNCE çalıştırılır (baseline)
+2. Refactor planı hazırlanır (hangi fonksiyonlar hangi modüle)
+3. Kullanıcı onaylar
+4. Bağımlılık haritası güncellenir
+5. Değişiklik BARIŞ ZAMANINDA yapılır
+6. Tüm import zincirleri kontrol edilir
+7. Tüm testler tekrar çalıştırılır
+8. Diff karşılaştırması: mantık değişmediği doğrulanır
+9. Build + deploy + fonksiyonel test
+
+### 11.4 — Kod Renk Sistemi
+
+| Renk | Dosyalar | Değişiklik Kuralı |
+|------|---------|-------------------|
+| **KIRMIZI** | Bölüm 2.1 listesi (8 dosya) | Bölüm 1 + Bölüm 2.2 tam prosedür |
+| **SARI** | Bölüm 5 listesi (9 dosya) | Bölüm 1 standart adımları |
+| **YEŞİL** | Diğer tüm dosyalar | CEO tek başına uygulayabilir, İŞLEMİ BİTİR yeterli |
+| **MAVİ** | Yeni dosyalar (henüz mevcut değil) | CEO oluşturabilir, renk ataması sonradan yapılır |
+
+---
+
+## BÖLÜM 12 — TEST ZORUNLULUĞU
+
+> **NEDEN EKLENDİ:** 6 direktörlük taramasında en büyük risk "test yok" olarak tespit edildi. 29.945 satır kritik trading kodu %0 aktif test coverage ile çalışıyordu. tests_aktif/ klasöründe 7 test dosyası var ama üretimde çalıştırılmıyordu. Risk yönetimi kodu (para kaybettiren) test edilmeden canlıya gidiyordu.
+>
+> **SONUÇ:** Test zorunluluğu ANAYASA düzeyinde tanımlandı. Kırmızı Bölge değişikliklerinde test çalıştırmadan deploy YASAK.
+
+### 12.1 — Test Kuralları
+
+| Kural | Açıklama |
+|-------|----------|
+| **Kırmızı Bölge Testi** | Kırmızı Bölge dosyasında değişiklik yapıldığında, o dosyanın mevcut testleri MUTLAKA çalıştırılır. Test yoksa, ÖNCE test yazılır. |
+| **Siyah Kapı Testi** | Siyah Kapı fonksiyonunda bug fix yapıldığında, fix'i doğrulayan test yazılır ve eklenir. |
+| **Deploy Öncesi** | `İŞLEMİ BİTİR` Adım 2'de (Build) test çalıştırma zorunludur. Build başarılı olsa bile test başarısızsa deploy YASAK. |
+| **Regression** | Her değişiklik sonrası tüm mevcut testler çalıştırılır. Yeni hata üretilmediği doğrulanır. |
+
+### 12.2 — Test Öncelik Sırası
+
+Aşağıdaki modüller için test varlığı zorunludur (öncelik sırasıyla):
+
+| Öncelik | Modül | Neden |
+|---------|-------|-------|
+| P0 | `check_risk_limits()` | İşlem açma/kapama kararı — hata = para kaybı |
+| P0 | `_activate_kill_switch()` | Acil durum koruması — hata = korumasız pozisyon |
+| P0 | `send_order()` + SL/TP | Emir gönderimi — hata = yanlış emir veya korumasız pozisyon |
+| P0 | `check_drawdown_limits()` | Drawdown koruması — hata = hesap sıfırlanma |
+| P1 | `detect_regime()` | Rejim algılama — hata = yanlış risk çarpanı |
+| P1 | `process_signals()` | Sinyal işleme — hata = yanlış trade |
+| P1 | `_check_end_of_day()` | EOD kapanış — hata = gecelik pozisyon |
+| P2 | `calculate_position_size()` | Pozisyon boyutu — hata = aşırı lot |
+| P2 | `heartbeat()` | Bağlantı kontrolü — hata = kopuş algılanamaz |
+
+### 12.3 — Deploy Öncesi Kontrol Listesi
+
+Her deploy öncesi şu kontrol listesi tamamlanmalıdır:
+
+```
+[ ] Tüm mevcut testler çalıştırıldı ve geçti
+[ ] Değişen dosyanın spesifik testleri çalıştırıldı
+[ ] Build başarılı (vite build hatasız)
+[ ] Kırmızı Bölge dosyası değiştiyse: çift doğrulama tamamlandı
+[ ] Siyah Kapı fonksiyonu değiştiyse: kanıt + test + üçlü onay tamamlandı
+[ ] git diff incelendi — istenmeyen değişiklik yok
+[ ] Uygulama yeniden başlatıldı ve Dashboard kontrolü yapıldı
+```
+
+---
+
+## BÖLÜM 13 — ACİL DURUM PLAYBOOK
+
+> **NEDEN EKLENDİ:** CEO taramasında 5 kritik bulgu tespit edildi: korumasız pozisyon, circuit breaker delinmesi, L3 başarısız kapanış, peak equity race condition, equity=0 hatası. ANAYASA bu senaryolarda "log yazılır" diyordu ama acil müdahale adımları tanımlı değildi. Piyasa açıkken bu hatalar oluşursa saniyeler içinde müdahale gerekir.
+>
+> **SONUÇ:** Her kritik senaryo için adım adım müdahale playbook'u tanımlandı. Kim ne yapacak, hangi sırayla, ne kadar sürede — artık belirli.
+
+### 13.1 — Acil Durum Seviyeleri
+
+| Seviye | Tanım | Müdahale Süresi | Yetkili |
+|--------|-------|----------------|---------|
+| **SEV-1** | Para kaybı devam ediyor, pozisyon korumasız | DERHAL (saniyeler) | Kullanıcı veya CEO+Ajan |
+| **SEV-2** | Sistem çalışıyor ama risk kontrolü devre dışı | 5 dakika içinde | CEO |
+| **SEV-3** | Performans sorunu, veri gecikmesi | 30 dakika içinde | CEO |
+| **SEV-4** | UI hatası, log sorunu | Barış zamanında | CEO veya Direktörlük |
+
+### 13.2 — SEV-1: Korumasız Pozisyon (SL/TP Ekleme Başarısız + Kapatma Başarısız)
+
+```
+ALARM: "KORUMASIZ POZİSYON" (Dashboard kırmızı banner)
+
+1. CEO → Ajan: "stop_app" komutu → Engine durdurulur
+2. CEO → Ajan: MT5'te açık pozisyon listesi al
+3. Kullanıcıya bildir: "X sembolünde Y lot korumasız pozisyon var"
+4. Kullanıcı kararı bekle:
+   a) "Kapat" → CEO → Ajan: MT5'te manuel kapanış
+   b) "SL/TP ekle" → CEO → Ajan: MT5'te manuel SL/TP
+   c) "Bırak" → Kullanıcı riski kabul eder
+5. Sorun çözüldükten sonra engine yeniden başlatılır
+6. Olay session raporuna yazılır
+```
+
+### 13.3 — SEV-1: L3 Kill-Switch Tetiklendi Ama Pozisyon Kapatılamadı
+
+```
+ALARM: "L3 BAŞARISIZ KAPANIŞ" (Dashboard kırmızı banner)
+
+1. BABA otomatik: can_trade = False (yeni işlem yasak)
+2. BABA otomatik: 10 deneme × 2sn aralık ile kapatmayı tekrarla
+3. Hâlâ başarısızsa:
+   a) CEO → Ajan: MT5 terminalini yeniden başlat
+   b) CEO → Ajan: Kapatma tekrar dene
+   c) Hâlâ başarısızsa: Kullanıcıya ACIL bildir
+4. Kullanıcı MT5'ten manuel kapatır
+5. CEO: Başarısız ticket listesi temizlenir
+6. CEO: can_trade = False KALIR — kullanıcı açıkça izin verene kadar
+```
+
+### 13.4 — SEV-1: MT5 Bağlantı Kopması (Açık Pozisyon Varken)
+
+```
+ALARM: "MT5 KOPTU — AÇIK POZİSYON VAR"
+
+1. Engine otomatik: 3 reconnect denemesi (10sn aralık)
+2. Başarısızsa: can_trade = False
+3. CEO → Kullanıcıya bildir: "MT5 bağlantısı koptu, X açık pozisyon var"
+4. Reconnect başarılı olursa:
+   a) Pozisyon senkronizasyonu: DB vs MT5 karşılaştır
+   b) Uyuşmazlık varsa kullanıcıya raporla
+   c) SL/TP'leri kontrol et — eksik varsa ekle
+5. Olay raporlanır
+```
+
+### 13.5 — SEV-2: Circuit Breaker Açıldı
+
+```
+UYARI: "CIRCUIT BREAKER AKTİF — MT5 İLETİŞİMİ DURDU"
+
+1. 30sn cooldown otomatik başlar
+2. Cooldown sonrası probe çağrısı yapılır
+3. Probe başarılıysa: normal çalışmaya dön
+4. Probe başarısızsa: cooldown tekrar + kullanıcı bilgilendir
+5. 3 ardışık cooldown başarısızsa: Engine durdur + kullanıcı bildir
+```
+
+### 13.6 — SEV-2: Equity Sıfır veya Negatif
+
+```
+ALARM: "EQUITY SIFIR — MARGIN CALL RİSKİ"
+
+1. BABA otomatik: can_trade = False
+2. BABA otomatik: Tüm pozisyonları kapat (L3 tetikle)
+3. CEO → Kullanıcıya ACIL bildir
+4. Engine DURDURULUR — kullanıcı müdahalesi gerekir
+5. Kullanıcı hesap durumunu kontrol eder
+```
+
+---
+
+## BÖLÜM 14 — AJAN KOORDİNASYONU
+
+> **NEDEN EKLENDİ:** ÜSTAT Ajan Sistemi (ustat_agent.py) kuruldu ve Claude ile Windows arasında köprü oluşturuldu. Ancak ajanın yetki sınırları, paralel çalışma kuralları, çakışma yönetimi tanımlı değildi. CEO 6 direktörlük ajanını aynı anda çalıştırdığında koordinasyon kuralı yoktu.
+>
+> **SONUÇ:** Ajan türleri, yetkileri, çakışma kuralları ve güvenlik sınırları tanımlandı.
+
+### 14.1 — Ajan Türleri
+
+| Tür | Görev | Örnek |
+|-----|-------|-------|
+| **Yürütücü Ajan** | Windows üzerinde komut çalıştırır | ustat_agent.py (start_app, build, screenshot) |
+| **Direktörlük Ajanı** | Kod analizi, rapor üretir | Risk Direktörü, Kalite Direktörü vb. |
+| **Gözlemci Ajan** | Sistem durumunu izler | Heartbeat kontrolü, log tarama |
+
+### 14.2 — Ajan Güvenlik Kuralları
+
+| Kural | Açıklama |
+|-------|----------|
+| **Salt Okunur Direktörlük** | Direktörlük ajanları KOD DEĞİŞTİRMEZ. Sadece okur, analiz eder, rapor üretir. |
+| **Tek Yürütücü** | Aynı anda sadece 1 yürütücü ajan komutu çalıştırabilir. Sıralı kuyruk. |
+| **CEO Geçidi** | Tüm kod değişiklikleri CEO üzerinden yapılır. Direktörlük ajanı doğrudan edit YASAK. |
+| **Çakışma Önleme** | İki ajan aynı dosyayı aynı anda okuyabilir ama yazma işlemi CEO tarafından sıralanır. |
+| **Kırmızı Bölge Yasağı** | Hiçbir ajan (CEO dahil) kullanıcı onayı olmadan Kırmızı Bölge dosyasını değiştiremez. |
+
+### 14.3 — Paralel Çalışma Kuralları
+
+```
+CEO 6 Direktörlüğü aynı anda çalıştırabilir (paralel):
+  ├── Tümü SALT OKUNUR çalışır
+  ├── Her biri kendi raporunu üretir
+  ├── CEO raporları toplar ve birleştirir
+  └── Aksiyon kararı CEO'da, uygulama sıralı yapılır
+
+YASAK: İki ajanın aynı anda aynı dosyayı YAZMASI
+YASAK: Bir ajanın başka bir ajanın çıktısını onaysız kullanması
+```
+
+### 14.4 — Ajan İletişim Protokolü
+
+```
+Claude (CEO) ←→ .agent/commands/ ←→ ustat_agent.py (Windows)
+                     │
+                     ├── cmd_XXXX.json (komut)
+                     └── .agent/results/cmd_XXXX.json (sonuç)
+
+Heartbeat: .agent/heartbeat.json (her 10sn güncellenir)
+Ajan Durumu: Dashboard TopBar'da yeşil/kırmızı gösterge
+```
+
+---
+
+## BÖLÜM 15 — ANAYASA DEĞİŞİKLİK KURALLARI
+
+> **NEDEN EKLENDİ:** Orijinal ANAYASA kendi değişiklik kurallarını tanımlamıyordu. "Hiçbir madde kullanıcının açık yazılı talimatı olmadan değiştirilemez" deniyordu ama değişiklik prosedürü yoktu. Versiyon numarası, onay süreci, koruma mekanizması tanımsızdı.
+>
+> **SONUÇ:** ANAYASA'nın kendisi de artık korunan ve versiyonlanan bir belge. Değişiklik prosedürü netleştirildi.
+
+### 15.1 — Değişiklik Prosedürü
+
+ANAYASA'da değişiklik yapmak için:
+
+```
+1. CEO veya Kullanıcı değişiklik önerir
+2. NEDEN-SONUÇ gerekçesi yazılır
+3. Mevcut maddeyle çelişki analizi yapılır
+4. Kullanıcı açık onay verir ("ANAYASA değişikliğini onaylıyorum")
+5. Değişiklik uygulanır
+6. Bölüm 9.2 tablosuna kayıt eklenir
+7. Versiyon numarası güncellenir
+8. git commit ile kalıcılaştırılır
+```
+
+### 15.2 — Koruma Seviyeleri
+
+| Bölüm | Koruma | Değişiklik Koşulu |
+|-------|--------|-------------------|
+| **Bölüm 1-4** (Müdahale + Kırmızı Bölge + Siyah Kapı + Kurallar) | DOKUNULMAZ | Sadece kullanıcı talimatıyla, CEO + Kullanıcı çift onay |
+| **Bölüm 5-8** (Sarılar + İhlal + Sabitler + Harita) | KORUNMUŞ | CEO öneri + Kullanıcı onay |
+| **Bölüm 9-15** (CEO Genişletmesi) | GELİŞTİRİLEBİLİR | CEO öneri + Kullanıcı onay, mevcut korumalar korunarak |
+
+### 15.3 — Versiyon Numaralandırma
+
+```
+ANAYASA v[MAJOR].[MINOR]
+
+MAJOR: Yapısal değişiklik (yeni bölüm, bölüm kaldırma, temel kural değişikliği)
+MINOR: İçerik güncellemesi (tablo güncelleme, açıklama ekleme, tarih düzeltme)
+
+Örnekler:
+v1.0 → Orijinal ANAYASA (Bölüm 1-8)
+v2.0 → CEO Genişletmesi (Bölüm 9-15 eklendi)
+v2.1 → Bir tabloya yeni satır eklendi
+v3.0 → Yeni bölüm eklendi
+```
+
+### 15.4 — Değiştirilemez Çekirdek
+
+Aşağıdaki maddeler ANAYASA'nın çekirdeğidir ve HİÇBİR KOŞULDA değiştirilemez:
+
+1. **Bölüm 4.1** — Çağrı Sırası Kuralı (BABA önce, OĞUL sonra)
+2. **Bölüm 4.2** — Risk Kapısı Kuralı (can_trade kapısı)
+3. **Bölüm 4.4** — SL/TP Zorunluluk Kuralı
+4. **Bölüm 4.6** — Felaket Drawdown Kuralı (%15 → L3)
+5. **Bölüm 4.9** — Fail-Safe Kuralı (şüphede dur)
+
+Bu 5 madde ÜSTAT'ın hayatta kalma refleksleridir. CEO bile dokunma yetkisine sahip değildir.
+
+---
+
+## MEVCUT ANAYASA VERSİYONU
+
+```
+ANAYASA v2.0
+Oluşturulma: 2026-03-14 (v1.0)
+Son Güncelleme: 2026-03-21 (v2.0 — CEO Genişletmesi)
+Toplam Bölüm: 15
+Orijinal Bölümler: 1-8 (değiştirilmedi)
+CEO Bölümleri: 9-15 (yeni)
+Onaylayan: Turan Aykut
+Uygulayan: ÜSTATLAR ÜSTADI (CEO)
+```
