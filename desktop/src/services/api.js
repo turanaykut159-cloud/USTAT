@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.6 — Backend API çağrıları.
+ * ÜSTAT v5.7 — Backend API çağrıları.
  *
  * FastAPI sunucusuyla iletişim (REST + WebSocket).
  * Tüm endpoint'ler: /api/status, /api/account, /api/positions,

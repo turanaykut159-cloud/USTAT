@@ -119,22 +119,52 @@ MIN_TOTAL_SCORE_LOW_VOL: float = 55.0
 # Minimum R:R oranı
 MIN_RISK_REWARD: float = 1.5
 
+# ── v2: Rejim-bazlı eşikler ────────────────────────────────────────
+# BABA rejim tespitine göre SE2 parametrelerini uyarla.
+# TREND: Trend zaten BABA + strateji tarafından doğrulanmış, daha gevşek eşik.
+# RANGE: Standart eşikler.
+# VOLATILE: Daha sıkı eşikler — risk yüksek.
+REGIME_SE2_PARAMS: dict[str, dict] = {
+    "TREND": {
+        "min_sources": 2,
+        "min_score": 35.0,
+        "min_rr": 1.2,
+    },
+    "RANGE": {
+        "min_sources": 3,
+        "min_score": 45.0,
+        "min_rr": 1.5,
+    },
+    "VOLATILE": {
+        "min_sources": 4,
+        "min_score": 60.0,
+        "min_rr": 2.0,
+    },
+    "OLAY": {
+        "min_sources": 99,  # Fiilen engelle
+        "min_score": 999.0,
+        "min_rr": 99.0,
+    },
+}
+
 # Volatilite rejim tespiti: ATR percentile eşikleri
 LOW_VOL_PERCENTILE: float = 30.0   # ATR bu percentilenin altındaysa düşük vol
 HIGH_VOL_PERCENTILE: float = 70.0  # ATR bu percentilenin üstündeyse yüksek vol
 
 # Kaynak ağırlıkları (sinyal gücü hesabında)
+# [VİOP kalibrasyon: VİOP vadeli piyasada yapı kırılımı ve hacim daha gürültülü,
+#  VWAP/momentum/KAMA daha güvenilir — ağırlıklar buna göre ayarlandı]
 SOURCE_WEIGHTS: dict[str, float] = {
-    "structure_break": 1.3,       # Yapı kırılımı en önemli
-    "momentum_ignition": 1.0,     # Momentum standard
-    "volume_intelligence": 1.2,   # Hacim çok önemli
-    "compression_release": 0.8,   # Sıkışma daha az sık
-    "extreme_reversion": 0.7,     # Mean reversion düşük ağırlık
+    "structure_break": 1.1,       # Yapı kırılımı [ESKİ: 1.3 → VİOP'ta S/R daha gürültülü]
+    "momentum_ignition": 1.2,     # Momentum [ESKİ: 1.0 → VİOP'ta momentum daha güvenilir]
+    "volume_intelligence": 0.9,   # Hacim [ESKİ: 1.2 → VİOP düşük likidite, hacim aldatıcı]
+    "compression_release": 1.0,   # Sıkışma [ESKİ: 0.8 → VİOP'ta sıkışma sık ve güvenilir]
+    "extreme_reversion": 0.8,     # Mean reversion [ESKİ: 0.7 → VİOP'ta uçlar daha çok]
     # SE3 yeni kaynaklar
-    "vwap_institutional": 1.1,    # Kurumsal VWAP — güvenilir seviye
+    "vwap_institutional": 1.3,    # Kurumsal VWAP [ESKİ: 1.1 → VİOP'ta kurumsal seviyeler net]
     "smart_divergence": 1.0,      # Diverjans — erken uyarı
-    "ichimoku_cloud": 0.9,        # Ichimoku — kapsamlı ama gecikmeli
-    "adaptive_momentum": 1.0,     # KAMA — rejim-uyumlu trend
+    "ichimoku_cloud": 0.8,        # Ichimoku [ESKİ: 0.9 → Gecikmeli, VİOP hızlı hareket]
+    "adaptive_momentum": 1.1,     # KAMA [ESKİ: 1.0 → Rejim uyumlu, VİOP'a iyi uyar]
 }
 
 # ── SE3: VWAP sabitleri ──
@@ -157,16 +187,16 @@ DIV_MAX_AGE_BARS: int = 10        # Diverjans en fazla 10 bar eskiyse geçerli
 SR_PROXIMITY_ATR: float = 1.5   # Fiyat S/R'ye 1.5×ATR'den yakın olmalı
 SR_BREAK_ATR: float = 0.3       # S/R kırılma eşiği: 0.3×ATR
 
-# Momentum
-ROC_STRONG: float = 1.5         # ROC > %1.5 = güçlü momentum
-ROC_WEAK: float = 0.3           # ROC < %0.3 = zayıf
+# Momentum  [VİOP kalibrasyon: ROC eşikleri düşürüldü — VİOP daha dar bantlı]
+ROC_STRONG: float = 0.8         # ROC > %0.8 = güçlü momentum  [ESKİ: 1.5]
+ROC_WEAK: float = 0.15          # ROC < %0.15 = zayıf           [ESKİ: 0.3]
 STOCH_RSI_OB: float = 80.0      # StochRSI > 80 = aşırı alım
 STOCH_RSI_OS: float = 20.0      # StochRSI < 20 = aşırı satım
 STOCH_RSI_CROSS_ZONE: float = 50.0  # %K/%D cross zone
 
-# Sıkışma
-COMPRESSION_TIGHT: float = 0.35  # ratio < 0.35 = ciddi sıkışma
-COMPRESSION_EXPANDING: float = 0.7  # ratio > 0.7 = genişleme
+# Sıkışma  [VİOP kalibrasyon: eşikler gevşetildi — VİOP daha sık sıkışır]
+COMPRESSION_TIGHT: float = 0.45  # ratio < 0.45 = ciddi sıkışma  [ESKİ: 0.35]
+COMPRESSION_EXPANDING: float = 0.6  # ratio > 0.6 = genişleme    [ESKİ: 0.7]
 
 # Aşırı uç
 EXTREME_RSI_OB: float = 75.0
@@ -454,10 +484,10 @@ def _source_volume_intelligence(
     vm_norm = vm_val / atr_val if atr_val > 0 else 0.0
     details["vol_momentum_norm"] = round(vm_norm, 4)
 
-    if vm_norm > 0.05:
-        buy_score += min(vm_norm * 20.0, 7.0)
-    elif vm_norm < -0.05:
-        sell_score += min(abs(vm_norm) * 20.0, 7.0)
+    if vm_norm > 0.02:  # [VİOP kalibrasyon: 0.05→0.02 — düşük likidite ortamı]
+        buy_score += min(vm_norm * 35.0, 7.0)  # Çarpan artırıldı: 20→35
+    elif vm_norm < -0.02:
+        sell_score += min(abs(vm_norm) * 35.0, 7.0)
 
     # ── 3. Volume Climax (0-5) ────────────────────────────────────
     # Son bar hacmi / 20-bar ortalama
@@ -468,8 +498,8 @@ def _source_volume_intelligence(
             vol_ratio = cur_vol / avg_vol
             details["vol_ratio"] = round(vol_ratio, 2)
 
-            if vol_ratio >= 2.5:
-                # Hacim klimaksı — yön tespiti
+            if vol_ratio >= 1.8:
+                # Hacim klimaksı — yön tespiti  [VİOP kalibrasyon: 2.5→1.8]
                 price_change = close[-1] - close[-2]
                 if price_change > 0:
                     buy_score += 5.0
@@ -477,8 +507,8 @@ def _source_volume_intelligence(
                 elif price_change < 0:
                     sell_score += 5.0
                     details["volume_climax"] = "bearish"
-            elif vol_ratio >= 1.5:
-                # Ortalamanın üstünde hacim — küçük bonus
+            elif vol_ratio >= 1.1:
+                # Ortalamanın üstünde hacim — küçük bonus  [VİOP kalibrasyon: 1.5→1.1]
                 price_change = close[-1] - close[-2]
                 if price_change > 0:
                     buy_score += 2.0
@@ -1180,12 +1210,14 @@ def generate_signal(
     close: np.ndarray,
     volume: np.ndarray,
     current_price: float = 0.0,
+    regime_type: str = "",
 ) -> SignalVerdict:
     """Ana sinyal üretim motoru — 9 bağımsız kaynaktan karar (SE3).
 
     Args:
         open_, high, low, close, volume: M15 OHLCV verileri.
         current_price: Güncel tick fiyatı (0 ise close[-1] kullanılır).
+        regime_type: BABA rejim tipi ("TREND", "RANGE", "VOLATILE", "OLAY").
 
     Returns:
         SignalVerdict nesnesi.
@@ -1220,9 +1252,18 @@ def generate_signal(
         elif current_rank > HIGH_VOL_PERCENTILE:
             vol_regime = "HIGH"
 
-    # Rejime göre adaptif eşikler
-    min_agree = MIN_AGREEING_SOURCES_LOW_VOL if vol_regime == "LOW" else MIN_AGREEING_SOURCES
-    min_score = MIN_TOTAL_SCORE_LOW_VOL if vol_regime == "LOW" else MIN_TOTAL_SCORE
+    # ── v2: Rejim-bazlı adaptif eşikler ────────────────────────────
+    # BABA rejim tipi varsa REGIME_SE2_PARAMS'dan al, yoksa vol_regime fallback
+    _regime_params = REGIME_SE2_PARAMS.get(regime_type, {})
+    if _regime_params:
+        min_agree = _regime_params["min_sources"]
+        min_score = _regime_params["min_score"]
+        min_rr = _regime_params["min_rr"]
+    else:
+        # Fallback: eski vol_regime bazlı mantık
+        min_agree = MIN_AGREEING_SOURCES_LOW_VOL if vol_regime == "LOW" else MIN_AGREEING_SOURCES
+        min_score = MIN_TOTAL_SCORE_LOW_VOL if vol_regime == "LOW" else MIN_TOTAL_SCORE
+        min_rr = MIN_RISK_REWARD
 
     # Price Action yapısal analiz (FAZ 1'den)
     levels = find_support_resistance(high, low, close, atr_val)
@@ -1360,9 +1401,9 @@ def generate_signal(
     reward = abs(verdict.structural_tp - current_price)
     verdict.risk_reward = reward / risk if risk > 0 else 0.0
 
-    if verdict.risk_reward < MIN_RISK_REWARD:
+    if verdict.risk_reward < min_rr:
         verdict.should_trade = False
-        verdict.reason = f"R:R yetersiz ({verdict.risk_reward:.2f} < {MIN_RISK_REWARD})"
+        verdict.reason = f"R:R yetersiz ({verdict.risk_reward:.2f} < {min_rr})"
         return verdict
 
     # ── Strateji tipi eşleme (SE3: genişletilmiş) ────────────────
@@ -1391,7 +1432,7 @@ def generate_signal(
     verdict.reason = (
         f"ÜSTAT-SE: {verdict.direction} {len(agreeing)}/{total_sources} kaynak uyumlu "
         f"[{source_names}] "
-        f"skor={total:.0f} R:R={verdict.risk_reward:.1f} vol={vol_regime}"
+        f"skor={total:.0f} R:R={verdict.risk_reward:.1f} vol={vol_regime} rejim={regime_type or 'N/A'}"
     )
 
     return verdict

@@ -54,6 +54,7 @@ from engine.utils.price_action import (
     get_structural_sl,
     get_structural_tp,
     CONFLUENCE_MIN_ENTRY,
+    CONFLUENCE_THRESHOLDS,
 )
 from engine.utils.multi_tf import (
     analyze_multi_tf,
@@ -878,9 +879,11 @@ class Ogul:
         #  Signal Engine v2.0 — Yapı-Öncelikli Ana Motor
         # ═══════════════════════════════════════════════════════════════
         try:
+            _regime_str = regime.regime_type.value if regime else ""
             verdict: SignalVerdict = se2_generate_signal(
                 open_, high, low, close, volume,
                 current_price=float(close[-1]),
+                regime_type=_regime_str,
             )
             if verdict.should_trade and verdict.direction != "NEUTRAL":
                 # SignalVerdict → Signal dönüşümü
@@ -996,6 +999,9 @@ class Ogul:
                 vol_ratio = float(volume[-1]) / vol_avg if vol_avg > 0 else 1.0
 
                 # Confluence hesapla
+                # v2: Rejim bilgisini al
+                _regime_str = regime.regime_type.value if regime else ""
+
                 confluence = calculate_confluence(
                     direction=direction_str,
                     price=best.price,
@@ -1009,24 +1015,42 @@ class Ogul:
                     ema_fast=_ema_f,
                     ema_slow=_ema_s,
                     volume_ratio=vol_ratio,
+                    regime_type=_regime_str,
                 )
 
-                # Confluence gate: skor yetersizse sinyal red
+                # v2: Rejim-bazlı eşik logla
+                _conf_threshold = CONFLUENCE_THRESHOLDS.get(_regime_str, CONFLUENCE_MIN_ENTRY)
+
+                # v2: Confluence gate → soft penalty
+                # ESKİ: can_enter=False → return None (hard veto, %100 red)
+                # YENİ: Düşük skor → güç cezası (sinyal ölmez, zayıflar)
                 if not confluence.can_enter:
+                    conf_factor = confluence.total_score / 100.0
+                    penalty = 0.3 + 0.7 * conf_factor  # En az %30 kalır
+                    original_str = best.strength
+                    best.strength *= penalty
                     logger.info(
-                        f"[PA] Confluence yetersiz [{symbol}]: "
-                        f"skor={confluence.total_score:.1f} < {CONFLUENCE_MIN_ENTRY} "
+                        f"[PA] Confluence düşük [{symbol}]: "
+                        f"skor={confluence.total_score:.1f} < {_conf_threshold} "
+                        f"→ güç cezası {original_str:.2f}×{penalty:.2f}={best.strength:.2f} "
                         f"(seviye={confluence.level_score:.1f}, "
                         f"pattern={confluence.pattern_score:.1f}, "
                         f"indikatör={confluence.indicator_score:.1f}, "
                         f"hacim={confluence.volume_score:.1f}, "
                         f"trend={confluence.trend_score:.1f})"
                     )
-                    return None
+                else:
+                    # Confluence iyi — bonus ver
+                    confluence_bonus = (confluence.total_score - _conf_threshold) / 100.0
+                    best.strength = min(best.strength + confluence_bonus * 0.3, 1.0)
+                    logger.debug(
+                        f"[PA] Confluence OK [{symbol}]: "
+                        f"skor={confluence.total_score:.1f} ≥ {_conf_threshold}"
+                    )
 
-                # Confluence skoru sinyal gücüne ekle (0-1 ölçeğine normalize)
-                confluence_bonus = (confluence.total_score - CONFLUENCE_MIN_ENTRY) / 100.0
-                best.strength = min(best.strength + confluence_bonus * 0.3, 1.0)
+                # Eski: Confluence skoru sinyal gücüne ekle (taşındı yukarı)
+                # confluence_bonus = (confluence.total_score - CONFLUENCE_MIN_ENTRY) / 100.0
+                # best.strength = min(best.strength + confluence_bonus * 0.3, 1.0)
 
                 # Pattern yönü ters ise uyarı logla (soft engel — strength düşür)
                 pat_ok, pat_str = pattern_confirms_direction(pa_patterns, direction_str)
@@ -1134,28 +1158,45 @@ class Ogul:
 
             mtf = analyze_multi_tf(direction_str, h1_data, m15_data, m5_data)
 
-            # H1 ters trend engeli (güçlü ters trend = giriş yapma)
+            # v2: H1 ters trend → kademeli ceza (ESKİ: hard veto)
+            # Sadece çok güçlü ters trend (>0.8) hard engel kalır
             if h1_data is not None:
                 h1_pass, h1_dir, h1_str = h1_trend_filter(
                     h1_data["close"], h1_data["high"], h1_data["low"],
                     direction_str,
                 )
                 if not h1_pass:
-                    logger.info(
-                        f"[MTF] H1 trend engeli [{symbol}]: "
-                        f"sinyal={direction_str}, H1={h1_dir}, "
-                        f"güç={h1_str:.2f}"
-                    )
-                    return None
+                    if h1_str > 0.8:
+                        # Çok güçlü ters trend — hala hard engel
+                        logger.info(
+                            f"[MTF] H1 güçlü ters trend ENGEL [{symbol}]: "
+                            f"sinyal={direction_str}, H1={h1_dir}, "
+                            f"güç={h1_str:.2f} > 0.8"
+                        )
+                        return None
+                    else:
+                        # Orta güçlü ters trend — soft penalty
+                        penalty = 1.0 - h1_str * 0.6
+                        best.strength *= penalty
+                        logger.info(
+                            f"[MTF] H1 ters trend CEZA [{symbol}]: "
+                            f"sinyal={direction_str}, H1={h1_dir}, "
+                            f"güç={h1_str:.2f} → strength ×{penalty:.2f}"
+                        )
 
-            # Çoklu TF çakışma engeli
+            # v2: MTF conflict → soft penalty (ESKİ: hard veto)
             if mtf.alignment == "conflict":
+                best.strength *= 0.5
                 logger.info(
-                    f"[MTF] TF çakışması [{symbol}]: "
+                    f"[MTF] TF çakışması CEZA [{symbol}]: "
                     f"skor={mtf.total_score:.1f}, "
-                    f"alignment={mtf.alignment}"
+                    f"alignment={mtf.alignment} → strength ×0.5"
                 )
-                return None
+            elif mtf.alignment == "none":
+                best.strength *= 0.7
+                logger.debug(
+                    f"[MTF] TF uyum yok [{symbol}]: strength ×0.7"
+                )
 
             # MTF skoru sinyal gücüne ekle
             if mtf.total_score > 50:
@@ -1217,13 +1258,25 @@ class Ogul:
                 f"→ {best.strength:.2f} (saat={now_time})"
             )
 
-        # Trend follow ise H1 onayı gerekli
+        # v2: Trend follow H1 onayı → soft penalty (ESKİ: hard veto)
+        # H1 nötr iken de trend follow izni var, sadece ceza
         if best.strategy == StrategyType.TREND_FOLLOW:
             if not self._confirm_h1(symbol, best):
+                best.strength *= 0.6
                 logger.debug(
-                    f"H1 onayı başarısız [{symbol}]: {best.signal_type.value}"
+                    f"H1 onayı yok [{symbol}]: {best.signal_type.value} "
+                    f"→ strength ×0.6 = {best.strength:.2f}"
                 )
-                return None
+
+        # v2: Tüm soft penaltylerden sonra minimum strength kontrolü
+        # Çok zayıflayan sinyalleri ele (gereksiz işlem önleme)
+        MIN_FINAL_STRENGTH = 0.10
+        if best.strength < MIN_FINAL_STRENGTH:
+            logger.info(
+                f"[v2] Sinyal çok zayıf [{symbol}]: "
+                f"güç={best.strength:.2f} < {MIN_FINAL_STRENGTH} — red"
+            )
+            return None
 
         logger.info(
             f"Sinyal üretildi [{symbol}]: {best.signal_type.value} "
@@ -1633,6 +1686,32 @@ class Ogul:
         direction = "BUY" if signal.signal_type == SignalType.BUY else "SELL"
         now = datetime.now()
 
+        # ── PAPER TRADING MODU ──────────────────────────────────────
+        # Paper mode aktifken sinyal log'lanır, DB'ye kaydedilir ama
+        # MT5'e emir gönderilmez. Parametre değişikliklerini güvenle
+        # test etmek için kullanılır.
+        if self.config.get("engine.paper_mode", False):
+            logger.info(
+                f"[PAPER] Sinyal üretildi [{symbol}]: "
+                f"{direction} strateji={signal.strategy.value} "
+                f"güç={signal.strength:.2f} "
+                f"fiyat={signal.price:.4f} "
+                f"SL={signal.sl:.4f} TP={signal.tp:.4f} "
+                f"rejim={regime.regime_type.value}"
+            )
+            self.db.insert_event(
+                event_type="PAPER_TRADE",
+                message=(
+                    f"Paper sinyal: {direction} {symbol} "
+                    f"strateji={signal.strategy.value} "
+                    f"güç={signal.strength:.2f} "
+                    f"SL={signal.sl:.4f} TP={signal.tp:.4f}"
+                ),
+                severity="INFO",
+                action="paper_trade",
+            )
+            return
+
         # ── FAZ 1: SIGNAL ────────────────────────────────────────────
         trade = Trade(
             symbol=symbol,
@@ -1958,6 +2037,7 @@ class Ogul:
                         atr_val=_atr, adx_val=_adx, rsi_val=_rsi,
                         macd_hist=_hist_val, ema_fast=_ema_f, ema_slow=_ema_s,
                         volume_ratio=_vol_ratio,
+                        regime_type=regime.regime_type.value if regime else "",
                     )
 
                     # Fix M17: Confluence skor sınır kontrolü

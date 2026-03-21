@@ -1,4 +1,4 @@
-"""ÜSTAT v5.6 API — FastAPI Sunucu.
+"""ÜSTAT v5.7 API — FastAPI Sunucu.
 
 Desktop uygulamasına REST API + WebSocket köprüsü sağlar.
 
@@ -54,7 +54,7 @@ from api.routes import (
 logger = logging.getLogger("ustat.api")
 
 # Tek kaynak: OpenAPI ve root endpoint aynı versiyonu kullanır
-API_VERSION = "5.6.0"
+API_VERSION = "5.7.0"
 
 
 # ── Lifespan: Engine başlat / durdur ─────────────────────────────

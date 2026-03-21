@@ -1,4 +1,4 @@
-"""ÜSTAT v5.6 — Hata Takip Dashboard API.
+"""ÜSTAT v5.7 — Hata Takip Dashboard API.
 
 Endpoint'ler:
     GET  /api/errors/summary    — Dashboard özet (sayaçlar, kategori dağılımı)
@@ -240,8 +240,11 @@ def _get_resolution_map() -> dict[str, dict]:
 def _is_resolved(error_type: str, last_seen: str, resolutions: dict) -> tuple[bool, str | None, str]:
     """Bir hata grubunun çözülüp çözülmediğini belirle.
 
-    Çözülme koşulu: error_type resolution tablosunda var VE
-    last_seen <= resolved_at (çözümlemeden sonra yeni event yok).
+    Çözülme koşulu: error_type resolution tablosunda var.
+    Eğer çözümlemeden sonra aynı tip event tekrar gelmişse,
+    24 saat geçmediyse hâlâ çözümlü sayılır (tekrarlayan uyarılar
+    çözümlemeyi hemen iptal etmesin). 24 saatten fazlaysa yeni sorun
+    kabul edilir ve çözümleme düşer.
 
     Returns:
         (resolved, resolved_at, resolved_by)
@@ -250,9 +253,25 @@ def _is_resolved(error_type: str, last_seen: str, resolutions: dict) -> tuple[bo
     if not res:
         return False, None, ""
     resolved_at = res.get("resolved_at", "")
+    resolved_by = res.get("resolved_by", "")
+
+    # Çözümlemeden önce veya aynı anda → kesinlikle çözümlü
     if last_seen <= resolved_at:
-        return True, resolved_at, res.get("resolved_by", "")
-    # Çözümlemeden SONRA yeni event gelmiş → artık çözülmemiş
+        return True, resolved_at, resolved_by
+
+    # Çözümlemeden sonra yeni event gelmiş — 24 saat tolerans uygula
+    try:
+        from datetime import datetime as _dt
+        res_dt = _dt.fromisoformat(resolved_at)
+        last_dt = _dt.fromisoformat(last_seen[:19])
+        diff_hours = (last_dt - res_dt).total_seconds() / 3600
+        if diff_hours <= 24:
+            # 24 saat içinde tekrar eden aynı tip uyarı → hâlâ çözümlü say
+            return True, resolved_at, resolved_by
+    except (ValueError, TypeError):
+        pass
+
+    # 24 saatten fazla geçmiş → gerçekten yeni sorun
     return False, None, ""
 
 

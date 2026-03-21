@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.6 — Hata Takip Paneli (Error Tracker Dashboard).
+ * ÜSTAT v5.7 — Hata Takip Paneli (Error Tracker Dashboard).
  *
  * Özellikler:
  *   - Özet kartları (bugünkü hatalar, uyarılar, açık gruplar)

@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.6 — System Monitor bileşeni.
+ * ÜSTAT v5.7 — System Monitor bileşeni.
  *
  * Eski: SystemHealth + SystemLog → Yeni: tek Monitor sayfası.
  * Tüm modüllerin durumu, emir akışı, log, performans, risk panelleri.

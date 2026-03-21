@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.6 — Ana Dashboard ekranı.
+ * ÜSTAT v5.7 — Ana Dashboard ekranı.
  *
  * Layout:
  *   Üst:    4 stat kartı (Günlük İşlem, Başarı Oranı, Net K/Z, Profit Factor)
@@ -61,6 +61,11 @@ function marginUsagePct(margin, equity) {
 // Bilinen otomatik stratejiler
 const KNOWN_AUTO_STRATEGIES = ['trend_follow', 'mean_reversion', 'breakout'];
 
+// ── Sekme geçişi cache — unmount/remount'ta "Yükleniyor" flash'ını önler ──
+// Modül seviyesinde tutulur: React state yıkılsa bile veri kalır.
+let _dashCache = null;   // { stats, perf, recentTrades, status, account, livePositions, hybridTickets }
+let _dashLoaded = false; // en az 1 kez başarılı fetchAll yapıldı mı?
+
 // ═══════════════════════════════════════════════════════════════════
 //  DASHBOARD
 // ═══════════════════════════════════════════════════════════════════
@@ -68,25 +73,25 @@ const KNOWN_AUTO_STRATEGIES = ['trend_follow', 'mean_reversion', 'breakout'];
 export default function Dashboard() {
   const navigate = useNavigate();
 
-  // ── State ────────────────────────────────────────────────────────
-  const [stats, setStats] = useState({
-    total_trades: 0, win_rate: 0, total_pnl: 0,
-  });
-  const [perf, setPerf] = useState({
-    profit_factor: 0, equity_curve: [],
-  });
-  const [recentTrades, setRecentTrades] = useState([]);
-  const [status, setStatus] = useState({
-    regime: 'TREND', regime_confidence: 0,
-    engine_running: false, daily_trade_count: 0,
-  });
-  const [account, setAccount] = useState({
-    balance: 0, equity: 0, margin: 0, free_margin: 0, floating_pnl: 0,
-  });
-  const [livePositions, setLivePositions] = useState([]);
-  const [initialLoading, setInitialLoading] = useState(true);
+  // ── State (cache varsa ondan başlat → "Yükleniyor" flash'ı olmaz) ──
+  const [stats, setStats] = useState(
+    _dashCache?.stats ?? { total_trades: 0, win_rate: 0, total_pnl: 0 },
+  );
+  const [perf, setPerf] = useState(
+    _dashCache?.perf ?? { profit_factor: 0, equity_curve: [] },
+  );
+  const [recentTrades, setRecentTrades] = useState(_dashCache?.recentTrades ?? []);
+  const [status, setStatus] = useState(
+    _dashCache?.status ?? { regime: 'TREND', regime_confidence: 0, engine_running: false, daily_trade_count: 0 },
+  );
+  const [account, setAccount] = useState(
+    _dashCache?.account ?? { balance: 0, equity: 0, margin: 0, free_margin: 0, floating_pnl: 0 },
+  );
+  const [livePositions, setLivePositions] = useState(_dashCache?.livePositions ?? []);
+  // İlk kez açılıyorsa loading göster, daha önce yüklendiyse gösterme
+  const [initialLoading, setInitialLoading] = useState(!_dashLoaded);
   const [closingTicket, setClosingTicket] = useState(null);
-  const [hybridTickets, setHybridTickets] = useState(new Set());
+  const [hybridTickets, setHybridTickets] = useState(_dashCache?.hybridTickets ?? new Set());
   const [transferringTicket, setTransferringTicket] = useState(null);
 
   // WebSocket kaynak canlı veri
@@ -135,6 +140,14 @@ export default function Dashboard() {
       const tickets = (hybrid.positions || []).map((hp) => hp.ticket).filter(Boolean);
       setHybridTickets(new Set(tickets));
       setApiError(null); // Başarılı fetch → hata banner'ını temizle
+
+      // ── Cache güncelle — sonraki mount'larda anında gösterilir ──
+      _dashCache = {
+        stats: s, perf: p, recentTrades: t.trades || [],
+        status: st, account: acc, livePositions: pos.positions || [],
+        hybridTickets: new Set(tickets),
+      };
+      _dashLoaded = true;
     } catch (err) {
       console.error('[Dashboard] fetchAll:', err?.message ?? err);
       setApiError('Veri yüklenemedi. API erişilebilir mi kontrol edin.');

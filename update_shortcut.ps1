@@ -2,7 +2,7 @@
 # Calistirmak icin: PowerShell -ExecutionPolicy Bypass -File "C:\Users\pc\USTAT\update_shortcut.ps1"
 
 $desktop = [Environment]::GetFolderPath("Desktop")
-$newName = "USTAT v5.6 VIOP Algorithmic Trading"
+$newName = "USTAT v5.7 VIOP Algorithmic Trading"
 $projectDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 # Eski kisayollari bul
@@ -26,7 +26,7 @@ $shortcut = $shell.CreateShortcut($newPath)
 $shortcut.TargetPath = "wscript.exe"
 $shortcut.Arguments = "`"$(Join-Path $projectDir 'start_ustat.vbs')`""
 $shortcut.WorkingDirectory = $projectDir
-$shortcut.Description = "USTAT v5.6 VIOP Algorithmic Trading"
+$shortcut.Description = "USTAT v5.7 VIOP Algorithmic Trading"
 $iconPath = Join-Path $projectDir "desktop\assets\icon.ico"
 if (Test-Path $iconPath) {
     $shortcut.IconLocation = "$iconPath,0"

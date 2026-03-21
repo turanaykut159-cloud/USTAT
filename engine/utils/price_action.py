@@ -74,8 +74,17 @@ ENGULFING_MIN_RATIO: float = 1.2  # engulfing gövde oranı
 TREND_MIN_SWINGS: int = 3         # Min swing sayısı trend tespiti için
 HH_HL_TOLERANCE: float = 0.001   # Higher High/Low tolerans (%)
 
-# Confluence
-CONFLUENCE_MIN_ENTRY: float = 60.0  # Min giriş skoru
+# Confluence — rejim-bazlı eşikler (v2 revizyon)
+# ESKİ: CONFLUENCE_MIN_ENTRY = 60.0 (sabit, tüm rejimlerde aynı)
+# YENİ: Rejime göre dinamik eşik. Trend'te düşük (zaten SE2+BABA teyitli),
+#        Range'de orta, Volatile'da yüksek.
+CONFLUENCE_THRESHOLDS: dict[str, float] = {
+    "TREND": 40.0,      # Trend zaten SE2 + BABA tarafından doğrulanmış
+    "RANGE": 50.0,      # Orta düzey doğrulama
+    "VOLATILE": 65.0,   # Yüksek eşik — korunma
+    "OLAY": 999.0,      # OLAY rejiminde işlem yapılmaz
+}
+CONFLUENCE_MIN_ENTRY: float = 50.0  # Fallback (rejim bilinmiyorsa)
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -525,13 +534,15 @@ def calculate_confluence(
     ema_slow: float = 0.0,
     # Hacim bilgisi
     volume_ratio: float = 1.0,  # current_vol / avg_vol
+    # v2: Rejim bilgisi (eşik seçimi için)
+    regime_type: str = "",  # "TREND", "RANGE", "VOLATILE", "OLAY"
 ) -> ConfluenceResult:
     """Giriş kararı için confluence skor hesapla.
 
     Skor dağılımı (100 üzerinden):
         - Seviye yakınlığı:    0-25 puan
-        - Bar pattern:         0-20 puan
-        - Gösterge uyumu:      0-25 puan
+        - Bar pattern:         0-10 puan (v2: 20→10)
+        - Gösterge uyumu:      0-35 puan (v2: 25→35)
         - Hacim kalitesi:      0-15 puan
         - Trend yapısı:        0-15 puan
 
@@ -584,63 +595,69 @@ def calculate_confluence(
 
     level_score = min(level_score, 25.0)
 
-    # ── 2. Bar Pattern (0-20) ────────────────────────────────────
+    # ── 2. Bar Pattern (0-10) ────────────────────────────────────
+    # v2 revizyon: 20→10 (VİOP M15'te pattern %88 sıfır, ağırlık düşürüldü)
     pattern_score = 0.0
     confirms, pat_str = pattern_confirms_direction(patterns, direction)
     if confirms:
-        pattern_score = pat_str * 20.0
+        pattern_score = pat_str * 10.0
     else:
         # Çelişen pattern: ceza
-        pattern_score = -pat_str * 10.0
+        pattern_score = -pat_str * 5.0
     details["pattern_confirms"] = confirms
-    pattern_score = max(min(pattern_score, 20.0), 0.0)
+    pattern_score = max(min(pattern_score, 10.0), 0.0)
 
-    # ── 3. Gösterge Uyumu (0-25) ──────────────────────────────────
+    # ── 3. Gösterge Uyumu (0-35) ──────────────────────────────────
+    # v2 revizyon: 25→35 (Pattern'den aktarılan 10 puan burada)
+    # VİOP'ta indikatörler pattern'den daha güvenilir sinyal veriyor
     indicator_score = 0.0
 
-    # ADX gücü (0-8)
-    if adx_val > 25:
-        indicator_score += min((adx_val - 25) / 25.0 * 8, 8)
+    # ADX gücü (0-12) — ESKİ: 0-8
+    if adx_val > 20:
+        indicator_score += min((adx_val - 20) / 20.0 * 12, 12)
 
-    # RSI uyumu (0-7)
+    # RSI uyumu (0-9) — ESKİ: 0-7
     if direction == "BUY":
         if 30 < rsi_val < 60:  # Aşırı almayı geçmemiş, geri çekilme bölgesi
-            indicator_score += 5.0
-        elif rsi_val <= 30:     # Aşırı satış = MR fırsatı
             indicator_score += 7.0
+        elif rsi_val <= 30:     # Aşırı satış = MR fırsatı
+            indicator_score += 9.0
         elif rsi_val > 70:      # Aşırı alım = risk
             indicator_score -= 3.0
     else:
         if 40 < rsi_val < 70:
-            indicator_score += 5.0
-        elif rsi_val >= 70:
             indicator_score += 7.0
+        elif rsi_val >= 70:
+            indicator_score += 9.0
         elif rsi_val < 30:
             indicator_score -= 3.0
 
-    # MACD uyumu (0-5)
+    # MACD uyumu (0-7) — ESKİ: 0-5
     if direction == "BUY" and macd_hist > 0:
-        indicator_score += min(abs(macd_hist) / (atr_val * 0.3) * 5, 5) if atr_val > 0 else 0
+        indicator_score += min(abs(macd_hist) / (atr_val * 0.3) * 7, 7) if atr_val > 0 else 0
     elif direction == "SELL" and macd_hist < 0:
-        indicator_score += min(abs(macd_hist) / (atr_val * 0.3) * 5, 5) if atr_val > 0 else 0
+        indicator_score += min(abs(macd_hist) / (atr_val * 0.3) * 7, 7) if atr_val > 0 else 0
 
-    # EMA uyumu (0-5)
+    # EMA uyumu (0-7) — ESKİ: 0-5
     if direction == "BUY" and ema_fast > ema_slow:
-        indicator_score += 5.0
+        indicator_score += 7.0
     elif direction == "SELL" and ema_fast < ema_slow:
-        indicator_score += 5.0
+        indicator_score += 7.0
 
-    indicator_score = max(min(indicator_score, 25.0), 0.0)
+    indicator_score = max(min(indicator_score, 35.0), 0.0)
 
     # ── 4. Hacim Kalitesi (0-15) ──────────────────────────────────
+    # v2 revizyon: Sabit eşik yerine kademeli puanlama.
+    # ESKİ: volume_ratio >= 2.0 → 15, >= 1.5 → 12, >= 1.0 → 8, >= 0.7 → 4
+    # YENİ: Daha erişilebilir eşikler (VİOP düşük hacim gerçeğine uygun)
     volume_score = 0.0
-    if volume_ratio >= 2.0:
+    if volume_ratio >= 1.8:
         volume_score = 15.0
-    elif volume_ratio >= 1.5:
+    elif volume_ratio >= 1.3:
         volume_score = 12.0
-    elif volume_ratio >= 1.0:
+    elif volume_ratio >= 0.8:
         volume_score = 8.0
-    elif volume_ratio >= 0.7:
+    elif volume_ratio >= 0.5:
         volume_score = 4.0
     else:
         volume_score = 0.0
@@ -661,6 +678,9 @@ def calculate_confluence(
     # ── Toplam ────────────────────────────────────────────────────
     total = level_score + pattern_score + indicator_score + volume_score + trend_score
 
+    # v2: Rejim-bazlı eşik (ESKİ: sabit 60.0)
+    threshold = CONFLUENCE_THRESHOLDS.get(regime_type, CONFLUENCE_MIN_ENTRY)
+
     return ConfluenceResult(
         total_score=max(total, 0.0),
         level_score=level_score,
@@ -669,7 +689,7 @@ def calculate_confluence(
         volume_score=volume_score,
         trend_score=trend_score,
         details=details,
-        can_enter=total >= CONFLUENCE_MIN_ENTRY,
+        can_enter=total >= threshold,
     )
 
 

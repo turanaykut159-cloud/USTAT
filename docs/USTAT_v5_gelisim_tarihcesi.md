@@ -1,4 +1,54 @@
-# ÜSTAT v5.6 — Gelişim Tarihçesi
+# ÜSTAT v5.7 — Gelişim Tarihçesi
+
+---
+
+## #48 — OĞUL v2 Revizyon: Aktif İşlem Kapasitesi (6 Aşamalı Pipeline Yenileme) (2026-03-21)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-21 |
+| **Versiyon** | 5.6.0 → 5.7.0 |
+| **Neden** | OĞUL motoru 157 DB kaydından 0 otomatik işlem açabiliyordu. Kök neden: PA Confluence Gate (sabit 60.0 eşiği) VİOP koşullarında matematiksel olarak geçilemez — Pattern alt-skoru %88 sıfır, Volume %77 sıfır. 6 aşamalı revizyon planı uygulandı. |
+| **Tetikleyen** | Detaylı 5-ajan paralel araştırma + "DÜRÜST CEVAP" harici analiz değerlendirmesi |
+
+### Değişiklikler
+
+| Dosya | Aşama | Ne Değişti |
+|-------|-------|-----------|
+| `config/default.json` ⛔ | 0 | `paper_mode: true` eklendi — sinyaller loglanır, MT5'e emir gitmez. Versiyon 5.6.0 → 5.7.0. |
+| `engine/utils/price_action.py` | 1 | Sabit 60.0 confluence eşiği → rejim-bazlı: TREND:40 / RANGE:50 / VOLATILE:65 / OLAY:999. Pattern ağırlığı 20→10, Indicator ağırlığı 25→35. Volume eşikleri VİOP'a uyarlandı (2.0→1.8, 1.5→1.3, 1.0→0.8, 0.7→0.5). `calculate_confluence()` artık `regime_type` parametresi alıyor. |
+| `engine/ogul.py` ⛔ | 0+2 | Paper trading modu: `paper_mode` aktifken sinyal `PAPER_TRADE` event olarak DB'ye yazılır, MT5'e emir gönderilmez. Confluence gate: hard veto → soft penalty (min %30 güç korunur). H1 trend filtresi: kademeli ceza (sadece h1_str > 0.8 hard engel). MTF conflict: %50 penalty, MTF none: %30 penalty. H1 confirmation: %40 penalty. Minimum final güç eşiği: 0.10. SE2 çağrısına `regime_type` parametresi eklendi. |
+| `engine/utils/signal_engine.py` | 3+4 | `generate_signal()` artık `regime_type` parametresi alıyor. REGIME_SE2_PARAMS eklendi: TREND(2 kaynak, 35 skor, R:R 1.2), RANGE(3, 45, 1.5), VOLATILE(4, 60, 2.0). Volume klimaks eşikleri: 2.5→1.8, bonus: 1.5→1.1. Volume momentum eşiği: 0.05→0.02, çarpan 20→35. ROC: 1.5→0.8, zayıf: 0.3→0.15. Compression: 0.35→0.45, genişleme: 0.7→0.6. Kaynak ağırlıkları VİOP'a uyarlandı (VWAP ↑1.3, momentum ↑1.2, volume ↓0.9, yapı ↓1.1). |
+| `engine/backtest.py` 🆕 | 5 | Walk-forward validasyon aracı. Sentetik veya gerçek DB verisiyle sinyal pipeline testi. CLI: `python -m engine.backtest --synthetic --regime TREND`. |
+
+### Eklenen
+- `REGIME_SE2_PARAMS` dictionary — rejim bazlı SE2 eşikleri (signal_engine.py)
+- `CONFLUENCE_THRESHOLDS` dictionary — rejim bazlı confluence eşikleri (price_action.py)
+- `paper_mode` konfigürasyon parametresi (config/default.json)
+- Paper trade event loglama — `PAPER_TRADE` event tipi (ogul.py)
+- `engine/backtest.py` — bağımsız walk-forward validasyon modülü
+- `GELISIM_TARIHCESI.md` — kök dizinde kısa değişiklik özeti
+
+### Kaldırılan / Değiştirilen Davranışlar
+- Confluence sabit 60.0 eşiği → rejim-bazlı dinamik eşikler
+- 5 hard veto noktası → soft penalty (confluence, H1, MTF, H1 confirmation)
+- SE2 sabit min_sources/min_score/min_rr → rejim-bazlı parametreler
+- Volume/ROC/Compression sabitleri → VİOP kalibrasyonlu değerler
+- Kaynak ağırlıkları → VİOP piyasa yapısına uyumlu yeniden dengeleme
+
+### Test Sonuçları
+- Tüm dosyalar syntax kontrolünden geçti ✓
+- Import chain doğrulaması başarılı (Config, price_action, signal_engine, ogul) ✓
+- Sentetik backtest TREND: 40 pencereden 4 sinyal (%10 oran), tümü final'a ulaştı ✓
+- Sentetik backtest RANGE: 0 sinyal (daha sıkı eşikler, beklenen davranış) ✓
+- `paper_mode = True` doğrulandı ✓
+
+### Rollback Planı
+1. `config/default.json`: `paper_mode: false`, versiyon 5.6.0'a geri al
+2. `engine/ogul.py`: `.bak` dosyasından geri yükle
+3. `engine/utils/price_action.py`: git checkout ile geri al
+4. `engine/utils/signal_engine.py`: git checkout ile geri al
+5. `engine/backtest.py`: sil (bağımsız dosya, sisteme etkisi yok)
 
 ---
 
