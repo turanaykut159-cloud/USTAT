@@ -2,6 +2,25 @@
 
 ---
 
+## #55 — ÜSTAT Beyin Merkezi Sayfası + Sayfa Ayrımı (2026-03-21)
+- **UstatBrain.jsx** (YENİ — 400 satır): Kurumsal ÜSTAT beyin merkezi sayfası
+  - Hero banner (marka logosu, 4 özet metrik, dönem filtresi)
+  - Üç Motor Panorama (BABA/OĞUL/ÜSTAT canlı durum kartları)
+  - İşlem Kategorileri (4'lü mini bar chart grid: sonuç, yön, süre, rejim)
+  - Kontrat Profilleri (sembol kartları: işlem, WR, K/Z, süre)
+  - Karar Akışı (timeline: son 20 olay)
+  - Rejim Bazlı Performans (yatay bar chart + aktif rejim badge)
+  - Beyin Panelleri (Hata Atama, Ertesi Gün Analizi, Regülasyon Önerileri)
+- **Performance.jsx**: Üstat Analiz tab'ı tamamen kaldırıldı (299 satır azalma), başlık "Performans" olarak güncellendi
+- **App.jsx**: UstatBrain import + `/ustat` route eklendi
+- **SideNav.jsx**: "Üstat & Performans" → "Performans" 🏆 + "ÜSTAT" 🧠 ayrı menü öğeleri
+- **theme.css**: +756 satır — `.ustat-brain` ve tüm `.ub-*` alt sınıfları (koyu/açık tema)
+- CSS düzeltmeleri: Hero banner flex-wrap overflow fix, beyin panel metin wrap fix
+- API: `/api/ustat/brain` endpoint'i üzerinden 9/9 ÜSTAT görevi canlı veri çekiyor
+- Versiyon hesabı: 2276 değişiklik / 32558 toplam = %6.99 (<%10 — versiyon artmaz)
+
+---
+
 ## #54 — CEO FAZ-3: Governance — Modüler Refactoring + CI/CD (2026-03-21)
 - ogul.py Top 5 modülü → engine/top5_selection.py (Facade/Composition pattern)
 - ogul.py: 4,897 → 4,307 satır (Top 5 iç metotlar taşındı, delegation stubs eklendi)

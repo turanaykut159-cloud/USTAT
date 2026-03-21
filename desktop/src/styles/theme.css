@@ -4644,3 +4644,759 @@ h2 {
   white-space: nowrap;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   ÜSTAT BEYİN MERKEZİ — Kurumsal & Profesyonel Stil
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.ustat-brain {
+  padding: 16px 20px 32px;
+  overflow-y: auto;
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ── Loading ──────────────────────────────────────────────────────── */
+.ub-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 60vh;
+  gap: 16px;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.ub-loading-spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: ubSpin 0.8s linear infinite;
+}
+
+@keyframes ubSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── HERO BANNER ─────────────────────────────────────────────────── */
+.ub-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  background: linear-gradient(135deg, #0c1929 0%, #0d1f3c 40%, #111b2e 100%);
+  border: 1px solid rgba(88, 166, 255, 0.12);
+  border-radius: 12px;
+  padding: 24px 28px;
+  position: relative;
+  overflow: visible;
+  gap: 16px;
+}
+
+.ub-hero::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  right: -20%;
+  width: 400px;
+  height: 400px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(88, 166, 255, 0.06) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.ub-hero-left {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1 1 280px;
+  min-width: 0;
+}
+
+.ub-hero-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.ub-hero-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #2563eb, #4f46e5);
+  color: #fff;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -1px;
+  font-family: 'Segoe UI', sans-serif;
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.35);
+}
+
+.ub-hero-title-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.ub-hero-title {
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: 3px;
+  color: #e6edf3;
+  line-height: 1;
+}
+
+.ub-hero-subtitle {
+  font-size: 12px;
+  color: var(--accent);
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+.ub-hero-desc {
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  max-width: 340px;
+  line-height: 1.5;
+}
+
+.ub-hero-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 14px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ub-hero-metrics {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.ub-hero-metric {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.ub-hm-value {
+  font-size: 17px;
+  font-weight: 700;
+  color: #e6edf3;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 160px;
+  text-align: center;
+}
+
+.ub-hm-label {
+  font-size: 10px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.ub-hero-period {
+  display: flex;
+  gap: 6px;
+}
+
+.ub-period-btn {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 4px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.ub-period-btn:hover {
+  background: rgba(88, 166, 255, 0.08);
+  color: var(--text-primary);
+}
+
+.ub-period-btn.active {
+  background: rgba(88, 166, 255, 0.15);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ── MOTOR KARTLARI ──────────────────────────────────────────────── */
+.ub-motors {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+
+.ub-motor-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.ub-motor-card:hover {
+  border-color: rgba(88, 166, 255, 0.2);
+}
+
+.ub-motor--active {
+  border-left: 3px solid var(--profit);
+}
+
+.ub-motor--inactive {
+  border-left: 3px solid var(--loss);
+  opacity: 0.7;
+}
+
+.ub-motor-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ub-motor-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.ub-ind--green {
+  background: var(--profit);
+  box-shadow: 0 0 8px rgba(63, 185, 80, 0.5);
+}
+
+.ub-ind--red {
+  background: var(--loss);
+  box-shadow: 0 0 8px rgba(248, 81, 73, 0.5);
+}
+
+.ub-motor-name {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--text-primary);
+}
+
+.ub-motor-role {
+  font-size: 11px;
+  color: var(--accent);
+  background: var(--accent-dim);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.ub-motor-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.ub-motor-status {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  align-self: flex-start;
+  padding: 3px 10px;
+  border-radius: 4px;
+}
+
+.ub-status--ok {
+  color: var(--profit);
+  background: rgba(63, 185, 80, 0.1);
+}
+
+.ub-status--warn {
+  color: var(--loss);
+  background: rgba(248, 81, 73, 0.1);
+}
+
+/* ── BÖLÜM GENEL ─────────────────────────────────────────────────── */
+.ub-section {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px;
+}
+
+.ub-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.ub-section-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.5px;
+  margin-bottom: 14px;
+}
+
+.ub-section-header .ub-section-title {
+  margin-bottom: 0;
+}
+
+.ub-section-badge {
+  font-size: 11px;
+  color: var(--accent);
+  background: var(--accent-dim);
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+/* ── KATEGORİ GRID (4 mini chart) ────────────────────────────────── */
+.ub-cat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.ub-mini-chart {
+  background: var(--bg-secondary);
+  border: 1px solid rgba(48, 54, 61, 0.5);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.ub-mc-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  letter-spacing: 0.3px;
+}
+
+/* ── KONTRAT PROFİL GRID ─────────────────────────────────────────── */
+.ub-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.ub-profile-card {
+  background: var(--bg-secondary);
+  border: 1px solid rgba(48, 54, 61, 0.5);
+  border-radius: 8px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: border-color 0.2s;
+}
+
+.ub-profile-card:hover {
+  border-color: rgba(88, 166, 255, 0.15);
+}
+
+.ub-profile-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ub-profile-symbol {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.5px;
+}
+
+.ub-profile-dir {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.ub-dir--buy {
+  color: var(--profit);
+  background: rgba(63, 185, 80, 0.12);
+}
+
+.ub-dir--sell {
+  color: var(--loss);
+  background: rgba(248, 81, 73, 0.12);
+}
+
+.ub-profile-stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.ub-ps {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ub-ps-label {
+  font-size: 10px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.ub-ps-val {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+}
+
+.ub-ps-val.profit { color: var(--profit); }
+.ub-ps-val.loss { color: var(--loss); }
+
+/* ── KARAR AKIŞI (TIMELINE) ──────────────────────────────────────── */
+.ub-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  position: relative;
+  padding-left: 20px;
+}
+
+.ub-timeline::before {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  background: var(--border);
+  border-radius: 1px;
+}
+
+.ub-tl-item {
+  display: flex;
+  gap: 14px;
+  padding: 8px 0;
+  position: relative;
+}
+
+.ub-tl-dot {
+  position: absolute;
+  left: -19px;
+  top: 13px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-card);
+  z-index: 1;
+}
+
+.ub-tl-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ub-tl-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ub-tl-time {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  min-width: 80px;
+}
+
+.ub-tl-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.ub-sev--info,
+.ub-sev--low {
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.ub-sev--medium,
+.ub-sev--warning {
+  color: var(--warning);
+  background: rgba(210, 153, 34, 0.12);
+}
+
+.ub-sev--high,
+.ub-sev--critical {
+  color: var(--loss);
+  background: rgba(248, 81, 73, 0.12);
+}
+
+.ub-tl-msg {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+/* ── CHART CONTAINER ─────────────────────────────────────────────── */
+.ub-chart-container {
+  width: 100%;
+  height: 200px;
+}
+
+/* ── BEYİN PANELLERİ ─────────────────────────────────────────────── */
+.ub-panels {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 14px;
+}
+
+.ub-brain-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 180px;
+}
+
+.ub-bp-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(48, 54, 61, 0.5);
+}
+
+.ub-bp-icon {
+  font-size: 18px;
+}
+
+.ub-bp-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.3px;
+}
+
+.ub-bp-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  max-height: 260px;
+}
+
+.ub-bp-row {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  font-size: 11.5px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.015);
+  border: 1px solid transparent;
+  transition: border-color 0.15s;
+}
+
+.ub-bp-row:hover {
+  border-color: rgba(48, 54, 61, 0.5);
+}
+
+.ub-bp-badge {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 3px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.ub-bp--baba { color: #d29922; background: rgba(210, 153, 34, 0.12); }
+.ub-bp--ogul { color: #58a6ff; background: rgba(88, 166, 255, 0.12); }
+.ub-bp--ustat { color: #a371f7; background: rgba(163, 113, 247, 0.12); }
+.ub-bp--high { color: var(--loss); background: rgba(248, 81, 73, 0.1); }
+.ub-bp--medium { color: var(--warning); background: rgba(210, 153, 34, 0.1); }
+.ub-bp--low { color: var(--profit); background: rgba(63, 185, 80, 0.1); }
+.ub-bp--critical { color: #fff; background: rgba(248, 81, 73, 0.25); }
+
+.ub-bp-type {
+  color: var(--text-primary);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.ub-bp-desc {
+  color: var(--text-secondary);
+  flex: 1 1 100%;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.ub-bp-dim {
+  color: var(--text-dim);
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 11px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.ub-bp-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  gap: 8px;
+  text-align: center;
+  padding: 20px 10px;
+}
+
+.ub-bp-empty p {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.ub-bp-waiting {
+  font-size: 10px;
+  color: var(--text-dim);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  animation: ubPulse 2s ease-in-out infinite;
+}
+
+@keyframes ubPulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+/* NDA satırı */
+.ub-nda-row {
+  flex-wrap: wrap;
+}
+
+.ub-bp-symbol {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+  min-width: 65px;
+}
+
+.ub-bp-pnl {
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  min-width: 70px;
+}
+
+.ub-bp-pnl.profit { color: var(--profit); }
+.ub-bp-pnl.loss { color: var(--loss); }
+
+.ub-nda-scores {
+  display: flex;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--text-dim);
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+}
+
+.ub-nda-total {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* ── EMPTY STATE ──────────────────────────────────────────────────── */
+.ub-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 30px 20px;
+  gap: 8px;
+}
+
+.ub-empty--sm {
+  padding: 16px 10px;
+}
+
+.ub-empty-icon {
+  font-size: 28px;
+  opacity: 0.3;
+}
+
+.ub-empty--sm .ub-empty-icon {
+  font-size: 20px;
+}
+
+.ub-empty-text {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+/* ── AÇIK TEMA AYARLARI ──────────────────────────────────────────── */
+:root[data-theme="light"] .ub-hero {
+  background: linear-gradient(135deg, #e8f0fe 0%, #dbeafe 40%, #f0f5ff 100%);
+  border-color: rgba(9, 105, 218, 0.15);
+}
+
+:root[data-theme="light"] .ub-hero-logo {
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.2);
+}
+
+:root[data-theme="light"] .ub-hero-title {
+  color: #1f2328;
+}
+
+:root[data-theme="light"] .ub-period-btn {
+  background: rgba(0, 0, 0, 0.03);
+  border-color: rgba(0, 0, 0, 0.08);
+}
+
+:root[data-theme="light"] .ub-mini-chart,
+:root[data-theme="light"] .ub-profile-card {
+  background: #f6f8fa;
+  border-color: var(--border);
+}
+
+:root[data-theme="light"] .ub-bp-row {
+  background: rgba(0, 0, 0, 0.015);
+}
+
+:root[data-theme="light"] .ub-bp-row:hover {
+  border-color: var(--border);
+}
+

@@ -20,6 +20,7 @@ import AutoTrading from './components/AutoTrading';
 import Monitor from './components/Monitor';
 import ErrorTracker from './components/ErrorTracker';
 import Settings from './components/Settings';
+import UstatBrain from './components/UstatBrain';
 import ErrorBoundary from './components/ErrorBoundary';
 
 /** Her route'u ayri ErrorBoundary ile sarar — bir sayfa cokerse diger sayfalar etkilenmez. */
@@ -61,6 +62,7 @@ export default function App() {
               <Route path="/auto" element={<RouteBoundary label="Oto"><AutoTrading /></RouteBoundary>} />
               <Route path="/trades" element={<RouteBoundary label="Islem Gecmisi"><TradeHistory /></RouteBoundary>} />
               <Route path="/performance" element={<RouteBoundary label="Performans"><Performance /></RouteBoundary>} />
+              <Route path="/ustat" element={<RouteBoundary label="Üstat"><UstatBrain /></RouteBoundary>} />
               <Route path="/risk" element={<RouteBoundary label="Risk"><RiskManagement /></RouteBoundary>} />
               <Route path="/monitor" element={<RouteBoundary label="Monitor"><Monitor /></RouteBoundary>} />
               <Route path="/errors" element={<RouteBoundary label="Hata Takip"><ErrorTracker /></RouteBoundary>} />

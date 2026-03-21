@@ -1,11 +1,7 @@
 /**
- * ÜSTAT v5.7 — Üstat & Performans ekranı.
+ * ÜSTAT v5.7 — Performans ekranı.
  *
- * İki sekme:
- *   A) Performans — Klasik performans metrikleri (9 bölüm)
- *   B) Üstat Analiz — v13.0 beyin görev bileşenleri (6 bölüm)
- *
- * Performans bölümleri:
+ * 9 Bölüm:
  *   1. Özet kartlar (5): Net K/Z, Win Rate, Sharpe, PF, Max DD
  *   2. Equity eğrisi (detaylı, AreaChart)
  *   3. Drawdown grafiği (AreaChart, kırmızı)
@@ -16,16 +12,7 @@
  *   8. Saat bazlı performans (heatmap)
  *   9. Aylık kâr/zarar breakdown (BarChart)
  *
- * Üstat Analiz bölümleri:
- *   A. Özet kartlar (4)
- *   B. İşlem kategorileri (4 mini BarChart)
- *   C. Kontrat profilleri (grid kartlar)
- *   D. Karar akışı (timeline)
- *   E. Rejim bazlı performans (BarChart)
- *   F. Placeholder paneller (3 yakında kartı)
- *
- * Veri: getPerformance, getTradeStats, getTrades (Performans)
- *       getUstatBrain (Üstat Analiz)
+ * Veri: getPerformance, getTradeStats, getTrades
  */
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
@@ -35,7 +22,7 @@ import {
   LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
 } from 'recharts';
-import { getPerformance, getTradeStats, getTrades, getUstatBrain, STATS_BASELINE } from '../services/api';
+import { getPerformance, getTradeStats, getTrades, STATS_BASELINE } from '../services/api';
 
 // ── Yardımcılar ──────────────────────────────────────────────────
 
@@ -136,11 +123,9 @@ function CategoryTip({ active, payload }) {
 // ═══════════════════════════════════════════════════════════════════
 
 export default function Performance() {
-  const [activeTab, setActiveTab] = useState('performance');
   const [perf, setPerf] = useState(null);
   const [stats, setStats] = useState(null);
   const [trades, setTrades] = useState([]);
-  const [brain, setBrain] = useState(null);
   const [days, setDays] = useState(90);
   const [loading, setLoading] = useState(true);
 
@@ -158,21 +143,9 @@ export default function Performance() {
     setLoading(false);
   }, [days]);
 
-  // ── Üstat beyin verisi ───────────────────────────────────────────
-  const fetchBrainData = useCallback(async () => {
-    setLoading(true);
-    const b = await getUstatBrain(days);
-    setBrain(b);
-    setLoading(false);
-  }, [days]);
-
   useEffect(() => {
-    if (activeTab === 'performance') {
-      fetchPerfData();
-    } else {
-      fetchBrainData();
-    }
-  }, [activeTab, fetchPerfData, fetchBrainData]);
+    fetchPerfData();
+  }, [fetchPerfData]);
 
   // ── Drawdown verisi ──────────────────────────────────────────────
   const drawdownData = useMemo(() => {
@@ -296,35 +269,11 @@ export default function Performance() {
   }, [trades]);
 
   // ── Üstat Analiz: Özet kartlar hesaplamaları ────────────────────
-  const brainSummary = useMemo(() => {
-    if (!brain) return { totalTrades: 0, bestRegime: '—', bestContract: '—', totalDecisions: 0 };
-
-    // Toplam analiz edilen işlem
-    const cats = brain.trade_categories?.by_result || [];
-    const totalTrades = cats.reduce((s, c) => s + c.count, 0);
-
-    // En iyi rejim (en yüksek win rate)
-    const regimes = brain.regime_performance || [];
-    const bestReg = regimes.length > 0
-      ? [...regimes].sort((a, b) => b.win_rate - a.win_rate)[0]
-      : null;
-    const bestRegime = bestReg ? `${bestReg.label} (%${bestReg.win_rate.toFixed(0)})` : '—';
-
-    // En verimli kontrat (en yüksek toplam K/Z)
-    const profiles = brain.contract_profiles || [];
-    const bestContract = profiles.length > 0 ? profiles[0].symbol : '—';
-
-    // Toplam karar sayısı
-    const totalDecisions = (brain.recent_decisions || []).length;
-
-    return { totalTrades, bestRegime, bestContract, totalDecisions };
-  }, [brain]);
-
   // ── Render ───────────────────────────────────────────────────────
-  if (loading && !perf && !brain) {
+  if (loading && !perf) {
     return (
       <div className="performance">
-        <h2>Üstat & Performans</h2>
+        <h2>Performans</h2>
         <div className="pf-loading">Yükleniyor...</div>
       </div>
     );
@@ -335,7 +284,7 @@ export default function Performance() {
   return (
     <div className="performance">
       <div className="pf-header">
-        <h2>Üstat & Performans</h2>
+        <h2>Performans</h2>
         <div className="pf-period-btns">
           {[30, 90, 180, 365].map((d) => (
             <button
@@ -349,27 +298,9 @@ export default function Performance() {
         </div>
       </div>
 
-      {/* ═══ SEKME ÇUBUĞU ═══════════════════════════════════════════ */}
-      <div className="pf-tab-bar">
-        <button
-          className={`pf-tab-btn ${activeTab === 'performance' ? 'active' : ''}`}
-          onClick={() => setActiveTab('performance')}
-        >
-          Performans
-        </button>
-        <button
-          className={`pf-tab-btn ${activeTab === 'ustat' ? 'active' : ''}`}
-          onClick={() => setActiveTab('ustat')}
-        >
-          Üstat Analiz
-        </button>
-      </div>
-
       {/* ═══════════════════════════════════════════════════════════════
-          PERFORMANS SEKMESİ
+          PERFORMANS İÇERİĞİ
           ═════════════════════════════════════════════════════════════ */}
-      {activeTab === 'performance' && (
-        <>
           {/* ═══ ÖZET KARTLAR (5) ══════════════════════════════════════ */}
           <div className="pf-stats-row">
             <PfStat label="Net Kâr/Zarar" value={fmt(perf?.total_pnl)} cls={pnlCls(perf?.total_pnl)} />
@@ -571,216 +502,6 @@ export default function Performance() {
               </ResponsiveContainer>
             ) : <div className="pf-empty">Aylık veri yok</div>}
           </div>
-        </>
-      )}
-
-      {/* ═══════════════════════════════════════════════════════════════
-          ÜSTAT ANALİZ SEKMESİ
-          ═════════════════════════════════════════════════════════════ */}
-      {activeTab === 'ustat' && (
-        <>
-          {/* ═══ A) ÖZET KARTLAR (4) ═══════════════════════════════════ */}
-          <div className="pf-stats-row" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
-            <PfStat label="Analiz Edilen İşlem" value={brainSummary.totalTrades} />
-            <PfStat label="En İyi Rejim" value={brainSummary.bestRegime} />
-            <PfStat label="En Verimli Kontrat" value={brainSummary.bestContract} />
-            <PfStat label="Toplam Karar" value={brainSummary.totalDecisions} />
-          </div>
-
-          {/* ═══ B) İŞLEM KATEGORİLERİ (2x2 grid) ════════════════════ */}
-          <div className="pf-category-grid">
-            <CategoryChart title="Sonuca Göre" data={brain?.trade_categories?.by_result || []} />
-            <CategoryChart title="Yöne Göre" data={brain?.trade_categories?.by_direction || []} />
-            <CategoryChart title="Süreye Göre" data={brain?.trade_categories?.by_duration || []} />
-            <CategoryChart title="Rejime Göre" data={brain?.trade_categories?.by_regime || []} />
-          </div>
-
-          {/* ═══ C) KONTRAT PROFİLLERİ ════════════════════════════════ */}
-          <div className="pf-chart-card pf-chart-full">
-            <div className="pf-chart-header"><h3>Kontrat Profilleri</h3></div>
-            {(brain?.contract_profiles || []).length > 0 ? (
-              <div className="pf-contract-grid">
-                {brain.contract_profiles.map((cp) => (
-                  <div key={cp.symbol} className="pf-contract-card">
-                    <div className="pf-contract-symbol">
-                      <span>{cp.symbol}</span>
-                      <span className={`pf-contract-badge ${cp.preferred_direction === 'BUY' ? 'buy' : 'sell'}`}>
-                        {cp.preferred_direction}
-                      </span>
-                    </div>
-                    <div className="pf-contract-stat">
-                      <span>İşlem</span>
-                      <span className="value">{cp.trade_count}</span>
-                    </div>
-                    <div className="pf-contract-stat">
-                      <span>Win Rate</span>
-                      <span className={`value ${cp.win_rate >= 50 ? 'profit' : 'loss'}`}>{fmtPct(cp.win_rate)}</span>
-                    </div>
-                    <div className="pf-contract-stat">
-                      <span>Toplam K/Z</span>
-                      <span className={`value ${pnlCls(cp.total_pnl)}`}>{fmt(cp.total_pnl)}</span>
-                    </div>
-                    <div className="pf-contract-stat">
-                      <span>Ort. Süre</span>
-                      <span className="value">{cp.avg_duration_min > 60 ? `${(cp.avg_duration_min / 60).toFixed(1)}s` : `${cp.avg_duration_min.toFixed(0)}dk`}</span>
-                    </div>
-                    <div className="pf-contract-stat">
-                      <span>Son İşlem</span>
-                      <span className="value" style={{ fontSize: 10 }}>{cp.last_trade || '—'}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : <div className="pf-empty">Kontrat verisi yok</div>}
-          </div>
-
-          {/* ═══ D) KARAR AKIŞI (Timeline) ════════════════════════════ */}
-          <div className="pf-chart-card pf-chart-full">
-            <div className="pf-chart-header"><h3>Karar Akışı</h3></div>
-            {(brain?.recent_decisions || []).length > 0 ? (
-              <div className="pf-decision-timeline">
-                {brain.recent_decisions.slice(0, 20).map((ev) => (
-                  <div key={ev.id} className="pf-decision-item">
-                    <span className="pf-decision-time">{shortDate(ev.timestamp)}</span>
-                    <span className={`pf-decision-badge ${ev.severity}`}>{ev.type}</span>
-                    <span className="pf-decision-msg">{ev.message}</span>
-                  </div>
-                ))}
-              </div>
-            ) : <div className="pf-empty">Karar verisi yok</div>}
-          </div>
-
-          {/* ═══ E) REJİM BAZLI PERFORMANS ════════════════════════════ */}
-          <div className="pf-chart-card pf-chart-full">
-            <div className="pf-chart-header">
-              <h3>Rejim Bazlı Performans</h3>
-              {brain?.strategy_pool?.current_regime && (
-                <span className="pf-chart-sub">Aktif rejim: {brain.strategy_pool.current_regime}</span>
-              )}
-            </div>
-            {(brain?.regime_performance || []).length > 0 ? (
-              <ResponsiveContainer width="100%" height={180}>
-                <BarChart data={brain.regime_performance} layout="vertical" margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#30363d" horizontal={false} />
-                  <XAxis type="number" stroke="#8b949e" fontSize={10} tickLine={false} tickFormatter={(v) => fmt(v)} />
-                  <YAxis type="category" dataKey="label" stroke="#8b949e" fontSize={11} tickLine={false} width={90} />
-                  <Tooltip content={<CategoryTip />} />
-                  <ReferenceLine x={0} stroke="#30363d" />
-                  <Bar dataKey="total_pnl" radius={[0, 3, 3, 0]} maxBarSize={22}>
-                    {(brain.regime_performance || []).map((e, i) => (
-                      <Cell key={i} fill={e.total_pnl >= 0 ? '#3fb950' : '#f85149'} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            ) : <div className="pf-empty">Rejim verisi yok</div>}
-          </div>
-
-          {/* ═══ F) ÜSTAT BEYİN PANELLERİ ═══════════════════════════════ */}
-          <div className="pf-brain-grid">
-
-            {/* ── Hata Atama Raporu ─────────────────────────────────── */}
-            {(brain?.error_attributions || []).length > 0 ? (
-              <div className="pf-chart-card">
-                <div className="pf-chart-header"><h3>Hata Atama Raporu</h3></div>
-                <div className="pf-brain-list">
-                  {brain.error_attributions.slice(0, 10).map((ea, i) => (
-                    <div key={i} className="pf-brain-row">
-                      <span className={`pf-brain-badge pf-brain--${ea.responsible.toLowerCase()}`}>
-                        {ea.responsible}
-                      </span>
-                      <span className="pf-brain-type">{ea.error_type}</span>
-                      <span className="pf-brain-desc">{ea.description}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div className="pf-placeholder-card">
-                <span className="pf-placeholder-icon">&#x1F50D;</span>
-                <span className="pf-placeholder-title">Hata Atama Raporu</span>
-                <span className="pf-placeholder-desc">
-                  Kim hata yapti? BABA veya OGUL sorumluluk atamasi.
-                  USTAT beyin motoru aktif oldugunda dolacak.
-                </span>
-                <span className="pf-placeholder-badge">Veri bekleniyor</span>
-              </div>
-            )}
-
-            {/* ── Ertesi Gün Analizi ───────────────────────────────── */}
-            {(brain?.next_day_analyses || []).length > 0 ? (
-              <div className="pf-chart-card">
-                <div className="pf-chart-header"><h3>Ertesi Gun Analizi</h3></div>
-                <div className="pf-brain-list">
-                  {brain.next_day_analyses.slice(0, 10).map((nda, i) => (
-                    <div key={i} className="pf-brain-row pf-nda-row">
-                      <span className="pf-brain-symbol">{nda.symbol}</span>
-                      <span className={`pf-brain-pnl ${nda.actual_pnl >= 0 ? 'pf-green' : 'pf-red'}`}>
-                        {fmt(nda.actual_pnl)}
-                      </span>
-                      <span className="pf-brain-dim">
-                        Potansiyel: {fmt(nda.potential_pnl)} | Kacirilan: {fmt(nda.missed_profit)}
-                      </span>
-                      <div className="pf-nda-scores">
-                        <span title="Sinyal puani">S:{Math.round(nda.signal_score)}</span>
-                        <span title="Yonetim puani">Y:{Math.round(nda.management_score)}</span>
-                        <span title="Kar puani">K:{Math.round(nda.profit_score)}</span>
-                        <span title="Risk puani">R:{Math.round(nda.risk_score)}</span>
-                        <span className="pf-nda-total" title="Toplam puan">
-                          {Math.round(nda.total_score)}/100
-                        </span>
-                      </div>
-                      {nda.summary && <span className="pf-brain-desc">{nda.summary}</span>}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div className="pf-placeholder-card">
-                <span className="pf-placeholder-icon">&#x1F4CA;</span>
-                <span className="pf-placeholder-title">Ertesi Gun Analizi</span>
-                <span className="pf-placeholder-desc">
-                  Kapanan islemler icin islem gununun ertesi gunu otomatik analiz.
-                  Her sabah 09:30'da bir onceki gunun islemleri puanlanir.
-                </span>
-                <span className="pf-placeholder-badge">Veri bekleniyor</span>
-              </div>
-            )}
-
-            {/* ── Regülasyon Önerileri ─────────────────────────────── */}
-            {(brain?.regulation_suggestions || []).length > 0 ? (
-              <div className="pf-chart-card">
-                <div className="pf-chart-header"><h3>Regulasyon Onerileri</h3></div>
-                <div className="pf-brain-list">
-                  {brain.regulation_suggestions.slice(0, 10).map((rs, i) => (
-                    <div key={i} className="pf-brain-row pf-reg-row">
-                      <span className={`pf-brain-badge pf-brain--${rs.priority.toLowerCase()}`}>
-                        {rs.priority}
-                      </span>
-                      <span className="pf-brain-type">{rs.parameter}</span>
-                      <span className="pf-brain-dim">
-                        {rs.current_value} &rarr; {rs.suggested_value}
-                      </span>
-                      <span className="pf-brain-desc">{rs.reason}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div className="pf-placeholder-card">
-                <span className="pf-placeholder-icon">&#x2699;</span>
-                <span className="pf-placeholder-title">Regulasyon Onerileri</span>
-                <span className="pf-placeholder-desc">
-                  BABA/OGUL parametre duzeltme onerileri.
-                  Her aksam 18:00'da gunluk rapor uretilir.
-                </span>
-                <span className="pf-placeholder-badge">Veri bekleniyor</span>
-              </div>
-            )}
-
-          </div>
-        </>
-      )}
     </div>
   );
 }
