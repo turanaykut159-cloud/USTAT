@@ -346,6 +346,14 @@ class Baba:
         self._ks_lock = threading.Lock()  # Kill-switch atomik geçiş kilidi (Anayasa 4.3)
         # L3 kapanışta kapatılamayan pozisyon ticket'ları (API'ye iletilir)
         self._last_l3_failed_tickets: list[int] = []
+        # v5.8/CEO-FAZ1: SL/TP eklenememiş + kapatılamamış korumasız pozisyonlar
+        self._unprotected_positions: list[dict] = []
+
+        # v5.8/CEO-FAZ1: Regime hysteresis — ping-pong önleme
+        # Rejim değişimi ancak 2 ardışık cycle aynı yeni rejimi gösterdiğinde onaylanır
+        self._confirmed_regime: RegimeType | None = None   # Son onaylanmış rejim
+        self._pending_regime: RegimeType | None = None      # Aday rejim (henüz onaylanmamış)
+        self._pending_regime_count: int = 0                 # Aday kaç cycle devam etti
 
         # v13.0: "izin verdi" olay kaydı dedup (5 dk'da 1 kez)
         self._last_risk_allowed_log: datetime | None = None
@@ -608,6 +616,52 @@ class Baba:
             bb_width_ratio=round(float(np.mean(bb_rats)), 3) if bb_rats else 0.0,
             details={"per_symbol": details_per, "votes": {k.value: v for k, v in votes.items()}},
         )
+
+        # v5.8/CEO-FAZ1: Regime hysteresis — ping-pong önleme
+        # OLAY hariç, rejim değişimi 2 ardışık cycle aynı sonucu verdiğinde onaylanır
+        HYSTERESIS_CYCLES = 2
+        raw_winner = winner
+
+        if self._confirmed_regime is not None and winner != self._confirmed_regime:
+            # Yeni rejim önerisi geldi — aday olarak beklet
+            if winner == self._pending_regime:
+                self._pending_regime_count += 1
+            else:
+                self._pending_regime = winner
+                self._pending_regime_count = 1
+
+            if self._pending_regime_count >= HYSTERESIS_CYCLES:
+                # Yeterince tekrar etti — onayla
+                logger.info(
+                    f"Rejim hysteresis onay: {self._confirmed_regime.value}"
+                    f"→{winner.value} ({self._pending_regime_count} cycle)"
+                )
+                self._confirmed_regime = winner
+                self._pending_regime = None
+                self._pending_regime_count = 0
+            else:
+                # Henüz onaylanmadı — eski rejimi koru
+                logger.debug(
+                    f"Rejim hysteresis bekleme: ham={winner.value}, "
+                    f"korunan={self._confirmed_regime.value} "
+                    f"(sayaç={self._pending_regime_count}/{HYSTERESIS_CYCLES})"
+                )
+                winner = self._confirmed_regime
+                confidence = round(votes.get(winner, 0) / total, 3) if total > 0 else 0.5
+                regime = Regime(
+                    regime_type=winner,
+                    confidence=confidence,
+                    adx_value=round(float(np.mean(adx_vals)), 2) if adx_vals else 0.0,
+                    atr_ratio=round(float(np.mean(atr_rats)), 3) if atr_rats else 0.0,
+                    bb_width_ratio=round(float(np.mean(bb_rats)), 3) if bb_rats else 0.0,
+                    details={"per_symbol": details_per, "votes": {k.value: v for k, v in votes.items()},
+                             "hysteresis": f"bekleme({raw_winner.value})"},
+                )
+        else:
+            # İlk kez veya aynı rejim devam ediyor
+            self._confirmed_regime = winner
+            self._pending_regime = None
+            self._pending_regime_count = 0
 
         logger.info(
             f"Rejim: {winner.value} (conf={confidence}, "
@@ -905,7 +959,7 @@ class Baba:
             import time as _time_mod
             now = _time_mod.time()
             last = self._volume_spike_cooldowns.get(symbol, 0.0)
-            if now - last < 60.0:  # 60 saniyelik cooldown — flood önleme
+            if now - last < 600.0:  # 10 dakikalık cooldown — flood önleme
                 return None
             self._volume_spike_cooldowns[symbol] = now
             return EarlyWarning(
@@ -1252,6 +1306,15 @@ class Baba:
             verdict.lot_multiplier = 0.0
             verdict.kill_switch_level = KILL_SWITCH_L2
             verdict.reason = "KILL_SWITCH L2 aktif — sistem durduruldu"
+            return verdict
+
+        # 2b. v5.8/CEO-FAZ1: Korumasız pozisyon varsa yeni işlem yasak
+        if self._unprotected_positions:
+            verdict.can_trade = False
+            verdict.reason = (
+                f"KORUMASIZ POZİSYON — {len(self._unprotected_positions)} pozisyon "
+                f"SL/TP'siz açık. Manuel müdahale gerekli."
+            )
             return verdict
 
         # 3. Aylık kayıp → manuel onay bekleniyor
@@ -1856,6 +1919,7 @@ class Baba:
         """Manuel kill-switch onay (Desktop/API'den çağrılır).
 
         L3 veya monthly_paused durumunu onaylayıp sistemi sıfırlar.
+        v5.8/CEO-FAZ1: Başarısız kapanış ticket'ları varsa onay REDDEDİLİR.
 
         Args:
             user: Onayı veren kullanıcı.
@@ -1864,6 +1928,23 @@ class Baba:
             True ise onay başarılı.
         """
         if self._kill_switch_level == KILL_SWITCH_NONE:
+            return False
+
+        # v5.8/CEO-FAZ1: Kapatılamayan pozisyon varsa onay kabul edilmez
+        if self._last_l3_failed_tickets:
+            logger.critical(
+                f"Kill-switch onay REDDEDİLDİ — {len(self._last_l3_failed_tickets)} "
+                f"pozisyon hâlâ açık: {self._last_l3_failed_tickets}. "
+                f"Önce bu pozisyonlar manuel kapatılmalı."
+            )
+            self._db.insert_event(
+                event_type="L3_ACK_BLOCKED",
+                severity="CRITICAL",
+                message=(
+                    f"Kill-switch onayı reddedildi: {len(self._last_l3_failed_tickets)} "
+                    f"kapatılamayan pozisyon mevcut — {self._last_l3_failed_tickets}"
+                ),
+            )
             return False
 
         self._db.insert_intervention(
@@ -1875,6 +1956,78 @@ class Baba:
         self._risk_state["monthly_paused"] = False
         self._clear_kill_switch(f"Manuel onay by {user}")
         return True
+
+    def report_unprotected_position(self, symbol: str, ticket: int) -> None:
+        """v5.8/CEO-FAZ1: Korumasız pozisyon bildir (OĞUL → BABA).
+
+        SL/TP eklenememiş ve kapatılamamış bir pozisyon oluştuğunda
+        çağrılır. can_trade otomatik False olur.
+
+        Args:
+            symbol: Korumasız pozisyon sembolü.
+            ticket: MT5 pozisyon ticket'ı.
+        """
+        entry = {"symbol": symbol, "ticket": ticket, "time": datetime.now().isoformat()}
+        self._unprotected_positions.append(entry)
+        logger.critical(
+            f"KORUMASIZ POZİSYON RAPOR EDİLDİ: {symbol} ticket={ticket} "
+            f"— Yeni işlem açma DURDURULDU. Toplam: {len(self._unprotected_positions)}"
+        )
+        self._db.insert_event(
+            event_type="UNPROTECTED_POSITION",
+            severity="CRITICAL",
+            message=f"Korumasız pozisyon: {symbol} ticket={ticket} — yeni işlem yasak",
+        )
+
+    def clear_unprotected_positions(self, user: str = "operator") -> list[dict]:
+        """v5.8/CEO-FAZ1: Korumasız pozisyon listesini temizle.
+
+        Kullanıcı pozisyonlara manuel SL/TP ekledikten veya kapattıktan
+        sonra çağrılarak yeni işlem açma izni verilir.
+
+        Args:
+            user: Temizlemeyi onaylayan kullanıcı.
+
+        Returns:
+            Temizlenen pozisyon listesi.
+        """
+        cleared = list(self._unprotected_positions)
+        if cleared:
+            logger.warning(
+                f"Korumasız pozisyon listesi temizlendi by {user}: {cleared}"
+            )
+            self._db.insert_intervention(
+                action="clear_unprotected",
+                reason=f"Pozisyonlar: {cleared}",
+                user=user,
+            )
+            self._unprotected_positions = []
+        return cleared
+
+    def clear_failed_tickets(self, user: str = "operator") -> list[int]:
+        """v5.8/CEO-FAZ1: Kapatılamayan pozisyon listesini temizle.
+
+        Kullanıcı pozisyonları MT5'ten manuel kapattıktan sonra
+        bu metod çağrılarak L3 onayının önü açılır.
+
+        Args:
+            user: Temizlemeyi onaylayan kullanıcı.
+
+        Returns:
+            Temizlenen ticket listesi.
+        """
+        cleared = list(self._last_l3_failed_tickets)
+        if cleared:
+            logger.warning(
+                f"Başarısız ticket listesi temizlendi by {user}: {cleared}"
+            )
+            self._db.insert_intervention(
+                action="clear_failed_tickets",
+                reason=f"Tickets: {cleared}",
+                user=user,
+            )
+            self._last_l3_failed_tickets = []
+        return cleared
 
     def activate_kill_switch_l1(self, symbol: str, reason: str) -> None:
         """L1: Tek kontrat durdur (anomali tespitinde dışardan çağrılır).

@@ -2,6 +2,29 @@
 
 ---
 
+## #52 — CEO FAZ-1: Kritik Güvenlik Yamaları (2026-03-21)
+
+- **baba.py**: L3 kill-switch onayı, kapatılamayan pozisyon varsa reddedilir (`acknowledge_kill_switch` + `_last_l3_failed_tickets` kontrolü)
+- **baba.py**: Korumasız pozisyon koruması — SL/TP eklenememiş + kapatılamamış pozisyon varsa `can_trade = False` (`_unprotected_positions` listesi + `check_risk_limits` kontrolü)
+- **baba.py**: Regime hysteresis — rejim değişimi 2 ardışık cycle onayı gerektirir, ping-pong önlendi (`_confirmed_regime` + `_pending_regime_count`)
+- **baba.py**: `clear_failed_tickets()` ve `clear_unprotected_positions()` metodları eklendi (manuel müdahale sonrası temizlik)
+- **baba.py**: `report_unprotected_position()` metodu eklendi (OĞUL → BABA bildirimi)
+- **ogul.py**: `send_order` sonucu `unprotected_position` flag'ı kontrol ediliyor, tespit edilirse BABA'ya bildiriliyor
+- Toplam 3 KRİTİK güvenlik açığı kapatıldı
+- Direktörlük raporlarında 3 YANLIŞ ALARM tespit edildi ve düzeltildi (peak_equity, circuit breaker, duplicate sinyal)
+
+## #51 — ANAYASA v2.0: CEO Genişletmesi (2026-03-21)
+
+- ANAYASA'ya 7 yeni bölüm eklendi (Bölüm 9-15), orijinal 8 bölüm korundu
+- B9: Değişiklik geçmişi ve NEDEN-SONUÇ kaydı
+- B10: Yönetim yapısı (CEO mekanizması, yetki matrisi, direktörlükler)
+- B11: Geliştirme pipeline (savaş/barış zamanı, feature pipeline, refactor prosedürü)
+- B12: Test zorunluluğu (deploy öncesi kontrol listesi)
+- B13: Acil durum playbook (SEV-1/2/3/4 senaryoları)
+- B14: Ajan koordinasyonu (yetki sınırları, paralel çalışma kuralları)
+- B15: Anayasa değişiklik kuralları (versiyon numaralama, koruma seviyeleri)
+- 273 satır → 708 satır
+
 ## #50 — OĞUL Tam Mimari Dokümantasyonu (2026-03-21)
 
 | Alan | Detay |

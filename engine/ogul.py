@@ -1973,6 +1973,17 @@ class Ogul:
             )
             return
 
+        # v5.8/CEO-FAZ1: Korumasız pozisyon kontrolü — SL/TP eklenememiş + kapatılamamış
+        if result.get("unprotected_position"):
+            logger.critical(
+                f"KORUMASIZ POZİSYON TESPİT EDİLDİ [{symbol}] — "
+                f"BABA'ya bildiriliyor, yeni işlem durdurulacak"
+            )
+            self.baba.report_unprotected_position(
+                symbol=symbol,
+                ticket=result.get("position_ticket", result.get("order", 0)),
+            )
+
         # Başarılı → SENT
         trade.state = TradeState.SENT
         trade.order_ticket = result.get("order", 0)
