@@ -64,3 +64,12 @@ class Trade:
     breakeven_hit: bool = False       # breakeven seviyesi çekildi mi
     voting_score: int = 0            # anlık 4-gösterge oylama skoru (0-4)
     flat_candle_count: int = 0       # yatay mum sayacı (2 saat kontrol)
+    # ── R-Multiple tracking (Van Tharp) ──────────────────────────
+    initial_risk: float = 0.0        # 1R = |entry_price - initial_SL| × volume × contract_size
+    r_multiple: float = 0.0          # anlık PnL / initial_risk
+    r_multiple_at_close: float = 0.0 # kapanıştaki R-multiple (final)
+    # ── Pyramiding (Turtle-style add to winners) ─────────────────
+    pyramid_count: int = 0           # ekleme sayısı (max PYRAMID_MAX_ADDS)
+    pyramid_prices: str = ""         # ekleme fiyatları (virgülle ayrılmış)
+    # ── Maximum hold time ────────────────────────────────────────
+    max_hold_warned: bool = False    # max süre uyarısı verildi mi

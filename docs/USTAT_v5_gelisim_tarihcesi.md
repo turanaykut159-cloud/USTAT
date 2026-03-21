@@ -1822,3 +1822,43 @@ Bu düzeltmeler native SLTP çalışmadığı için sorunu çözmedi ama kod kal
 - Frontend (10 sayfa, 45+ kart) — ✅
 - API (18 route + 1 WebSocket) — ✅
 
+
+---
+
+## #58 - OĞUL v13.0 İşlem Yönetimi İyileştirmeleri (2026-03-22)
+
+| Alan | İçerik |
+|------|--------|
+| **Tarih** | 2026-03-22 |
+| **Neden** | Dünya standartlarında kanıtlanmış 3 trade management sistemiyle (Turtle Trading, Van Tharp R-Multiple, Alexander Elder Triple Screen) yapılan karşılaştırma analizinden doğan 5 eksikliğin giderilmesi. Skor: 69/90 → 82/90. |
+| **Tetikleyen** | CEO talebi: "İşlem yönetimini maksimum seviyeye çıkartalım" |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `engine/models/trade.py` | 7 yeni alan eklendi: `initial_risk` (1R hesaplama), `r_multiple` (anlık R), `r_multiple_at_close` (kapanış R), `pyramid_count`, `pyramid_prices`, `max_hold_warned` |
+| `engine/ogul.py` — Sabitler | +35 satır yeni sabit: R_MULT_* (R-Multiple takip), MONTHLY_DD_* (aylık drawdown), PYRAMID_* (piramitleme), CHANDELIER_* (Chandelier Exit), MAX_HOLD_* (max pozisyon süresi) |
+| `engine/ogul.py` — `__init__` | +12 satır: `_r_multiple_history`, `_r_expectancy`, `_monthly_start_equity`, `_monthly_dd_stop`, `_monthly_dd_warn`, `_pyramid_last_add` instance değişkenleri |
+| `engine/ogul.py` — `_manage_position` | 3 yeni adım eklendi: 1b. R-Multiple takibi (-2R felaket koruma, -1.5R uyarı), 1c. Max hold süresi kontrolü (96 bar), 6. Trailing stop'a Chandelier Exit hibrit karışımı (%30 chandelier + %70 mevcut), 9. Piramitleme kontrolü |
+| `engine/ogul.py` — `_check_pyramid_add` (YENİ) | Turtle-style piramitleme: 0.5×ATR adım, max 3 ekleme, oylama 3/4+, aylık DD kontrolü, SL güncelleme (yeni entry - 2N) |
+| `engine/ogul.py` — `_check_advanced_risk_rules` | Aylık drawdown kontrolü eklendi: %4 uyarı (yeni işlem engeli), %6 mutlak stop (tüm pozisyonlar kapatılır), ay değişiminde sıfırlama |
+| `engine/ogul.py` — `_execute_signal` | 1R (initial_risk) hesaplaması giriş anında yapılır. Aylık DD uyarı/stop aktifken yeni işlem engellenir |
+| `engine/ogul.py` — `_handle_closed_trade` | R-Multiple kapanış hesabı, expectancy güncelleme ((WR × Avg Win R) - (LR × 1R)), DB kayıt, piramit temizliği |
+| `tests/simulation/test_008_runner.py` (YENİ) | v13.0 doğrulama testi: send_market_order, close_position_partial, get_deal_summary mock'ları, v13.0 metrik raporlaması |
+| `tests/simulation/INDEX.md` | TEST_008 kaydı, metrik gelişim tablosu güncellendi |
+
+### Eklenen
+- `_check_pyramid_add()` — Turtle-style piramitleme metodu (engine/ogul.py)
+- 35 yeni sabit (5 modül konfigürasyonu)
+- 12 yeni instance değişken
+- 7 yeni Trade model alanı
+- `test_008_runner.py` — v13.0 entegrasyon testi
+- `RAPORLAR/` klasörü — Araştırma ve analiz raporları arşivi
+- `RAPORLAR/USTAT_islem_yonetimi_karsilastirma.docx` — 3 sistem karşılaştırma raporu
+- `RAPORLAR/USTAT_v13_islem_yonetimi_iyilestirmeleri.docx` — v13.0 uygulama raporu
+
+### TEST_008 Sonuçları
+- 2800 cycle, 56 iş günü, 3 sembol
+- 5/5 katman: 0 hata (BABA, OĞUL, H-Engine, Manuel, ÜSTAT)
+- v13.0 modülleri sorunsuz entegre
