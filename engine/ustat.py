@@ -563,7 +563,7 @@ class Ustat:
             if now_t < _time(9, 45) or now_t > _time(17, 45):
                 reasons.append("İşlem saatleri dışı")
             else:
-                reasons.append("M15 mum kapanışı bekleniyor veya sinyal eşiği karşılanmadı")
+                reasons.append("M5 mum kapanışı bekleniyor veya sinyal eşiği karşılanmadı")
 
         return "; ".join(reasons)
 

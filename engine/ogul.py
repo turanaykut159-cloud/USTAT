@@ -109,6 +109,7 @@ BO_REENTRY_BARS: int = 3            # son 3 bar range içine dönmüşse = false
 SWING_LOOKBACK:  int = 10           # swing high/low arama barı
 ATR_PERIOD:      int = 14
 MIN_BARS_M15:    int = 60           # M15 için min bar
+MIN_BARS_M5:     int = 60           # M5 sinyal tetikleme için min bar (v5.7)
 MIN_BARS_H1:     int = 30           # H1 onay için min bar
 CONTRACT_SIZE:   float = 100.0      # VİOP çarpanı (varsayılan)
 
@@ -395,6 +396,7 @@ class Ogul:
 
         # ── İki döngü mimarisi (sinyal: M15 kapanış, yönetim: 10 sn) ──
         self._last_m15_candle_ts: str = ""          # son işlenen M15 mum timestamp
+        self._last_m5_candle_ts: str = ""           # son işlenen M5 mum timestamp (v5.7: M5 tetikleme)
         self._daily_loss_stop: bool = False          # %3 günlük zarar durdurucu
         self._daily_loss_stop_date: date | None = None  # sıfırlama takibi
         self._symbol_loss_count: dict[str, int] = {}    # sembol bazlı ardışık zarar
@@ -533,10 +535,12 @@ class Ogul:
         if self._daily_loss_stop:
             return
 
-        # ═══ SİNYAL DÖNGÜSÜ (sadece M15 mum kapanışında) ═════════
+        # ═══ SİNYAL DÖNGÜSÜ (M5 mum kapanışında tetiklenir — v5.7) ═════
 
-        # 6. M15 mum kapanış kontrolü — kapanmamışsa sinyal üretme
-        if not self._is_new_m15_candle():
+        # 6. M5 mum kapanış kontrolü — kapanmamışsa sinyal üretme
+        #    v5.7: M15→M5 tetikleme geçişi — 3x daha hızlı sinyal üretimi.
+        #    M15/H1 verileri filtreleme+doğrulama olarak kullanılmaya devam eder.
+        if not self._is_new_m5_candle():
             return
 
         # 7. Rejim kontrolü — aktif stratejiler
@@ -637,6 +641,48 @@ class Ogul:
 
         except Exception as exc:
             logger.error(f"M15 mum kontrolü hatası: {exc}")
+            return False
+
+    def _is_new_m5_candle(self) -> bool:
+        """Yeni bir M5 mum kapanıp kapanmadığını kontrol et.
+
+        v5.7: Sinyal tetiklemesi M15 yerine M5 mum kapanışına bağlandı.
+        Her 5 dakikada bir sinyal üretimi tetiklenir (3x daha hızlı).
+        M15/H1 verileri filtreleme ve doğrulama için kullanılmaya devam eder.
+
+        Returns:
+            True: yeni M5 mumu kapanmış, sinyal üretilebilir.
+            False: aynı mum, sinyal üretme.
+        """
+        sample_symbol = None
+        if self._current_top5:
+            sample_symbol = self._current_top5[0]
+        else:
+            from engine.mt5_bridge import WATCHED_SYMBOLS
+            if WATCHED_SYMBOLS:
+                sample_symbol = list(WATCHED_SYMBOLS)[0]
+
+        if sample_symbol is None:
+            return False
+
+        try:
+            df = self.db.get_bars(sample_symbol, "M5", limit=1)
+            if df is None or df.empty:
+                return False
+
+            latest_ts = str(df.iloc[-1].get("timestamp", ""))
+            if not latest_ts:
+                return False
+
+            if latest_ts != self._last_m5_candle_ts:
+                self._last_m5_candle_ts = latest_ts
+                logger.debug(f"Yeni M5 mum kapanışı tespit edildi: {latest_ts}")
+                return True
+
+            return False
+
+        except Exception as exc:
+            logger.error(f"M5 mum kontrolü hatası: {exc}")
             return False
 
     # ═════════════════════════════════════════════════════════════════
@@ -862,7 +908,19 @@ class Ogul:
         Returns:
             En yüksek strength'e sahip Signal veya None.
         """
-        # M15 bar verisi
+        # ── v5.7: M5 verisi SE2 sinyal tetiklemesi için ────────────────
+        df_m5 = self.db.get_bars(symbol, "M5", limit=MIN_BARS_M5)
+        if df_m5 is None or df_m5.empty or len(df_m5) < MIN_BARS_M5:
+            logger.debug(f"{symbol}: M5 verisi yetersiz ({len(df_m5) if df_m5 is not None else 0} bar)")
+            return None
+
+        m5_close = df_m5["close"].values.astype(np.float64)
+        m5_high = df_m5["high"].values.astype(np.float64)
+        m5_low = df_m5["low"].values.astype(np.float64)
+        m5_volume = df_m5["volume"].values.astype(np.float64)
+        m5_open = df_m5["open"].values.astype(np.float64) if "open" in df_m5.columns else m5_close.copy()
+
+        # ── M15 verisi filtre/confluence için (eski ana veri, şimdi doğrulama) ──
         df = self.db.get_bars(symbol, "M15", limit=MIN_BARS_M15)
         if df.empty or len(df) < MIN_BARS_M15:
             return None
@@ -877,12 +935,14 @@ class Ogul:
 
         # ═══════════════════════════════════════════════════════════════
         #  Signal Engine v2.0 — Yapı-Öncelikli Ana Motor
+        #  v5.7: SE2 artık M5 verisiyle beslenir (3x daha hızlı tetikleme)
+        #         M15/H1 verileri confluence + filtreleme olarak kalır
         # ═══════════════════════════════════════════════════════════════
         try:
             _regime_str = regime.regime_type.value if regime else ""
             verdict: SignalVerdict = se2_generate_signal(
-                open_, high, low, close, volume,
-                current_price=float(close[-1]),
+                m5_open, m5_high, m5_low, m5_close, m5_volume,
+                current_price=float(m5_close[-1]),
                 regime_type=_regime_str,
             )
             if verdict.should_trade and verdict.direction != "NEUTRAL":

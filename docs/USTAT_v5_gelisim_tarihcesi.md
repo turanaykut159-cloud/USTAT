@@ -2,6 +2,41 @@
 
 ---
 
+## #49 — M5 Sinyal Tetikleme: M15→M5 Timeframe Geçişi (2026-03-21)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-21 |
+| **Neden** | Sinyal üretimi sadece M15 mum kapanışında tetikleniyordu (her 15 dk). VİOP'ta bu süre çok geç — fırsatlar kaçırılıyor. SE2'nin 9 kaynağından 3'ü (momentum, volume climax, extreme reversion) M5'te daha hızlı/güvenilir çalışır. |
+| **Tetikleyen** | Canlı test: "AÇILAMAYAN İŞLEMLER — M15 mum kapanışı bekleniyor" mesajları + timeframe analizi |
+
+### Değişiklikler
+
+| Dosya | Ne Değişti |
+|-------|-----------|
+| `engine/ogul.py` ⛔ | `_is_new_m5_candle()` fonksiyonu eklendi. Sinyal döngüsü M15→M5 tetiklemesine geçirildi. SE2 artık M5 verisiyle beslenir. M15/H1 verileri confluence+filtreleme olarak kalmaya devam eder. `MIN_BARS_M5=60` sabiti eklendi. |
+| `engine/ustat.py` ⛔ | "Açılamayan İşlem" log mesajı "M15 mum kapanışı bekleniyor" → "M5 mum kapanışı bekleniyor" olarak güncellendi. |
+
+### Mimari (Önceki → Sonraki)
+
+```
+ÖNCEKİ:  H1(filtre) → M15(tetikleme+sinyal) → M5(giriş zamanlaması)
+ŞİMDİ:   H1(filtre) → M15(confluence+filtre) → M5(tetikleme+sinyal)
+```
+
+### Eklenen
+- `_is_new_m5_candle()` — M5 mum kapanış tespiti (ogul.py)
+- `_last_m5_candle_ts` — M5 mum timestamp takibi (ogul.py)
+- `MIN_BARS_M5 = 60` — M5 minimum bar sabiti (ogul.py)
+- M5 OHLCV çekimi → SE2 beslemesi (df_m5 → m5_open/high/low/close/volume)
+
+### Kaldırılan / Değiştirilen Davranışlar
+- Sinyal tetikleme: `_is_new_m15_candle()` → `_is_new_m5_candle()` (3x daha sık)
+- SE2 veri kaynağı: M15 OHLCV → M5 OHLCV
+- Log mesajı: "M15 mum kapanışı bekleniyor" → "M5 mum kapanışı bekleniyor"
+
+---
+
 ## #48 — OĞUL v2 Revizyon: Aktif İşlem Kapasitesi (6 Aşamalı Pipeline Yenileme) (2026-03-21)
 
 | Alan | Detay |
