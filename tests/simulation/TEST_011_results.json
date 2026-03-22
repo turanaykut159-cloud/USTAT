@@ -1,0 +1,169 @@
+{
+  "A_spike_load": {
+    "test": "SPIKE_LOAD",
+    "elapsed_s": 0.2,
+    "total_cycles": 2500,
+    "cycle_p95_ms": 0.13,
+    "cycle_max_ms": 0.62,
+    "orders_sent": 2500,
+    "fill_rate": 96.84,
+    "errors": 0,
+    "stress_metrics": {
+      "orders": {
+        "sent": 2500,
+        "filled": 2421,
+        "rejected": 48,
+        "timed_out": 31,
+        "partial": 0,
+        "fill_rate": 96.84
+      },
+      "connection": {
+        "disconnects": 0,
+        "reconnects": 0,
+        "max_disconnect_s": 0.0,
+        "total_downtime_s": 0.0
+      },
+      "latency_ms": {
+        "p50": 56.41,
+        "p95": 95.59,
+        "p99": 98.77,
+        "max": 99.48
+      },
+      "order_latency_ms": {
+        "p50": 0.01,
+        "p95": 15.16,
+        "p99": 83.59
+      },
+      "cycle_duration_ms": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0
+      },
+      "errors": {
+        "timeouts": 44,
+        "data_gaps": 0,
+        "corrupt": 0,
+        "rate_limited": 0,
+        "netting_errors": 0,
+        "gateway_slow": 0
+      },
+      "recovery": {
+        "circuit_breaker_trips": 0,
+        "auto_recoveries": 0,
+        "failed_recoveries": 0
+      },
+      "resources": {
+        "peak_memory_mb": 0.0,
+        "peak_positions": 0,
+        "peak_pending_events": 0
+      }
+    },
+    "criteria": {
+      "Crash yok (tüm cycle tamamlandı)": true,
+      "Dolum oranı >%90": true,
+      "Cycle P95 <500ms": true
+    },
+    "passed": true
+  },
+  "B_chaos_motor_kill": {
+    "test": "CHAOS_MOTOR_KILL",
+    "initial_positions": 3,
+    "positions_after_recovery": 4,
+    "failed_during_disconnect": 29,
+    "recovery_success": 10,
+    "criteria": {
+      "Pozisyonlar korundu": true,
+      "Kesintide çoğu emir engellendi (>=%80)": true,
+      "Kurtarma başarılı (>=%80)": true
+    },
+    "passed": true
+  },
+  "C_monte_carlo": {
+    "test": "MONTE_CARLO",
+    "simulations": 1000,
+    "trades_per_sim": 100,
+    "win_rate": 0.45,
+    "equity": {
+      "mean": 74469.72,
+      "median": 73380.11,
+      "p5": 57333.77,
+      "p25": 65714.86,
+      "p75": 81881.44,
+      "p95": 96112.73,
+      "min": 43308.18,
+      "max": 119252.71
+    },
+    "drawdown": {
+      "mean": 7.79,
+      "median": 7.26,
+      "p95": 12.79,
+      "max": 21.6
+    },
+    "profitable_pct": 99.4,
+    "ruin_pct": 0.0,
+    "criteria": {
+      "Karlılık >%60": true,
+      "İflas oranı <%5": true,
+      "Ortalama DD <%15": true,
+      "P95 DD <%30": true
+    },
+    "passed": true
+  },
+  "D_historical_crisis": {
+    "test": "HISTORICAL_CRISIS",
+    "scenarios": [
+      {
+        "scenario": "2018 TL Krizi (Ağustos)",
+        "start_equity": 50000.0,
+        "end_equity": 48362.11,
+        "return_pct": -3.28,
+        "max_drawdown_pct": 3.87,
+        "duration_days": 10,
+        "survived": true
+      },
+      {
+        "scenario": "COVID-19 Mart 2020",
+        "start_equity": 50000.0,
+        "end_equity": 45039.95,
+        "return_pct": -9.92,
+        "max_drawdown_pct": 10.51,
+        "duration_days": 15,
+        "survived": true
+      },
+      {
+        "scenario": "Flash Crash (Ani %5 düşüş)",
+        "start_equity": 50000.0,
+        "end_equity": 50101.35,
+        "return_pct": 0.2,
+        "max_drawdown_pct": 0.0,
+        "duration_days": 1,
+        "survived": true
+      },
+      {
+        "scenario": "Kademeli Düşüş (%20 / 30 gün)",
+        "start_equity": 50000.0,
+        "end_equity": 49445.66,
+        "return_pct": -1.11,
+        "max_drawdown_pct": 1.11,
+        "duration_days": 30,
+        "survived": true
+      },
+      {
+        "scenario": "V-Shape Toparlanma",
+        "start_equity": 50000.0,
+        "end_equity": 50498.02,
+        "return_pct": 1.0,
+        "max_drawdown_pct": 0.0,
+        "duration_days": 5,
+        "survived": true
+      }
+    ],
+    "criteria": {
+      "Tüm senaryolarda hayatta kaldı (DD<%15)": true,
+      "Hiçbir senaryoda iflas yok": true,
+      "V-Shape'de toparlanma": true
+    },
+    "passed": true
+  }
+}

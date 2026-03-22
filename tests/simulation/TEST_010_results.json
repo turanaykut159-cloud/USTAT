@@ -1,0 +1,111 @@
+{
+  "A_db_stress": {
+    "test": "DB_CONCURRENT_STRESS",
+    "write_errors": 0,
+    "read_errors": 0,
+    "total_operations": 2500,
+    "elapsed_ms": 1652.7,
+    "latency_p50_ms": 4.7,
+    "latency_p95_ms": 11.11,
+    "latency_p99_ms": 16.26,
+    "latency_max_ms": 26.86,
+    "ops_per_second": 1512.7,
+    "criteria": {
+      "Yazma hatası = 0": true,
+      "Okuma hatası = 0": true,
+      "Kilit bekleme P95 <50ms": true,
+      "Kilit bekleme Max <200ms": true
+    },
+    "passed": true
+  },
+  "B_netting_lock": {
+    "test": "NETTING_LOCK_STRESS",
+    "stats": {
+      "acquired": 3768,
+      "rejected": 2232,
+      "released": 3768,
+      "deadlock_detected": 0,
+      "errors": 0,
+      "reentrant_success": 367
+    },
+    "elapsed_ms": 9163.0,
+    "orphan_locks": 0,
+    "locked_symbols": {},
+    "criteria": {
+      "Deadlock tespit = 0": true,
+      "Hata = 0": true,
+      "Sahipsiz kilit = 0": true,
+      "Reentrant çalışıyor": true,
+      "Acquired > 0": true
+    },
+    "passed": true
+  },
+  "C_circuit_breaker": {
+    "test": "CIRCUIT_BREAKER_CASCADE",
+    "normal_success": 20,
+    "cb_tripped": true,
+    "cb_trips": 1,
+    "cb_blocked_all": true,
+    "recovery_success": 10,
+    "criteria": {
+      "Normal emirler başarılı": true,
+      "CB tetiklendi": true,
+      "CB aktifken emirler engellendi": true,
+      "Kurtarma sonrası emirler başarılı": true
+    },
+    "passed": true
+  },
+  "D_risk_cascade": {
+    "test": "RISK_LIMIT_CASCADE",
+    "levels": [
+      {
+        "level": "Normal (%2 kayıp)",
+        "loss_pct": "2%",
+        "equity": 49000.0,
+        "warn": false,
+        "stop": false,
+        "l3": false
+      },
+      {
+        "level": "Uyarı seviyesi (%4 kayıp)",
+        "loss_pct": "4%",
+        "equity": 48000.0,
+        "warn": true,
+        "stop": false,
+        "l3": false
+      },
+      {
+        "level": "Mutlak stop (%6 kayıp)",
+        "loss_pct": "6%",
+        "equity": 47000.0,
+        "warn": true,
+        "stop": true,
+        "l3": false
+      },
+      {
+        "level": "Drawdown (%10 kayıp)",
+        "loss_pct": "10%",
+        "equity": 45000.0,
+        "warn": true,
+        "stop": true,
+        "l3": false
+      },
+      {
+        "level": "Felaket (%15 kayıp)",
+        "loss_pct": "15%",
+        "equity": 42500.0,
+        "warn": true,
+        "stop": true,
+        "l3": true
+      }
+    ],
+    "passed": true,
+    "criteria": {
+      "%2 kayıpta aksiyon YOK": true,
+      "%4 kayıpta UYARI": true,
+      "%6 kayıpta STOP": true,
+      "%10 kayıpta STOP (L3 değil)": true,
+      "%15 kayıpta L3 tam tasfiye": true
+    }
+  }
+}

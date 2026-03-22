@@ -1,0 +1,230 @@
+{
+  "test_id": "TEST_009",
+  "profile": "light_stress",
+  "date": "2026-03-22T13:54:23.436888",
+  "params": {
+    "symbols": [
+      "F_THYAO",
+      "F_AKBNK",
+      "F_XU030",
+      "F_GARAN",
+      "F_SAHOL",
+      "F_ISCTR",
+      "F_KCHOL",
+      "F_TUPRS",
+      "F_SISE",
+      "F_ASELS",
+      "F_EREGL",
+      "F_BIMAS",
+      "F_KOZAL",
+      "F_PETKM",
+      "F_TCELL"
+    ],
+    "symbol_count": 15,
+    "start": "2026-01-02",
+    "end": "2026-03-21",
+    "cycles_per_day": 50,
+    "total_cycles": 250,
+    "business_days": 5,
+    "initial_balance": 100000.0
+  },
+  "balance": {
+    "initial": 100000.0,
+    "final": 100095.63,
+    "equity": 100095.63,
+    "total_pnl": 95.63
+  },
+  "stress_metrics": {
+    "orders": {
+      "sent": 3,
+      "filled": 3,
+      "rejected": 0,
+      "timed_out": 0,
+      "partial": 0,
+      "fill_rate": 100.0
+    },
+    "connection": {
+      "disconnects": 0,
+      "reconnects": 0,
+      "max_disconnect_s": 0.0,
+      "total_downtime_s": 0.0
+    },
+    "latency_ms": {
+      "p50": 56.02,
+      "p95": 96.32,
+      "p99": 98.85,
+      "max": 99.9
+    },
+    "order_latency_ms": {
+      "p50": 0.03,
+      "p95": 0.03,
+      "p99": 0.03
+    },
+    "cycle_duration_ms": {
+      "p50": 2024.29,
+      "p95": 2266.19,
+      "p99": 3569.71,
+      "max": 3613.86
+    },
+    "errors": {
+      "timeouts": 0,
+      "data_gaps": 0,
+      "corrupt": 0,
+      "rate_limited": 0,
+      "netting_errors": 0,
+      "gateway_slow": 0
+    },
+    "recovery": {
+      "circuit_breaker_trips": 0,
+      "auto_recoveries": 0,
+      "failed_recoveries": 0
+    },
+    "resources": {
+      "peak_memory_mb": 28.3,
+      "peak_positions": 1,
+      "peak_pending_events": 0
+    }
+  },
+  "layer_metrics": {
+    "baba": {
+      "cycles": 250,
+      "errors": 0,
+      "regimes": {
+        "TREND": 105,
+        "RANGE": 145
+      },
+      "risk_blocks": 0
+    },
+    "ogul": {
+      "cycles": 247,
+      "errors": 3,
+      "signals": 3,
+      "orders": 3
+    },
+    "h_engine": {
+      "cycles": 250,
+      "errors": 0
+    },
+    "manuel": {
+      "cycles": 250,
+      "errors": 0
+    },
+    "ustat": {
+      "cycles": 250,
+      "errors": 0
+    }
+  },
+  "pass_criteria": {
+    "Dolum oranı >%95": true,
+    "Döngü P95 <5000ms": true,
+    "Motor hata <cycle %5": true,
+    "Bellek sızıntısı <100MB": true,
+    "Pik pozisyon <50": true
+  },
+  "all_passed": true,
+  "daily": [
+    {
+      "date": "2026-01-02",
+      "day_num": 1,
+      "open_bal": 100000.0,
+      "close_bal": 100095.63,
+      "pnl": 95.63,
+      "floating": 0,
+      "positions": 0,
+      "signals": 3,
+      "errors": 3,
+      "regime": "TREND",
+      "avg_cycle_ms": 2073.93,
+      "max_cycle_ms": 3581.05,
+      "memory_mb": 23.2
+    },
+    {
+      "date": "2026-01-05",
+      "day_num": 2,
+      "open_bal": 100095.63,
+      "close_bal": 100095.63,
+      "pnl": 0.0,
+      "floating": 0,
+      "positions": 0,
+      "signals": 0,
+      "errors": 0,
+      "regime": "RANGE",
+      "avg_cycle_ms": 2050.03,
+      "max_cycle_ms": 2459.0,
+      "memory_mb": 24.8
+    },
+    {
+      "date": "2026-01-06",
+      "day_num": 3,
+      "open_bal": 100095.63,
+      "close_bal": 100095.63,
+      "pnl": 0.0,
+      "floating": 0,
+      "positions": 0,
+      "signals": 0,
+      "errors": 0,
+      "regime": "RANGE",
+      "avg_cycle_ms": 2241.96,
+      "max_cycle_ms": 3613.86,
+      "memory_mb": 26.3
+    },
+    {
+      "date": "2026-01-07",
+      "day_num": 4,
+      "open_bal": 100095.63,
+      "close_bal": 100095.63,
+      "pnl": 0.0,
+      "floating": 0,
+      "positions": 0,
+      "signals": 0,
+      "errors": 0,
+      "regime": "VOLATILE",
+      "avg_cycle_ms": 2024.11,
+      "max_cycle_ms": 2155.22,
+      "memory_mb": 27.9
+    },
+    {
+      "date": "2026-01-08",
+      "day_num": 5,
+      "open_bal": 100095.63,
+      "close_bal": 100095.63,
+      "pnl": 0.0,
+      "floating": 0,
+      "positions": 0,
+      "signals": 0,
+      "errors": 0,
+      "regime": "OLAY",
+      "avg_cycle_ms": 2018.59,
+      "max_cycle_ms": 2130.49,
+      "memory_mb": 26.3
+    }
+  ],
+  "memory_samples": [
+    {
+      "day": 1,
+      "current_mb": 23.2,
+      "peak_mb": 23.6
+    },
+    {
+      "day": 2,
+      "current_mb": 24.8,
+      "peak_mb": 25.2
+    },
+    {
+      "day": 3,
+      "current_mb": 26.3,
+      "peak_mb": 26.7
+    },
+    {
+      "day": 4,
+      "current_mb": 27.9,
+      "peak_mb": 28.3
+    },
+    {
+      "day": 5,
+      "current_mb": 26.3,
+      "peak_mb": 28.3
+    }
+  ],
+  "elapsed_seconds": 520.4
+}
