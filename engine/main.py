@@ -169,6 +169,7 @@ class Engine:
         self._prev_mt5_tickets: set[int] = set()  # pozisyon kapanma tespiti için
         self._pending_closure_tickets: set[int] = set()  # VİOP uzlaşma bekleyen kapanmalar
         self._last_cleanup_date: date | None = None  # FAZ 2.8: son temizlik tarihi
+        self._last_retention_date: date | None = None  # FAZ-A: son retention tarihi
         self._last_backup_cycle: int = 0  # v5.4.1: periyodik yedekleme sayacı
         self._consecutive_slow_cycles: int = 0  # v5.4.1: ardışık yavaş cycle sayacı
         self._last_successful_cycle_time: float = 0.0  # v5.4.1: son başarılı cycle epoch
@@ -375,6 +376,31 @@ class Engine:
                         self._last_backup_cycle = self._cycle_count
                     except Exception as bk_exc:
                         logger.error(f"Periyodik DB yedekleme hatası: {bk_exc}")
+
+                # FAZ-A: Günlük veri retention (günde bir kez, piyasa kapanışında)
+                today = date.today()
+                retention_enabled = self.config.get("retention.enabled", False)
+                if retention_enabled and self._last_retention_date != today:
+                    # Sadece piyasa kapanışından sonra çalıştır (18:00+)
+                    from datetime import datetime as _dt
+                    current_hour = _dt.now().hour
+                    if current_hour >= 18:
+                        try:
+                            retention_cfg = {
+                                "risk_snapshots_days": self.config.get("retention.risk_snapshots_days", 30),
+                                "top5_history_days": self.config.get("retention.top5_history_days", 60),
+                                "events_info_days": self.config.get("retention.events_info_days", 14),
+                                "events_warning_days": self.config.get("retention.events_warning_days", 30),
+                                "events_error_days": self.config.get("retention.events_error_days", 90),
+                                "config_history_days": self.config.get("retention.config_history_days", 365),
+                                "liquidity_days": self.config.get("retention.liquidity_days", 30),
+                                "hybrid_closed_days": self.config.get("retention.hybrid_closed_days", 90),
+                            }
+                            report = self.db.run_retention(retention_cfg)
+                            self._last_retention_date = today
+                            logger.info(f"Günlük retention tamamlandı: {report}")
+                        except Exception as ret_exc:
+                            logger.error(f"Retention hatası: {ret_exc}")
 
             except _SystemStopError as exc:
                 logger.critical(f"SİSTEM DURDURMA: {exc}")

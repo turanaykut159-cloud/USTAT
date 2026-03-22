@@ -21,7 +21,7 @@ import json
 import shutil
 import sqlite3
 import threading
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -182,6 +182,36 @@ CREATE TABLE IF NOT EXISTS hybrid_events (
 CREATE INDEX IF NOT EXISTS idx_hybrid_pos_state   ON hybrid_positions (state);
 CREATE INDEX IF NOT EXISTS idx_hybrid_pos_ticket  ON hybrid_positions (ticket);
 CREATE INDEX IF NOT EXISTS idx_hybrid_evt_ticket  ON hybrid_events (ticket);
+
+-- Composite index'ler (FAZ-A veri yönetimi)
+CREATE INDEX IF NOT EXISTS idx_risk_ts_dd       ON risk_snapshots (timestamp, drawdown);
+CREATE INDEX IF NOT EXISTS idx_events_ts_type   ON events (timestamp, type, severity);
+CREATE INDEX IF NOT EXISTS idx_top5_date_sym    ON top5_history (date, symbol);
+
+-- Günlük risk özet tablosu (aggregation)
+CREATE TABLE IF NOT EXISTS daily_risk_summary (
+    date          TEXT PRIMARY KEY,
+    min_equity    REAL,
+    max_equity    REAL,
+    avg_equity    REAL,
+    min_drawdown  REAL,
+    max_drawdown  REAL,
+    avg_drawdown  REAL,
+    total_pnl     REAL,
+    snapshot_count INTEGER,
+    created_at    TEXT NOT NULL
+);
+
+-- Haftalık top5 özet tablosu (aggregation)
+CREATE TABLE IF NOT EXISTS weekly_top5_summary (
+    week           TEXT NOT NULL,
+    symbol         TEXT NOT NULL,
+    avg_score      REAL,
+    selection_count INTEGER,
+    avg_rank       REAL,
+    created_at     TEXT NOT NULL,
+    PRIMARY KEY (week, symbol)
+);
 """
 
 
@@ -1537,4 +1567,293 @@ class Database:
 
         logger.info(f"DB bakım raporu: {report}")
         return report
+
+    # ═════════════════════════════════════════════════════════════════
+    #  DATA RETENTION (FAZ-A Veri Yönetimi)
+    # ═════════════════════════════════════════════════════════════════
+
+    def _aggregate_daily_risk(self, target_date: str) -> bool:
+        """Belirli bir günün risk snapshot'larını günlük özete dönüştür.
+
+        Args:
+            target_date: YYYY-MM-DD formatında gün.
+
+        Returns:
+            Aggregation başarılı ise True.
+        """
+        try:
+            row = self._fetch_one(
+                """SELECT
+                       MIN(equity) AS min_equity,
+                       MAX(equity) AS max_equity,
+                       AVG(equity) AS avg_equity,
+                       MIN(drawdown) AS min_drawdown,
+                       MAX(drawdown) AS max_drawdown,
+                       AVG(drawdown) AS avg_drawdown,
+                       SUM(daily_pnl) AS total_pnl,
+                       COUNT(*) AS snapshot_count
+                   FROM risk_snapshots
+                   WHERE timestamp LIKE ?""",
+                (f"{target_date}%",),
+            )
+            if row and row["snapshot_count"] > 0:
+                self._execute(
+                    """INSERT OR REPLACE INTO daily_risk_summary
+                       (date, min_equity, max_equity, avg_equity,
+                        min_drawdown, max_drawdown, avg_drawdown,
+                        total_pnl, snapshot_count, created_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        target_date,
+                        row["min_equity"], row["max_equity"], row["avg_equity"],
+                        row["min_drawdown"], row["max_drawdown"], row["avg_drawdown"],
+                        row["total_pnl"], row["snapshot_count"],
+                        self._now(),
+                    ),
+                )
+                return True
+            return False
+        except Exception as exc:
+            logger.error(f"Günlük risk aggregation hatası [{target_date}]: {exc}")
+            return False
+
+    def _aggregate_weekly_top5(self, week_start: str, week_end: str) -> int:
+        """Belirli bir haftanın top5 verilerini haftalık özete dönüştür.
+
+        Args:
+            week_start: Hafta başlangıcı (YYYY-MM-DD).
+            week_end: Hafta sonu (YYYY-MM-DD).
+
+        Returns:
+            Oluşturulan özet satır sayısı.
+        """
+        try:
+            rows = self._fetch_all(
+                """SELECT
+                       symbol,
+                       AVG(score) AS avg_score,
+                       COUNT(*) AS selection_count,
+                       AVG(rank) AS avg_rank
+                   FROM top5_history
+                   WHERE date >= ? AND date <= ?
+                   GROUP BY symbol""",
+                (week_start, week_end),
+            )
+            count = 0
+            for r in rows:
+                self._execute(
+                    """INSERT OR REPLACE INTO weekly_top5_summary
+                       (week, symbol, avg_score, selection_count, avg_rank, created_at)
+                       VALUES (?,?,?,?,?,?)""",
+                    (week_start, r["symbol"], r["avg_score"],
+                     r["selection_count"], r["avg_rank"], self._now()),
+                )
+                count += 1
+            return count
+        except Exception as exc:
+            logger.error(f"Haftalık top5 aggregation hatası [{week_start}]: {exc}")
+            return 0
+
+    def run_retention(self, retention_config: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Veri retention politikasını uygula: aggregate → sil → checkpoint.
+
+        Silmeden önce veriyi özetler (aggregation) — veri kaybı olmaz.
+        Sadece piyasa kapalıyken çağrılmalıdır.
+
+        Args:
+            retention_config: Tablo bazlı retention günleri. Varsayılan:
+                risk_snapshots_days=30, top5_history_days=60,
+                events_info_days=14, events_warning_days=30,
+                events_error_days=90, config_history_days=365,
+                liquidity_days=30, hybrid_closed_days=90
+
+        Returns:
+            Retention sonuç raporu.
+        """
+        cfg = retention_config or {}
+        risk_days = cfg.get("risk_snapshots_days", 30)
+        top5_days = cfg.get("top5_history_days", 60)
+        ev_info_days = cfg.get("events_info_days", 14)
+        ev_warn_days = cfg.get("events_warning_days", 30)
+        ev_err_days = cfg.get("events_error_days", 90)
+        config_days = cfg.get("config_history_days", 365)
+        liquidity_days = cfg.get("liquidity_days", 30)
+        hybrid_days = cfg.get("hybrid_closed_days", 90)
+
+        now = datetime.now()
+        report: dict[str, Any] = {
+            "risk_aggregated_days": 0,
+            "risk_deleted": 0,
+            "top5_aggregated_weeks": 0,
+            "top5_deleted": 0,
+            "events_deleted": 0,
+            "config_history_deleted": 0,
+            "liquidity_deleted": 0,
+            "hybrid_archived": 0,
+        }
+
+        logger.info(
+            f"Retention başlatılıyor — risk:{risk_days}g, top5:{top5_days}g, "
+            f"events(I/W/E):{ev_info_days}/{ev_warn_days}/{ev_err_days}g"
+        )
+
+        # ── 1. Risk Snapshots: Aggregate → Sil ──
+        risk_cutoff = (now - timedelta(days=risk_days)).strftime("%Y-%m-%d")
+        try:
+            # Silinecek günleri bul
+            days_to_agg = self._fetch_all(
+                """SELECT DISTINCT substr(timestamp, 1, 10) AS day
+                   FROM risk_snapshots
+                   WHERE timestamp < ?
+                   ORDER BY day""",
+                (risk_cutoff,),
+            )
+            for row in days_to_agg:
+                if self._aggregate_daily_risk(row["day"]):
+                    report["risk_aggregated_days"] += 1
+
+            # Aggregate edildikten sonra raw veriyi sil
+            if days_to_agg:
+                report["risk_deleted"] = self.delete_risk_snapshots(risk_cutoff)
+                logger.info(
+                    f"Risk retention: {report['risk_aggregated_days']} gün aggregate, "
+                    f"{report['risk_deleted']} satır silindi"
+                )
+        except Exception as exc:
+            logger.error(f"Risk retention hatası: {exc}")
+
+        # ── 2. Top5 History: Haftalık Aggregate → Sil ──
+        top5_cutoff = (now - timedelta(days=top5_days)).strftime("%Y-%m-%d")
+        try:
+            # Silinecek haftaları bul (Pazartesi bazlı)
+            weeks_to_agg = self._fetch_all(
+                """SELECT DISTINCT
+                       date(date, 'weekday 1', '-7 days') AS week_start
+                   FROM top5_history
+                   WHERE date < ?
+                   ORDER BY week_start""",
+                (top5_cutoff,),
+            )
+            for row in weeks_to_agg:
+                ws = row["week_start"]
+                we = (datetime.strptime(ws, "%Y-%m-%d") + timedelta(days=6)).strftime("%Y-%m-%d")
+                agg_count = self._aggregate_weekly_top5(ws, we)
+                if agg_count > 0:
+                    report["top5_aggregated_weeks"] += 1
+
+            # Aggregate edildikten sonra raw veriyi sil
+            if weeks_to_agg:
+                cur = self._execute(
+                    "DELETE FROM top5_history WHERE date < ?", (top5_cutoff,)
+                )
+                report["top5_deleted"] = cur.rowcount
+                logger.info(
+                    f"Top5 retention: {report['top5_aggregated_weeks']} hafta aggregate, "
+                    f"{report['top5_deleted']} satır silindi"
+                )
+        except Exception as exc:
+            logger.error(f"Top5 retention hatası: {exc}")
+
+        # ── 3. Events: Severity bazlı retention ──
+        try:
+            deleted = 0
+            # INFO: kısa retention
+            info_cutoff = (now - timedelta(days=ev_info_days)).isoformat(timespec="seconds")
+            cur = self._execute(
+                "DELETE FROM events WHERE severity='INFO' AND timestamp<?",
+                (info_cutoff,),
+            )
+            deleted += cur.rowcount
+
+            # WARNING: orta retention
+            warn_cutoff = (now - timedelta(days=ev_warn_days)).isoformat(timespec="seconds")
+            cur = self._execute(
+                "DELETE FROM events WHERE severity='WARNING' AND timestamp<?",
+                (warn_cutoff,),
+            )
+            deleted += cur.rowcount
+
+            # ERROR/CRITICAL: uzun retention
+            err_cutoff = (now - timedelta(days=ev_err_days)).isoformat(timespec="seconds")
+            cur = self._execute(
+                "DELETE FROM events WHERE severity IN ('ERROR','CRITICAL') AND timestamp<?",
+                (err_cutoff,),
+            )
+            deleted += cur.rowcount
+
+            report["events_deleted"] = deleted
+            if deleted > 0:
+                logger.info(f"Events retention: {deleted} satır silindi")
+        except Exception as exc:
+            logger.error(f"Events retention hatası: {exc}")
+
+        # ── 4. Config History: 12 ay retention ──
+        try:
+            cfg_cutoff = (now - timedelta(days=config_days)).isoformat(timespec="seconds")
+            cur = self._execute(
+                "DELETE FROM config_history WHERE timestamp<?", (cfg_cutoff,)
+            )
+            report["config_history_deleted"] = cur.rowcount
+        except Exception as exc:
+            logger.error(f"Config history retention hatası: {exc}")
+
+        # ── 5. Liquidity Classes: 30 gün retention ──
+        try:
+            liq_cutoff = (now - timedelta(days=liquidity_days)).strftime("%Y-%m-%d")
+            cur = self._execute(
+                "DELETE FROM liquidity_classes WHERE date<?", (liq_cutoff,)
+            )
+            report["liquidity_deleted"] = cur.rowcount
+        except Exception as exc:
+            logger.error(f"Liquidity retention hatası: {exc}")
+
+        # ── 6. Hybrid: Kapatılmış pozisyonları arşivle ──
+        try:
+            hybrid_cutoff = (now - timedelta(days=hybrid_days)).isoformat(timespec="seconds")
+            cur = self._execute(
+                "DELETE FROM hybrid_events WHERE ticket IN "
+                "(SELECT ticket FROM hybrid_positions WHERE state='CLOSED' AND closed_at<?)",
+                (hybrid_cutoff,),
+            )
+            cur2 = self._execute(
+                "DELETE FROM hybrid_positions WHERE state='CLOSED' AND closed_at<?",
+                (hybrid_cutoff,),
+            )
+            report["hybrid_archived"] = cur2.rowcount
+        except Exception as exc:
+            logger.error(f"Hybrid retention hatası: {exc}")
+
+        # ── 7. WAL Checkpoint + Vacuum ──
+        total_deleted = sum(
+            v for k, v in report.items()
+            if k.endswith("_deleted") or k == "hybrid_archived"
+        )
+        if total_deleted > 0:
+            self.wal_checkpoint()
+            self.vacuum()
+            logger.info(f"Retention sonrası WAL checkpoint + VACUUM tamamlandı")
+
+        logger.info(f"Retention raporu: {report}")
+        return report
+
+    def get_table_sizes(self) -> dict[str, int]:
+        """Tüm tabloların satır sayılarını döndür.
+
+        Returns:
+            Tablo adı → satır sayısı sözlüğü.
+        """
+        tables = [
+            "bars", "trades", "strategies", "risk_snapshots", "events",
+            "top5_history", "config_history", "manual_interventions",
+            "liquidity_classes", "app_state", "hybrid_positions",
+            "hybrid_events", "daily_risk_summary", "weekly_top5_summary",
+        ]
+        sizes = {}
+        for t in tables:
+            try:
+                row = self._fetch_one(f"SELECT COUNT(*) AS cnt FROM {t}")
+                sizes[t] = row["cnt"] if row else 0
+            except Exception:
+                sizes[t] = -1
+        return sizes
 

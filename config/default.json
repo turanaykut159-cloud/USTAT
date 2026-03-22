@@ -112,6 +112,18 @@
       "C": 2.5
     }
   },
+  "retention": {
+    "enabled": true,
+    "risk_snapshots_days": 30,
+    "top5_history_days": 60,
+    "events_info_days": 14,
+    "events_warning_days": 30,
+    "events_error_days": 90,
+    "config_history_days": 365,
+    "liquidity_days": 30,
+    "hybrid_closed_days": 90,
+    "trade_archive_days": 180
+  },
   "hybrid": {
     "enabled": true,
     "native_sltp": false,
