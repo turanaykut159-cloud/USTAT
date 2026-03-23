@@ -2049,3 +2049,33 @@ Bu düzeltmeler native SLTP çalışmadığı için sorunu çözmedi ama kod kal
 | `config/default.json` | `rss_feeds` listesi eklendi |
 | `tests/test_unit_core.py` | Yeni dosya — 57 birim test |
 | `docs/USTAT_v5_gelisim_tarihcesi.md` | Bu giriş (#58) |
+
+---
+
+## #59 — USTAT_OKU.docx v3.0 Güncellemesi (2026-03-24)
+
+### Bağlam
+Denetim raporu (#57 audit) ve çalışma perspektifi araştırması sonuçlarına göre ana referans belgesi (USTAT_OKU.docx) güncellenmiştir.
+
+### Sayısal Güncellemeler
+- Uygulama versiyonu: v5.6 → v5.7 (tüm referanslar)
+- Belge versiyonu: 2.0 → 3.0, tarih 24 Mart 2026
+- Motor boyutları güncellendi (ogul:4696, baba:2839, database:1859, main:1203, news_bridge:1481, top5_selection:643)
+- API routes: 17 → 20, endpoints ~35 → ~40
+- schemas.py: 25KB → 784 satır
+
+### Anayasa Güncellemeleri
+- Kırmızı Bölge: 8 → 10 dosya (news_bridge.py ve top5_selection.py eklendi, tüm satır sayıları güncellendi)
+- Siyah Kapı: _send_order_signal → _execute_signal düzeltmesi
+- indicators.py motor dosya listesinden çıkarıldı
+
+### Yeni Bölümler (3 adet)
+- **BÖLÜM 12 — Cerrah-Mühendis Kimliği:** Üç şapka modeli (Araştırmacı, Geliştirici, Risk Mühendisi)
+- **BÖLÜM 13 — Değişiklik Sınıflandırma Sistemi:** C0-C4 sınıflandırma tablosu + 8 maddelik Pre-Flight Checklist
+- **BÖLÜM 14 — Yeni Geliştirici Onboarding:** 7 adım, 2 iş günü süreci
+
+### Değişen Dosyalar
+| Dosya | Değişiklik |
+|-------|-----------|
+| `USTAT_OKU.docx` | v2.0 → v3.0 (sayısal güncellemeler + 3 yeni bölüm) |
+| `docs/USTAT_v5_gelisim_tarihcesi.md` | Bu giriş (#59) |
