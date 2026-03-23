@@ -2016,3 +2016,36 @@ Bu düzeltmeler native SLTP çalışmadığı için sorunu çözmedi ama kod kal
 - TEST_010-A: `db.get_recent_trades()` → `db.get_trades()` (doğru metot adı)
 - TEST_011-A: heavy_stress → light_stress profil (10x yükle heavy fazla agresif)
 - TEST_011-B: Chaos recovery'de CB reset eklendi, disconnect eşiği >=24'e gevşetildi
+
+---
+
+## #58 — Audit YAPILMALI Uygulamaları (2026-03-24)
+
+**Kapsam:** #57 audit raporundaki 3 "YAPILMALI" maddenin uygulanması.
+
+### 1. Ağırlıklı Oylama Tiebreaker (🔴 YÜKSEK)
+- **Dosya:** `engine/ogul.py` → `_get_voting_detail()`
+- **Problem:** Basit oy eşitliğinde w_buy/w_sell hesaplanıyor ama karar mekanizmasında kullanılmıyordu → NOTR
+- **Çözüm:** Tiebreaker eklendi — oy eşitliğinde ağırlıklı skor farkı ≥1.0 ise yön belirlenir
+- **Etki:** RSI-EMA beraberliğinde Price Action güçlü trend gösterdiğinde artık sinyal kaybolmuyor
+
+### 2. RSS Haber Provider (🟡 ORTA)
+- **Dosya:** `engine/news_bridge.py` → `RSSProvider(NewsProvider)`
+- **Özellikler:** feedparser yerine `requests` + `xml.etree.ElementTree` (ek bağımlılık yok)
+- **Varsayılan feed'ler:** Bloomberg HT piyasa/borsa/doviz RSS
+- **Config:** `config/default.json` → `news.rss_feeds[]`, `provider: "rss"` veya `"all"`
+- **Güvenlik:** seen_guids deduplikasyon, max_seen=5000 bellek sınırı, timeout=8s
+
+### 3. Birim Test Altyapısı (🟡 ORTA)
+- **Dosya:** `tests/test_unit_core.py` — 57 test, 6 sınıf
+- **Kapsam:** _normalize_turkish (8), _detect_category (13), _match_symbols (7), RSSProvider (12), VotingTiebreaker (10), Constants (5+2)
+- **Sonuç:** 57/57 PASSED (pytest, 0.36s)
+
+### Değişen Dosyalar
+| Dosya | Değişiklik |
+|-------|-----------|
+| `engine/ogul.py` | Tiebreaker mantığı eklendi (~10 satır) |
+| `engine/news_bridge.py` | RSSProvider sınıfı eklendi (~110 satır), docstring güncellendi |
+| `config/default.json` | `rss_feeds` listesi eklendi |
+| `tests/test_unit_core.py` | Yeni dosya — 57 birim test |
+| `docs/USTAT_v5_gelisim_tarihcesi.md` | Bu giriş (#58) |

@@ -129,6 +129,11 @@
     "provider": "mt5",
     "mt5_file_path": "",
     "benzinga_api_key": "",
+    "rss_feeds": [
+      "https://www.bloomberght.com/rss/piyasa",
+      "https://www.bloomberght.com/rss/borsa",
+      "https://www.bloomberght.com/rss/doviz"
+    ],
     "fetch_interval_sec": 10,
     "sentiment_model": "rule_based",
     "positive_threshold": 0.5,

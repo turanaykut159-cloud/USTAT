@@ -20,6 +20,7 @@ Mimari:
 Haber Kaynakları (provider):
     - MT5Provider : MQL5 servis scriptinin dosyaya yazdığı haberleri okur
     - BenzingaProvider : Benzinga Pro API (REST/WebSocket)
+    - RSSProvider : Ücretsiz RSS feed'leri (Bloomberg HT vb.)
     - RuleBasedProvider : Anahtar kelime bazlı kural motoru (fallback)
 
 Sentiment Modeli:
@@ -530,6 +531,122 @@ class BenzingaProvider(NewsProvider):
         return bool(self._api_key)
 
 
+class RSSProvider(NewsProvider):
+    """Ücretsiz RSS feed'lerinden Türkçe finansal haber çeker.
+
+    Varsayılan feed'ler:
+        - Bloomberg HT Piyasa   : https://www.bloomberght.com/rss/piyasa
+        - Bloomberg HT Borsa    : https://www.bloomberght.com/rss/borsa
+        - Bloomberg HT Döviz    : https://www.bloomberght.com/rss/doviz
+
+    Ek feed'ler config'den eklenebilir.
+
+    Bağımlılık: requests (BenzingaProvider ile ortak, ekstra kurulum gerekmez).
+    """
+
+    DEFAULT_FEEDS: list[str] = [
+        "https://www.bloomberght.com/rss/piyasa",
+        "https://www.bloomberght.com/rss/borsa",
+        "https://www.bloomberght.com/rss/doviz",
+    ]
+
+    def __init__(self, feeds: list[str] | None = None, fetch_timeout: int = 8):
+        self._feeds = feeds if feeds else self.DEFAULT_FEEDS
+        self._timeout = fetch_timeout
+        self._seen_guids: set[str] = set()
+        self._last_fetch_time: float = 0.0
+        # Aşırı büyümesini önle — en fazla 5000 guid tut
+        self._max_seen: int = 5000
+
+    def fetch(self) -> list[dict]:
+        """Tüm RSS feed'lerinden yeni haberleri çek."""
+        try:
+            import requests
+            import xml.etree.ElementTree as ET
+        except ImportError:
+            logger.warning("requests kütüphanesi bulunamadı — RSS devre dışı.")
+            return []
+
+        all_events: list[dict] = []
+
+        for feed_url in self._feeds:
+            try:
+                resp = requests.get(
+                    feed_url,
+                    timeout=self._timeout,
+                    headers={"User-Agent": "USTAT/5.7 NewsBot"},
+                )
+                resp.raise_for_status()
+
+                # RSS XML parse
+                root = ET.fromstring(resp.content)
+                channel = root.find("channel")
+                if channel is None:
+                    continue
+
+                for item in channel.findall("item"):
+                    title = (item.findtext("title") or "").strip()
+                    if not title:
+                        continue
+
+                    link = (item.findtext("link") or "").strip()
+                    guid_el = item.findtext("guid") or link or title
+                    pub_date = (item.findtext("pubDate") or "").strip()
+
+                    # Duplicate kontrolü
+                    if guid_el in self._seen_guids:
+                        continue
+
+                    # pubDate → timestamp
+                    ts = self._parse_rss_date(pub_date)
+
+                    all_events.append({
+                        "headline": title,
+                        "timestamp": ts or time.time(),
+                        "source": "RSS",
+                        "url": link,
+                        "feed": feed_url,
+                    })
+                    self._seen_guids.add(guid_el)
+
+            except Exception as e:
+                logger.warning(f"RSS feed hatası ({feed_url}): {e}")
+                continue
+
+        # seen_guids bellek sınırı
+        if len(self._seen_guids) > self._max_seen:
+            # En eskilerden at — set olduğu için tümünü sil, yeniden ekle
+            self._seen_guids.clear()
+            logger.debug("RSS seen_guids temizlendi (bellek sınırı).")
+
+        if all_events:
+            self._last_fetch_time = time.time()
+            logger.info(f"RSS feed'lerinden {len(all_events)} yeni haber çekildi.")
+
+        return all_events
+
+    @staticmethod
+    def _parse_rss_date(date_str: str) -> float | None:
+        """RFC 2822 / RFC 822 tarih stringini timestamp'e çevir.
+
+        Örnekler:
+            'Mon, 23 Mar 2026 14:30:00 +0300'
+            'Mon, 23 Mar 2026 14:30:00 GMT'
+        """
+        if not date_str:
+            return None
+        try:
+            from email.utils import parsedate_to_datetime
+            dt = parsedate_to_datetime(date_str)
+            return dt.timestamp()
+        except Exception:
+            return None
+
+    def is_available(self) -> bool:
+        """En az bir feed URL tanımlı mı?"""
+        return bool(self._feeds)
+
+
 # ═════════════════════════════════════════════════════════════════════
 #  HABER ÖNBELLEĞİ
 # ═════════════════════════════════════════════════════════════════════
@@ -676,6 +793,10 @@ class NewsBridge:
         if provider_name in ("benzinga", "all"):
             api_key = self._cfg("news.benzinga_api_key", "")
             self._providers.append(BenzingaProvider(api_key))
+
+        if provider_name in ("rss", "all"):
+            rss_feeds = self._cfg("news.rss_feeds", [])
+            self._providers.append(RSSProvider(rss_feeds if rss_feeds else None))
 
         if not self._providers:
             logger.warning("Hiçbir haber sağlayıcısı aktif değil!")

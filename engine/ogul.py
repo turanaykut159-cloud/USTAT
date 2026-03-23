@@ -842,6 +842,7 @@ class Ogul:
                     buy_votes += 1
                 elif sell_votes > buy_votes:
                     sell_votes += 1
+                # Beraberlikte ATR oy vermez — tiebreaker ağırlıklı skorla çözülür
             elif _vol_regime == "LOW" and prev_atr > 0:
                 # Düşük volatilite: ATR genişlemese bile stabil ise kabul et
                 # (sıkışma bölgesinde sinyal kaçırmamak için)
@@ -923,12 +924,22 @@ class Ogul:
         result["weighted_sell"] = round(w_sell, 2)
 
         # Sonuç: en yüksek oy alan yön
+        # Beraberlikte ağırlıklı skorlar tiebreaker olarak kullanılır
         if buy_votes > sell_votes:
             result["direction"] = "BUY"
             result["total_favorable"] = buy_votes
         elif sell_votes > buy_votes:
             result["direction"] = "SELL"
             result["total_favorable"] = sell_votes
+        elif w_buy > w_sell and (w_buy - w_sell) >= 1.0:
+            # Tiebreaker: basit oylar eşit ama ağırlıklı skor fark ≥ 1.0
+            result["direction"] = "BUY"
+            result["total_favorable"] = buy_votes
+            result["tiebreaker"] = "weighted"
+        elif w_sell > w_buy and (w_sell - w_buy) >= 1.0:
+            result["direction"] = "SELL"
+            result["total_favorable"] = sell_votes
+            result["tiebreaker"] = "weighted"
         else:
             result["direction"] = "NOTR"
             result["total_favorable"] = 0
