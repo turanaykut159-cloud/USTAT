@@ -103,7 +103,7 @@ SYMBOL_KEYWORDS: dict[str, list[str]] = {
     "F_GARAN": ["garanti", "garan", "bbva"],
     "F_GUBRF": ["gübre", "gubre", "gubrf"],
     "F_HALKB": ["halkbank", "halkb"],
-    "F_ISCTR": ["iş bankası", "isbank", "isctr"],
+    "F_ISCTR": ["iş bankası", "isbank", "isctr", "is bankasi"],
     "F_KCHOL": ["koç", "koc", "kchol"],
     "F_KONTR": ["konya", "kontr", "kontrat"],
     "F_PGSUS": ["pegasus", "pgsus", "havacılık"],
@@ -140,6 +140,7 @@ POSITIVE_KEYWORDS: list[str] = [
     "rally", "boğa", "boga", "alım", "alim", "hedef fiyat yükseltti",
     "temettü", "temettu", "kâr artışı", "gelir artışı",
     "ateşkes", "ateskes", "uzlaşma", "uzlasma",
+    "kredi notu", "not yükseltti", "not artışı",
 ]
 
 NEGATIVE_KEYWORDS: list[str] = [
@@ -772,12 +773,12 @@ class NewsBridge:
 
     def _detect_category(self, text: str) -> str:
         """Haber kategorisini belirle."""
-        text_lower = text.lower()
+        text_lower = self._normalize_turkish(text)
 
         jeopolitik = ["savaş", "savas", "barış", "baris", "nato", "trump",
                       "erdoğan", "erdogan", "iran", "rusya", "ukrayna",
                       "suriye", "çatışma", "catisma", "ambargo", "yaptırım",
-                      "ateşkes", "ateskes", "müzakere"]
+                      "ateşkes", "ateskes", "müzakere", "seçim", "secim"]
         ekonomik = ["faiz", "enflasyon", "tcmb", "fed", "ecb", "imf",
                     "gdp", "büyüme", "buyume", "cari açık", "işsizlik",
                     "issizlik", "cpi", "ppi", "cds", "kredi notu"]
@@ -804,9 +805,25 @@ class NewsBridge:
 
         return "GENEL"
 
+    @staticmethod
+    def _normalize_turkish(text: str) -> str:
+        """Türkçe karakterleri normalize et (Python İ→i̇ sorununu çözer).
+
+        Python'da İ.lower() = 'i̇' (combining dot above), I.lower() = 'i'.
+        Türkçe'de İ→i, I→ı olmalı ama biz keyword eşleştirmesinde
+        her ikisini de 'i' olarak normalize ediyoruz.
+        """
+        # İ (noktalı büyük) → i
+        text = text.replace("İ", "i")
+        # Standart lower() (I→i, diğer tüm harfler)
+        text = text.lower()
+        # Python lower() bazen İ→i̇ (combining dot) üretebilir, temizle
+        text = text.replace("i\u0307", "i")
+        return text
+
     def _match_symbols(self, text: str) -> list[str]:
         """Haber metninden etkilenen sembolleri çıkar."""
-        text_lower = text.lower()
+        text_lower = self._normalize_turkish(text)
         matched = []
 
         for symbol, keywords in SYMBOL_KEYWORDS.items():
@@ -820,7 +837,7 @@ class NewsBridge:
 
     def _is_global_news(self, text: str) -> bool:
         """Haberin tüm piyasayı etkileyip etkilemediğini belirle."""
-        text_lower = text.lower()
+        text_lower = self._normalize_turkish(text)
         return any(kw in text_lower for kw in GLOBAL_KEYWORDS)
 
     # ── Public: BABA Entegrasyonu ─────────────────────────────────
@@ -894,10 +911,23 @@ class NewsBridge:
     def get_lot_multiplier(self, symbol: str) -> float:
         """Sembol için haber bazlı lot çarpanı.
 
+        Sembol-spesifik ve global haberlerin en kötüsünü kullanır.
+        Ayrıca, hiçbir sembolle eşleşmeyen ama severity'si yüksek
+        haberleri de tüm semboller için uygular (piyasa geneli risk).
+
         Returns:
             0.0 .. 1.0 (1.0 = normal, 0.0 = işlem açılmaz)
         """
+        # Sembol-spesifik + global haberler
         events = self._cache.get_active_for_symbol(symbol)
+
+        # Ek: sembolsüz ve global olmayan ama ciddi haberler de
+        # tüm piyasayı etkiler (örn: "savaş ilanı" sembolsüz gelirse)
+        all_active = self._cache.get_active()
+        for ev in all_active:
+            if ev not in events and ev.severity in ("CRITICAL", "HIGH"):
+                events.append(ev)
+
         if not events:
             return 1.0
         # En kötü haberin çarpanını kullan

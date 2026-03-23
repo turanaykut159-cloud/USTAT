@@ -1,0 +1,732 @@
+{
+  "date": "2026-03-23 23:28:53",
+  "total": 100,
+  "passed": 100,
+  "failed": 0,
+  "pass_rate": "100%",
+  "categories": {
+    "A": {
+      "passed": 30,
+      "failed": 0,
+      "total": 30
+    },
+    "B": {
+      "passed": 30,
+      "failed": 0,
+      "total": 30
+    },
+    "C": {
+      "passed": 20,
+      "failed": 0,
+      "total": 20
+    },
+    "D": {
+      "passed": 20,
+      "failed": 0,
+      "total": 20
+    }
+  },
+  "failed_tests": [],
+  "all_results": [
+    {
+      "id": 1,
+      "name": "Güçlü pozitif — OĞUL BUY",
+      "category": "A",
+      "passed": true,
+      "details": "BABA lot=1.0, OĞUL=BUY score=15.6"
+    },
+    {
+      "id": 2,
+      "name": "Güçlü negatif — BABA OLAY",
+      "category": "A",
+      "passed": true,
+      "details": "BABA OLAY=True, lot=0.0, severity=CRITICAL"
+    },
+    {
+      "id": 3,
+      "name": "Nötr haber — tepkisizlik",
+      "category": "A",
+      "passed": true,
+      "details": "Nötr haber — doğru tepkisizlik"
+    },
+    {
+      "id": 4,
+      "name": "CRITICAL (-0.95) — lot 0.0",
+      "category": "A",
+      "passed": true,
+      "details": "CRITICAL lot=0.0, severity=CRITICAL"
+    },
+    {
+      "id": 5,
+      "name": "HIGH (-0.75) — lot 0.25",
+      "category": "A",
+      "passed": true,
+      "details": "HIGH lot=0.25"
+    },
+    {
+      "id": 6,
+      "name": "MEDIUM (-0.55) — lot 0.50",
+      "category": "A",
+      "passed": true,
+      "details": "MEDIUM lot=0.5"
+    },
+    {
+      "id": 7,
+      "name": "LOW (-0.35) — lot 0.75",
+      "category": "A",
+      "passed": true,
+      "details": "LOW lot=0.75"
+    },
+    {
+      "id": 8,
+      "name": "THY spesifik sinyal",
+      "category": "A",
+      "passed": true,
+      "details": "THY=BUY, AKBNK=NEUTRAL"
+    },
+    {
+      "id": 9,
+      "name": "JEOPOLİTİK kategori",
+      "category": "A",
+      "passed": true,
+      "details": "Kategori=JEOPOLITIK"
+    },
+    {
+      "id": 10,
+      "name": "EKONOMIK kategori",
+      "category": "A",
+      "passed": true,
+      "details": "Kategori=EKONOMIK"
+    },
+    {
+      "id": 11,
+      "name": "SIRKET kategori — Garanti",
+      "category": "A",
+      "passed": true,
+      "details": "Kategori=SIRKET, GARAN sinyal=BUY"
+    },
+    {
+      "id": 12,
+      "name": "Global haber — tüm semboller",
+      "category": "A",
+      "passed": true,
+      "details": "XU030 lot=0.25, THYAO lot=0.25"
+    },
+    {
+      "id": 13,
+      "name": "Düşük confidence — sinyal yok",
+      "category": "A",
+      "passed": true,
+      "details": "Düşük confidence — sinyal=NEUTRAL"
+    },
+    {
+      "id": 14,
+      "name": "Eşik altı sentiment — sinyal yok",
+      "category": "A",
+      "passed": true,
+      "details": "Eşik altı sentiment — sinyal=NEUTRAL"
+    },
+    {
+      "id": 15,
+      "name": "Düşük confidence — OLAY yok",
+      "category": "A",
+      "passed": true,
+      "details": "Düşük confidence OLAY=False"
+    },
+    {
+      "id": 16,
+      "name": "Dolar haberi — F_USDTRY",
+      "category": "A",
+      "passed": true,
+      "details": "Semboller=['F_USDTRY']"
+    },
+    {
+      "id": 17,
+      "name": "Aselsan savunma — F_ASELS",
+      "category": "A",
+      "passed": true,
+      "details": "Semboller=['F_ASELS'], sinyal=NEUTRAL"
+    },
+    {
+      "id": 18,
+      "name": "Çoklu sembol eşleşme",
+      "category": "A",
+      "passed": true,
+      "details": "Semboller=['F_AKBNK', 'F_GARAN']"
+    },
+    {
+      "id": 19,
+      "name": "Boş headline — event yok",
+      "category": "A",
+      "passed": true,
+      "details": "Boş headline process → None"
+    },
+    {
+      "id": 20,
+      "name": "Uzun headline — crash yok",
+      "category": "A",
+      "passed": true,
+      "details": "Uzun headline işlendi — aktif=1"
+    },
+    {
+      "id": 21,
+      "name": "Sınır -0.70 — OLAY tetik",
+      "category": "A",
+      "passed": true,
+      "details": "Sınır -0.70 OLAY=True"
+    },
+    {
+      "id": 22,
+      "name": "Sınır -0.69 — OLAY yok",
+      "category": "A",
+      "passed": true,
+      "details": "Sınır -0.69 OLAY=False"
+    },
+    {
+      "id": 23,
+      "name": "Importance 3 confidence boost",
+      "category": "A",
+      "passed": true,
+      "details": "Confidence: base=0.800, boosted=1.000, expected=1.000"
+    },
+    {
+      "id": 24,
+      "name": "Importance 1 — boost yok",
+      "category": "A",
+      "passed": true,
+      "details": "Confidence: base=0.300, event=0.300"
+    },
+    {
+      "id": 25,
+      "name": "BABA warning üretimi",
+      "category": "A",
+      "passed": true,
+      "details": "Warning count=1, THY warning=True"
+    },
+    {
+      "id": 26,
+      "name": "Petrol — TUPRS + global",
+      "category": "A",
+      "passed": true,
+      "details": "Semboller=['F_TUPRS'], global=True"
+    },
+    {
+      "id": 27,
+      "name": "Erdoğan — JEOPOLITIK + global",
+      "category": "A",
+      "passed": true,
+      "details": "Kategori=JEOPOLITIK, global=True"
+    },
+    {
+      "id": 28,
+      "name": "Deprem — CRITICAL, OLAY",
+      "category": "A",
+      "passed": true,
+      "details": "Deprem OLAY=True, lot=0.0"
+    },
+    {
+      "id": 29,
+      "name": "Seçim — JEOPOLITIK + global",
+      "category": "A",
+      "passed": true,
+      "details": "Seçim: global=True, kat=JEOPOLITIK"
+    },
+    {
+      "id": 30,
+      "name": "Ateşkes — pozitif JEOPOLITIK",
+      "category": "A",
+      "passed": true,
+      "details": "Ateşkes: sentiment=1.00, kat=JEOPOLITIK"
+    },
+    {
+      "id": 31,
+      "name": "İyi haber → düzeltme (yanlış)",
+      "category": "B",
+      "passed": true,
+      "details": "Düzeltme sonrası: worst=-0.7, lot=0.25, OĞUL=BUY"
+    },
+    {
+      "id": 32,
+      "name": "Kötü → iyileşme (ikili)",
+      "category": "B",
+      "passed": true,
+      "details": "İkili: BABA OLAY=True, OĞUL=NEUTRAL"
+    },
+    {
+      "id": 33,
+      "name": "3 kötüleşen haber dizisi",
+      "category": "B",
+      "passed": true,
+      "details": "Kötüleşme: severity=CRITICAL, lot=0.0"
+    },
+    {
+      "id": 34,
+      "name": "3 iyileşen haber dizisi",
+      "category": "B",
+      "passed": true,
+      "details": "İyileşme: OĞUL=BUY, score=20.0"
+    },
+    {
+      "id": 35,
+      "name": "Farklı sembol: THY kötü, AKBNK iyi",
+      "category": "B",
+      "passed": true,
+      "details": "THY lot=0.25, AKBNK lot=0.25, AKBNK signal=BUY"
+    },
+    {
+      "id": 36,
+      "name": "Duplicate haber kontrolü",
+      "category": "B",
+      "passed": true,
+      "details": "Aktif=1 (duplicate kontrol event_id bazlı)"
+    },
+    {
+      "id": 37,
+      "name": "Hızlı sentiment dönüşü -0.8→+0.8",
+      "category": "B",
+      "passed": true,
+      "details": "Hızlı dönüş: OLAY=True, worst=-0.8"
+    },
+    {
+      "id": 38,
+      "name": "Çelişkili kaynaklar",
+      "category": "B",
+      "passed": true,
+      "details": "Çelişkili kaynaklar: OLAY=True"
+    },
+    {
+      "id": 39,
+      "name": "5 nötr haber — stabil",
+      "category": "B",
+      "passed": true,
+      "details": "5 nötr: OLAY=False, lot=1.0"
+    },
+    {
+      "id": 40,
+      "name": "Birikimli negatif etki",
+      "category": "B",
+      "passed": true,
+      "details": "Birikimli: worst=-0.85, severity=CRITICAL"
+    },
+    {
+      "id": 41,
+      "name": "Sektörel bankacılık haberi",
+      "category": "B",
+      "passed": true,
+      "details": "Sektörel: kategori=SEKTOREL"
+    },
+    {
+      "id": 42,
+      "name": "Trump yaptırım tehdidi",
+      "category": "B",
+      "passed": true,
+      "details": "Trump yaptırım: OLAY=True"
+    },
+    {
+      "id": 43,
+      "name": "Fed faiz indirimi — rally",
+      "category": "B",
+      "passed": true,
+      "details": "Fed: OĞUL=BUY, score=20.0"
+    },
+    {
+      "id": 44,
+      "name": "İyi + nötr düzeltme",
+      "category": "B",
+      "passed": true,
+      "details": "İyi + nötr: OĞUL=BUY"
+    },
+    {
+      "id": 45,
+      "name": "Global kötü + sektörel iyi",
+      "category": "B",
+      "passed": true,
+      "details": "Global kötü + sektörel iyi: BABA OLAY=True, ASELS signal=BUY"
+    },
+    {
+      "id": 46,
+      "name": "10 haber yığılması",
+      "category": "B",
+      "passed": true,
+      "details": "10 haber: aktif=10"
+    },
+    {
+      "id": 47,
+      "name": "Pozitif sonra CRITICAL",
+      "category": "B",
+      "passed": true,
+      "details": "Pozitif+Critical: lot=0.0, severity=CRITICAL"
+    },
+    {
+      "id": 48,
+      "name": "CDS haberi — global",
+      "category": "B",
+      "passed": true,
+      "details": "CDS: global=True, OLAY=True"
+    },
+    {
+      "id": 49,
+      "name": "Enflasyon düştü — pozitif",
+      "category": "B",
+      "passed": true,
+      "details": "Enflasyon: kat=EKONOMIK, sentiment=0.00"
+    },
+    {
+      "id": 50,
+      "name": "Koç Holding haberi",
+      "category": "B",
+      "passed": true,
+      "details": "Koç: semboller=['F_KCHOL']"
+    },
+    {
+      "id": 51,
+      "name": "Sabancı Holding haberi",
+      "category": "B",
+      "passed": true,
+      "details": "Sabancı: semboller=['F_SAHOL']"
+    },
+    {
+      "id": 52,
+      "name": "İş Bankası haberi",
+      "category": "B",
+      "passed": true,
+      "details": "İşbank: semboller=['F_ISCTR']"
+    },
+    {
+      "id": 53,
+      "name": "2 kötü + 1 iyi düzeltme",
+      "category": "B",
+      "passed": true,
+      "details": "2 kötü + 1 iyi: OLAY=True, worst=-0.75"
+    },
+    {
+      "id": 54,
+      "name": "Güncelleme ile confidence artışı",
+      "category": "B",
+      "passed": true,
+      "details": "Güncelleme: OĞUL=BUY, score=9.6"
+    },
+    {
+      "id": 55,
+      "name": "Aynı sembol pozitif + negatif",
+      "category": "B",
+      "passed": true,
+      "details": "THY +/- : lot=0.5"
+    },
+    {
+      "id": 56,
+      "name": "IMF raporu — global ekonomik",
+      "category": "B",
+      "passed": true,
+      "details": "IMF: global=True, kat=EKONOMIK"
+    },
+    {
+      "id": 57,
+      "name": "Pegasus havacılık",
+      "category": "B",
+      "passed": true,
+      "details": "Pegasus: semboller=['F_PGSUS']"
+    },
+    {
+      "id": 58,
+      "name": "Ereğli çelik ihracat",
+      "category": "B",
+      "passed": true,
+      "details": "Ereğli: semboller=['F_EREGL']"
+    },
+    {
+      "id": 59,
+      "name": "Tüpraş rafineri",
+      "category": "B",
+      "passed": true,
+      "details": "Tüpraş: semboller=['F_TUPRS']"
+    },
+    {
+      "id": 60,
+      "name": "Yapı Kredi banka",
+      "category": "B",
+      "passed": true,
+      "details": "YKB: semboller=['F_YKBNK']"
+    },
+    {
+      "id": 61,
+      "name": "3 sembol: kötü/nötr/iyi",
+      "category": "C",
+      "passed": true,
+      "details": "3 sembol: THY lot=0.0, AKBNK lot=0.0, ASELS=BUY"
+    },
+    {
+      "id": 62,
+      "name": "Global çöküş — tüm BUY iptal",
+      "category": "C",
+      "passed": true,
+      "details": "Global çöküş: all_neutral=True"
+    },
+    {
+      "id": 63,
+      "name": "Enerji sektörü krizi",
+      "category": "C",
+      "passed": true,
+      "details": "Enerji: kat=SEKTOREL, sembol=['F_TUPRS']"
+    },
+    {
+      "id": 64,
+      "name": "BIST30 rekor — F_XU030",
+      "category": "C",
+      "passed": true,
+      "details": "BIST30: sembol=['F_XU030'], OĞUL=BUY"
+    },
+    {
+      "id": 65,
+      "name": "Altın haberi — global",
+      "category": "C",
+      "passed": true,
+      "details": "Altın: global=True"
+    },
+    {
+      "id": 66,
+      "name": "ECB faiz — global ekonomik",
+      "category": "C",
+      "passed": true,
+      "details": "ECB: global=True, kat=EKONOMIK"
+    },
+    {
+      "id": 67,
+      "name": "Turkcell + Pegasus ortaklık",
+      "category": "C",
+      "passed": true,
+      "details": "Çoklu sektör: semboller=['F_PGSUS', 'F_TCELL']"
+    },
+    {
+      "id": 68,
+      "name": "Resesyon haberi — global",
+      "category": "C",
+      "passed": true,
+      "details": "Resesyon: OLAY=True"
+    },
+    {
+      "id": 69,
+      "name": "Kredi notu yükseltme",
+      "category": "C",
+      "passed": true,
+      "details": "Kredi notu: sentiment=0.33"
+    },
+    {
+      "id": 70,
+      "name": "BIM perakende",
+      "category": "C",
+      "passed": true,
+      "details": "BIM: semboller=['F_BIMAS']"
+    },
+    {
+      "id": 71,
+      "name": "Emlak Konut",
+      "category": "C",
+      "passed": true,
+      "details": "EKGYO: semboller=['F_EKGYO']"
+    },
+    {
+      "id": 72,
+      "name": "Halkbank",
+      "category": "C",
+      "passed": true,
+      "details": "HALKB: semboller=['F_HALKB']"
+    },
+    {
+      "id": 73,
+      "name": "Tekfen inşaat",
+      "category": "C",
+      "passed": true,
+      "details": "TKFEN: semboller=['F_TKFEN']"
+    },
+    {
+      "id": 74,
+      "name": "Tofaş otomotiv",
+      "category": "C",
+      "passed": true,
+      "details": "TOASO: semboller=['F_TOASO']"
+    },
+    {
+      "id": 75,
+      "name": "Şişecam",
+      "category": "C",
+      "passed": true,
+      "details": "SISE: semboller=['F_SISE']"
+    },
+    {
+      "id": 76,
+      "name": "TAV havalimanı",
+      "category": "C",
+      "passed": true,
+      "details": "TAVHL: semboller=['F_TAVHL']"
+    },
+    {
+      "id": 77,
+      "name": "Gübre Fabrikaları",
+      "category": "C",
+      "passed": true,
+      "details": "GUBRF: semboller=['F_GUBRF']"
+    },
+    {
+      "id": 78,
+      "name": "Pandemi — CRITICAL",
+      "category": "C",
+      "passed": true,
+      "details": "Pandemi: severity=CRITICAL"
+    },
+    {
+      "id": 79,
+      "name": "5 sembolde eşzamanlı BUY",
+      "category": "C",
+      "passed": true,
+      "details": "5 BUY: 5/5"
+    },
+    {
+      "id": 80,
+      "name": "BIST30 + USDTRY çift risk",
+      "category": "C",
+      "passed": true,
+      "details": "Çift risk: warnings=2, OLAY=True"
+    },
+    {
+      "id": 81,
+      "name": "Alpha decay: 0/60/120sn",
+      "category": "D",
+      "passed": true,
+      "details": "Decay: 0s=20.00, 60s=5.23, 120s=0.00"
+    },
+    {
+      "id": 82,
+      "name": "Decay formül doğrulaması",
+      "category": "D",
+      "passed": true,
+      "details": "Decay formula: expected=4.82, actual=4.82, diff=0.005"
+    },
+    {
+      "id": 83,
+      "name": "TTL expire (3700s)",
+      "category": "D",
+      "passed": true,
+      "details": "TTL expire: aktif=0"
+    },
+    {
+      "id": 84,
+      "name": "TTL sınır (3500s)",
+      "category": "D",
+      "passed": true,
+      "details": "TTL sınır: aktif=1, OLAY=True"
+    },
+    {
+      "id": 85,
+      "name": "Decay → skor < 2.0 → iptal",
+      "category": "D",
+      "passed": true,
+      "details": "Decay iptal: score=0.0, signal=NEUTRAL"
+    },
+    {
+      "id": 86,
+      "name": "Max skor 20 sınırı",
+      "category": "D",
+      "passed": true,
+      "details": "Max skor: 20.0"
+    },
+    {
+      "id": 87,
+      "name": "Kategori çarpanı farkı",
+      "category": "D",
+      "passed": true,
+      "details": "Çarpan: JEOP=20.00, GENEL=9.60, oran=2.08"
+    },
+    {
+      "id": 88,
+      "name": "Severity-lot tam tablo",
+      "category": "D",
+      "passed": true,
+      "details": "s=-0.95: sev=CRITICAL(CRITICAL), lot=0.0(0.0) ✓ | s=-0.75: sev=HIGH(HIGH), lot=0.25(0.25) ✓ | s=-0.55: sev=MEDIUM(MEDIUM), lot=0.5(0.5) ✓ | s=-0.35: sev=LOW(LOW), lot=0.75(0.75) ✓ | s=-0.2: sev=NONE(NONE), lot=1.0(1.0) ✓"
+    },
+    {
+      "id": 89,
+      "name": "3 sembol 3 warning",
+      "category": "D",
+      "passed": true,
+      "details": "3 sembol warning: 3"
+    },
+    {
+      "id": 90,
+      "name": "Global warning (sembolsüz)",
+      "category": "D",
+      "passed": true,
+      "details": "Global warning: 1"
+    },
+    {
+      "id": 91,
+      "name": "20 haber performans",
+      "category": "D",
+      "passed": true,
+      "details": "20 haber: aktif=20"
+    },
+    {
+      "id": 92,
+      "name": "SE2 ağırlık config",
+      "category": "D",
+      "passed": true,
+      "details": "SE2 ağırlık: 1.3"
+    },
+    {
+      "id": 93,
+      "name": "Custom threshold override",
+      "category": "D",
+      "passed": true,
+      "details": "Custom threshold: OLAY=True"
+    },
+    {
+      "id": 94,
+      "name": "Disabled bridge",
+      "category": "D",
+      "passed": true,
+      "details": "Disabled: run_cycle=0"
+    },
+    {
+      "id": 95,
+      "name": "Cooldown (non-MT5)",
+      "category": "D",
+      "passed": true,
+      "details": "Cooldown: ilk=GENEL, ikinci=BLOCKED"
+    },
+    {
+      "id": 96,
+      "name": "MT5 cooldown bypass",
+      "category": "D",
+      "passed": true,
+      "details": "MT5 bypass: ilk=OK, ikinci=OK"
+    },
+    {
+      "id": 97,
+      "name": "Güçlü haber cooldown bypass",
+      "category": "D",
+      "passed": true,
+      "details": "Güçlü haber cooldown: BYPASS"
+    },
+    {
+      "id": 98,
+      "name": "Minimum sentiment -1.0",
+      "category": "D",
+      "passed": true,
+      "details": "Min sentiment: lot=0.0, sev=CRITICAL"
+    },
+    {
+      "id": 99,
+      "name": "Maximum sentiment +1.0",
+      "category": "D",
+      "passed": true,
+      "details": "Max sentiment: score=20.0, dir=BUY"
+    },
+    {
+      "id": 100,
+      "name": "Gerçekçi 5 haber senaryosu",
+      "category": "D",
+      "passed": true,
+      "details": "Gerçekçi: aktif=5, OLAY=False, THY=BUY(15.5), XU030=NEUTRAL(0.0)"
+    }
+  ]
+}
