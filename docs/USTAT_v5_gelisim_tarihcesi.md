@@ -2,6 +2,45 @@
 
 ---
 
+## #57 — Gelişim Tarihçesi Audit: Yapılmadı/Atlandı/Yarım Kaldı Analizi (2026-03-23)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-23 |
+| **Neden** | Gelişim tarihçesinin (#1-#59) tüm girişleri kod tabanıyla karşılaştırmalı incelendi. Planlanan ama yapılmayan, yarım kalan veya bilinçli ertelenen işlemler tespit edildi. |
+| **Tetikleyen** | CEO talebi: "Yapalım dediğimiz yapmadığımız veya öneri verip atladığımız işlemler var mı?" |
+| **Kapsam** | Yalnızca analiz — kod değişikliği yapılmadı |
+
+### İnceleme Sonuçları (9 Madde)
+
+| # | Konu | Önem | Durum | Karar |
+|---|------|------|-------|-------|
+| 1 | **Ağırlıklı oylama (w_buy/w_sell) hesaplanıp kullanılmıyor** | 🔴 YÜKSEK | Bug — satır 876-914'te hesaplanan w_buy/w_sell sadece result dict'e yazılıyor, satır 926'da karar basit oy sayısıyla veriliyor | **YAPILMALI** |
+| 2 | **Ücretsiz RSS/Türkçe haber provider eksik** | 🟡 ORTA | Benzinga ücretli ($99/ay), MT5 Calendar sadece ekonomik takvim. Trump/İran/jeopolitik haberler kaçırılıyor | **YAPILMALI** |
+| 3 | **Birim test altyapısı (pytest) yok** | 🟡 ORTA | Simülasyonlar makro koruma sağlıyor ama _normalize_turkish, _detect_category gibi saf fonksiyonlara regresyon testi yok | **YAPILMALI (acil değil)** |
+| 4 | **native_sltp hâlâ false** | 🟡 ORTA | GCM VİOP MT5 build 4755 < sunucu min 5200. Broker limiti — yapacak bir şey yok. 3 katmanlı koruma (yazılımsal SL + BABA floating + hard drawdown) mevcut | **BEKLET** |
+| 5 | **BenzingaProvider kod hazır ama API key yok** | 🟡 DÜŞÜK-ORTA | news_bridge.py:465-530 tam implementasyon. config'de "provider":"mt5". Abone olunca "all" yapılıp aktif edilir | **BEKLET** |
+| 6 | **USE_UNIVERSAL_MANAGEMENT eski strateji metotları (~300 satır)** | 🟢 DÜŞÜK | Flag True, 17 gündür stabil. Eski metotlar geri alma sigortası olarak bilerek bırakılmış. Fonksiyonel risk yok | **BEKLET** |
+| 7 | **MQL5 FILE_ANSI → UTF-16 önerisi** | 🟢 DÜŞÜK | Windows-1254 fallback + _normalize_turkish() workaround 100/100 testte çalıştı. UTF-16 geçişi MQL5 değişikliği gerektirir | **VAZGEÇ** |
+| 8 | **Hafta sonu risk takvimi / Cuma kapanışı** | 🟢 DÜŞÜK | VİOP'ta EOD 17:45 tüm pozisyonları kapatıyor. Pozisyon hafta sonuna kalmıyor. Forex mantığıyla karıştırılmış | **GEREK YOK** |
+| 9 | **v5.4→v5.7 versiyon geçiş kayıtları eksik** | 🟢 DÜŞÜK | 3 versiyon geçiş bloğu belgelenmemiş. Fonksiyonel etkisi yok, git history'den hesaplanabilir | **KOZMETİK** |
+
+### Keşfedilen Kritik Bulgu: Ağırlıklı Oylama (Madde #1 Detay)
+
+ogul.py `_get_voting_detail()` fonksiyonunda:
+- **Satır 876-914**: `w_buy` ve `w_sell` ağırlıklı skorlar hesaplanıyor (RSI:2.0, EMA:2.5, ATR:1.5, Hacim:1.5, Price Action:2.5)
+- **Satır 926**: Karar `buy_votes > sell_votes` basit oy sayısıyla veriliyor — ağırlıklı skorlar **kullanılmıyor**
+- **Etki**: RSI=BUY + EMA=SELL (1-1) durumunda, ATR ve Hacim bağımsız oy vermiyor (sadece çoğunluğu güçlendiriyor), Price Action güçlü trend gösterse bile NOTR dönüyor
+- **Sinyal kaybı gerçek** — ağırlıklı sistem boşuna hesaplanıyor
+
+### Eklenen
+- (yok — yalnızca analiz oturumu)
+
+### Çıkartılan
+- (yok — yalnızca analiz oturumu)
+
+---
+
 ## #56 — Haber Entegrasyonu: MT5 Calendar → NewsBridge → BABA/OĞUL (2026-03-23)
 
 | Alan | Detay |
