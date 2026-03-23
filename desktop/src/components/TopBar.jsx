@@ -6,7 +6,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { getStatus, getAccount, acknowledgeKillSwitch } from '../services/api';
+import { getStatus, getAccount, acknowledgeKillSwitch, getAgentStatus } from '../services/api';
 import { formatMoney } from '../utils/formatters';
 
 // ── Faz etiketleri ──────────────────────────────────────────────
@@ -34,6 +34,7 @@ export default function TopBar() {
   const [alwaysOnTop, setAlwaysOnTop] = useState(true);
   const [ksResetting, setKsResetting] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
+  const [agentAlive, setAgentAlive] = useState(false);
 
   // ── Saat (1sn) ─────────────────────────────────────────────────
   useEffect(() => {
@@ -47,6 +48,17 @@ export default function TopBar() {
     setStatus(s);
     setAccount(a);
     setInitialLoading(false);
+  }, []);
+
+  // ── Agent status polling (10sn) ──────────────────────────────
+  useEffect(() => {
+    const checkAgent = async () => {
+      const ag = await getAgentStatus();
+      setAgentAlive(ag?.alive === true);
+    };
+    checkAgent();
+    const iv = setInterval(checkAgent, 10000);
+    return () => clearInterval(iv);
   }, []);
 
   useEffect(() => {
@@ -142,6 +154,16 @@ export default function TopBar() {
         >
           <span className="tb-conn-dot" />
           {isConnected ? 'MT5' : 'Bağlantı Yok'}
+        </span>
+
+        <span
+          className={`tb-conn ${agentAlive ? 'tb-conn--on' : 'tb-conn--off'}`}
+          title={agentAlive
+            ? 'ÜSTAT Ajan aktif — Claude komutları Windows üzerinden çalıştırabilir'
+            : 'ÜSTAT Ajan çalışmıyor — Windows komutları kullanılamaz'}
+        >
+          <span className="tb-conn-dot" />
+          {agentAlive ? 'AJAN' : 'Ajan Yok'}
         </span>
       </div>
 

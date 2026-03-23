@@ -288,3 +288,68 @@ async def sync_mt5_trades(days: int = Query(90, ge=1, le=365)):
             f"{deduped} çift kayıt temizlendi ({len(trades)} toplam)"
         ),
     }
+
+
+# ── Rejim Backfill ───────────────────────────────────────────
+
+
+@router.post("/trades/backfill-regime")
+async def backfill_regime():
+    """NULL rejimli eski işlemlere top5_history'den rejim ata.
+
+    top5_history tablosunda her gün için hangi rejimin aktif olduğu
+    kayıtlıdır. Bu endpoint, rejimi NULL olan her işlemi entry_time
+    tarihine göre eşleştirerek günceller. Eşleşmeyen kayıtlara
+    'UNKNOWN' atanır.
+
+    Tek seferlik bakım endpoint'i — veri düzeltme sonrası kaldırılabilir.
+    """
+    db = get_db()
+    if db is None:
+        raise HTTPException(503, "Database mevcut değil")
+
+    # 1. top5_history'den tarih -> rejim haritası
+    rows = db._fetch_all(
+        """SELECT date, regime, COUNT(*) as cnt
+           FROM top5_history
+           WHERE regime IS NOT NULL AND regime != ''
+           GROUP BY date, regime
+           ORDER BY date, cnt DESC"""
+    )
+    date_regime: dict[str, str] = {}
+    for r in rows:
+        if r["date"] not in date_regime:
+            date_regime[r["date"]] = r["regime"]
+
+    # 2. NULL rejimli işlemleri bul
+    null_trades = db._fetch_all(
+        "SELECT id, entry_time FROM trades WHERE regime IS NULL OR regime = ''"
+    )
+
+    matched = 0
+    unknown = 0
+    for t in null_trades:
+        entry_date = (t["entry_time"] or "")[:10]
+        regime = date_regime.get(entry_date)
+        if regime:
+            db.update_trade(t["id"], {"regime": regime})
+            matched += 1
+        else:
+            db.update_trade(t["id"], {"regime": "UNKNOWN"})
+            unknown += 1
+
+    logger.info(
+        f"Rejim backfill: {matched} eşleşti, {unknown} UNKNOWN atandı "
+        f"(toplam {len(null_trades)} NULL işlem)"
+    )
+
+    return {
+        "success": True,
+        "total_null": len(null_trades),
+        "matched_from_top5": matched,
+        "set_unknown": unknown,
+        "message": (
+            f"{matched} işleme top5_history'den rejim atandı, "
+            f"{unknown} işlem UNKNOWN olarak işaretlendi"
+        ),
+    }

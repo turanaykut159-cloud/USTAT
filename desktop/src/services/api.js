@@ -383,6 +383,41 @@ export async function getHealth() {
   }
 }
 
+// ── Agent Status ────────────────────────────────────────────────
+
+export async function getAgentStatus() {
+  try {
+    const { data } = await client.get('/agent-status');
+    return data;
+  } catch {
+    return { alive: false };
+  }
+}
+
+// ── Haber API (v5.7.1 — REST polling fallback) ──────────────────
+
+/** Aktif haberleri getir — WebSocket çalışmadığında Dashboard polling ile kullanır. */
+export async function getNewsStatus() {
+  try {
+    const { data } = await api.get('/news/status');
+    return data;
+  } catch (err) {
+    console.warn('[ÜSTAT API] getNewsStatus:', err?.message);
+    return null;
+  }
+}
+
+/** Aktif haber listesi — NewsPanel için tam veri. */
+export async function getNewsActive() {
+  try {
+    const { data } = await api.get('/news/active');
+    return data;
+  } catch (err) {
+    console.warn('[ÜSTAT API] getNewsActive:', err?.message);
+    return null;
+  }
+}
+
 // ── WebSocket (Auto-Reconnect) ──────────────────────────────────
 
 /**

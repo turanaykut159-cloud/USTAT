@@ -91,6 +91,11 @@ def get_uptime() -> int:
     return int(time.time() - _start_time)
 
 
+def get_news_bridge():
+    """NewsBridge (haber köprüsü) instance'ına eriş."""
+    return _engine.news_bridge if _engine and hasattr(_engine, 'news_bridge') else None
+
+
 def is_engine_running() -> bool:
     """Engine çalışıyor mu?"""
     if _engine is None:

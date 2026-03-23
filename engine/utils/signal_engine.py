@@ -165,6 +165,8 @@ SOURCE_WEIGHTS: dict[str, float] = {
     "smart_divergence": 1.0,      # Diverjans — erken uyarı
     "ichimoku_cloud": 0.8,        # Ichimoku [ESKİ: 0.9 → Gecikmeli, VİOP hızlı hareket]
     "adaptive_momentum": 1.1,     # KAMA [ESKİ: 1.0 → Rejim uyumlu, VİOP'a iyi uyar]
+    # v5.7.1: Haber bazlı sinyal kaynağı
+    "news_event": 1.3,            # Haber [YENİ: Haber sentiment bazlı, VWAP ile eşit ağırlık]
 }
 
 # ── SE3: VWAP sabitleri ──
@@ -1200,6 +1202,56 @@ def _source_adaptive_momentum(
 
 
 # ═════════════════════════════════════════════════════════════════════
+#  J) HABER BAZLI SİNYAL (v5.7.1)
+# ═════════════════════════════════════════════════════════════════════
+
+def _source_news_event(
+    symbol: str = "",
+    news_bridge=None,
+) -> SourceResult:
+    """Haber bazlı sinyal kaynağı — NewsBridge entegrasyonu.
+
+    NewsBridge'den sembol için aktif haber sinyali alır.
+    Pozitif sentiment → BUY, Negatif → SELL.
+    Alpha decay otomatik uygulanır.
+
+    Args:
+        symbol: VİOP kontrat kodu.
+        news_bridge: NewsBridge instance.
+
+    Returns:
+        SourceResult: name="news_event", score=0-20, direction, confidence
+    """
+    if not symbol or news_bridge is None:
+        return SourceResult("news_event", 0.0, "NEUTRAL", 0.0, {"reason": "no_bridge"})
+
+    try:
+        signal = news_bridge.get_signal_for_symbol(symbol)
+
+        if signal.score < 2.0:
+            return SourceResult("news_event", 0.0, "NEUTRAL", 0.0, {"reason": "no_signal"})
+
+        details = {
+            "headline": signal.source_event.headline[:60] if signal.source_event else "",
+            "sentiment": signal.source_event.sentiment_score if signal.source_event else 0,
+            "age_seconds": signal.source_event.age_seconds if signal.source_event else 0,
+            "category": signal.source_event.category if signal.source_event else "",
+            "decay_applied": signal.decay_applied,
+        }
+
+        return SourceResult(
+            name="news_event",
+            score=signal.score,
+            direction=signal.direction,
+            confidence=signal.confidence,
+            details=details,
+        )
+
+    except Exception as e:
+        return SourceResult("news_event", 0.0, "NEUTRAL", 0.0, {"error": str(e)})
+
+
+# ═════════════════════════════════════════════════════════════════════
 #  ANA MOTOR: SİNYAL ÜRETİMİ
 # ═════════════════════════════════════════════════════════════════════
 
@@ -1211,13 +1263,17 @@ def generate_signal(
     volume: np.ndarray,
     current_price: float = 0.0,
     regime_type: str = "",
+    symbol: str = "",
+    news_bridge=None,
 ) -> SignalVerdict:
-    """Ana sinyal üretim motoru — 9 bağımsız kaynaktan karar (SE3).
+    """Ana sinyal üretim motoru — 10 bağımsız kaynaktan karar (SE3 + News).
 
     Args:
         open_, high, low, close, volume: M15 OHLCV verileri.
         current_price: Güncel tick fiyatı (0 ise close[-1] kullanılır).
         regime_type: BABA rejim tipi ("TREND", "RANGE", "VOLATILE", "OLAY").
+        symbol: VİOP kontrat kodu (v5.7.1 haber entegrasyonu için).
+        news_bridge: NewsBridge instance (v5.7.1 haber entegrasyonu için).
 
     Returns:
         SignalVerdict nesnesi.
@@ -1312,8 +1368,12 @@ def generate_signal(
     src_i = _source_adaptive_momentum(close, high, low, atr_val)
     sources.append(src_i)
 
+    # J) Haber Bazlı Sinyal (v5.7.1 — NewsBridge entegrasyonu)
+    src_j = _source_news_event(symbol, news_bridge)
+    sources.append(src_j)
+
     verdict.sources = sources
-    total_sources = len(sources)  # 9
+    total_sources = len(sources)  # 10
 
     # ── Yön belirleme: çoğunluk oylaması (adaptif, 9 kaynak) ──────
     buy_sources = [s for s in sources if s.direction == "BUY" and s.score > 2.0]

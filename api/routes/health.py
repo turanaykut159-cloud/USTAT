@@ -38,6 +38,30 @@ from api.schemas import HealthResponse
 router = APIRouter()
 
 
+@router.get("/agent-status")
+async def get_agent_status():
+    """ÜSTAT Ajan heartbeat durumunu döndür."""
+    import json
+    from pathlib import Path
+
+    hb_path = Path(os.path.dirname(os.path.abspath(__file__))).parent.parent / ".agent" / "heartbeat.json"
+    if not hb_path.exists():
+        return {"alive": False, "reason": "heartbeat dosyası yok"}
+    try:
+        data = json.loads(hb_path.read_text(encoding="utf-8"))
+        # 30 saniyeden eski heartbeat = ölü
+        from datetime import datetime, timezone
+        ts = data.get("timestamp", "")
+        if ts:
+            hb_time = datetime.fromisoformat(ts)
+            age = (datetime.now(timezone.utc) - hb_time).total_seconds()
+            data["alive"] = data.get("alive", False) and age < 30
+            data["age_seconds"] = round(age, 1)
+        return data
+    except Exception as e:
+        return {"alive": False, "reason": str(e)}
+
+
 @router.get("/health", response_model=HealthResponse)
 async def get_health():
     """Sistem sağlığı metriklerini döndür."""

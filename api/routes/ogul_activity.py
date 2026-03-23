@@ -64,7 +64,7 @@ async def get_ogul_activity():
             adx_val = _safe_float(getattr(baba.current_regime, "adx", 0.0))
 
         # ── Top-5 sembolleri için oylama detayı ───────────────────────
-        _raw_top5 = getattr(ogul, "_current_top5", None)
+        _raw_top5 = getattr(ogul, "current_top5", None)
         top5 = list(_raw_top5) if _raw_top5 else []
         signals: list[OgulSignalItem] = []
         signal_count = 0

@@ -366,6 +366,14 @@ class Baba:
         # Volume spike cooldown — sembol başına son uyarı zamanı (saniye)
         self._volume_spike_cooldowns: dict[str, float] = {}
 
+        # v5.7.1: Haber köprüsü referansı (main.py tarafından atanır)
+        self._news_bridge: Any | None = None
+
+    def set_news_bridge(self, news_bridge) -> None:
+        """NewsBridge referansını kaydet (engine başlatmada çağrılır)."""
+        self._news_bridge = news_bridge
+        logger.info("BABA: NewsBridge referansı bağlandı.")
+
     # ── public: ana cycle ────────────────────────────────────────────
     def run_cycle(self, pipeline=None) -> Regime:
         """Her 10 sn'de engine tarafından çağrılır.
@@ -834,6 +842,16 @@ class Baba:
                 "value": usdtry_move,
             }
 
+        # 4. Haber bazlı OLAY — news_bridge entegrasyonu (v5.7.1)
+        if hasattr(self, '_news_bridge') and self._news_bridge is not None:
+            news_olay = self._news_bridge.should_trigger_olay()
+            if news_olay is not None:
+                logger.warning(
+                    f"HABER OLAY TETİKLEME: sentiment={news_olay['sentiment']:.2f} "
+                    f"severity={news_olay['severity']} — {news_olay['reason']}"
+                )
+                return news_olay
+
         return None
 
     # ═════════════════════════════════════════════════════════════════
@@ -866,6 +884,20 @@ class Baba:
         w = self._check_usdtry_shock()
         if w:
             warnings.append(w)
+
+        # Haber bazlı erken uyarılar (v5.7.1 — news_bridge entegrasyonu)
+        if hasattr(self, '_news_bridge') and self._news_bridge is not None:
+            news_warnings = self._news_bridge.get_news_warnings()
+            for nw in news_warnings:
+                warnings.append(EarlyWarning(
+                    warning_type=nw["warning_type"],
+                    symbol=nw["symbol"],
+                    severity=nw["severity"],
+                    value=nw["value"],
+                    threshold=nw["threshold"],
+                    liquidity_class=self._get_liquidity_class(nw["symbol"]) if nw["symbol"] != "GLOBAL" else "A",
+                    message=nw["message"],
+                ))
 
         if warnings:
             for w in warnings:

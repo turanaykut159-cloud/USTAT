@@ -2,6 +2,57 @@
 
 ---
 
+## #56 — Haber Entegrasyonu: MT5 Calendar → NewsBridge → BABA/OĞUL (2026-03-23)
+
+| Alan | Detay |
+|------|-------|
+| Tarih | 2026-03-23 |
+| Neden | Ekonomik takvim verilerinin otomatik olarak risk yönetimi (BABA) ve sinyal üretimi (OĞUL) motorlarına aktarılması |
+| Tetikleyen | Manuel haber takibinin yetersizliği, olay bazlı risk yönetimi ihtiyacı |
+
+### Eklenen Yeni Dosyalar
+- **mql5/Services/UstatNewsService.mq5** (276 satır): MT5 Economic Calendar'dan JSON'a veri aktaran MQL5 service script. CalendarValueHistory() API, TRY/USD/EUR filtresi, 10sn polling
+- **mql5/KURULUM.md** (97 satır): MQL5 servis kurulum rehberi
+- **engine/news_bridge.py** (1330 satır): NewsBridge merkez koordinatör, MT5FileProvider (JSON okuyucu), SentimentAnalyzer (NLP), NewsCache (TTL bazlı), PreMarketBriefing (09:30 otomatik brifing), BABA/OĞUL entegrasyon API'leri
+- **api/routes/news.py** (175 satır): `/api/news/status`, `/api/news/active`, `/api/news/briefing` REST endpoint'leri
+- **desktop/src/components/NewsPanel.jsx** (157 satır): Haber Akışı React bileşeni (sentiment renklendirme, önem rozetleri)
+- **desktop/src/components/NewsPanel.css** (252 satır): NewsPanel stilleri (koyu/açık tema)
+- **restart_all.bat**: API + Engine toplu yeniden başlatma script'i
+- **start_agent.vbs**: Claude Bridge Agent otomatik başlatma
+- **ustat_agent.py**: Windows-side agent (Claude VM ↔ Windows dosya köprüsü)
+
+### Değiştirilen Dosyalar
+- **engine/main.py** (+40 satır): NewsBridge ve PreMarketBriefing import/init, motor döngüsüne haber güncelleme ve brifing kontrolü eklendi
+- **engine/baba.py** (+32 satır): `should_trigger_olay()`, `get_lot_multiplier()`, `get_news_warnings()` — haber bazlı OLAY rejimi tetikleme, lot azaltma, erken uyarı
+- **engine/utils/signal_engine.py** (+64 satır): SE2 10. kaynak olarak haber sinyali entegrasyonu (`get_signal_for_symbol`)
+- **api/server.py** (+2 satır): news router mount
+- **api/schemas.py** (+53 satır): NewsEvent, NewsBriefing, NewsStatus şemaları
+- **api/deps.py** (+5 satır): news_bridge dependency injection
+- **api/routes/live.py** (+20 satır): TickSnapshot attribute fix (`time` → `timestamp`), WebSocket haber push
+- **api/routes/trades.py** (+65 satır): İşlem geçmişi endpoint iyileştirmeleri
+- **api/routes/health.py** (+24 satır): Sağlık kontrolü genişletmeleri
+- **config/default.json** (+18 satır): news_bridge konfigürasyonu (max_age_seconds: 3600, cooldown, kaynak ayarları)
+- **desktop/src/components/Dashboard.jsx** (+32 satır): NewsPanel entegrasyonu, REST polling fallback (10sn), Haber Akışı kartı Son İşlemler altına taşındı
+- **desktop/src/services/api.js** (+35 satır): `getNewsStatus()`, `getNewsActive()` API fonksiyonları
+- **desktop/src/components/TopBar.jsx** (+24 satır): Haber durumu göstergesi
+- **desktop/index.html** (+4 satır): Meta tag güncellemeleri
+- **health_check.py** (690 satır refactor): Haber sistemi sağlık kontrolleri eklendi
+
+### Çözülen Hatalar
+1. MQL5 `sector_name` derleme hatası — MqlCalendarEvent struct'ında bulunmayan alan kaldırıldı
+2. Windows-1254 encoding hatası — MQL5 FILE_ANSI → Python UTF-8 fallback ile çözüldü
+3. Cooldown batch engeli — MT5 kaynaklı olaylar cooldown'dan muaf tutuldu
+4. TTL erken expire — max_age_seconds 300→3600, timestamp=now düzeltmesi
+5. WebSocket code 1006 — Chrome için REST polling fallback (10sn)
+6. TickSnapshot attribute error — `time` → `timestamp` düzeltmesi (tüm WS push'u kırıyordu)
+
+### Versiyon Hesabı
+- Yeni dosyalar: 2287 satır eklendi
+- Değiştirilen dosyalar: 755 ekleme, 355 silme
+- Toplam değişiklik: 3397 satır
+
+---
+
 ## #55 — ÜSTAT Beyin Merkezi Sayfası + Sayfa Ayrımı (2026-03-21)
 - **UstatBrain.jsx** (YENİ — 400 satır): Kurumsal ÜSTAT beyin merkezi sayfası
   - Hero banner (marka logosu, 4 özet metrik, dönem filtresi)

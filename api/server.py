@@ -40,6 +40,7 @@ from api.routes import (
     live,
     manual_trade,
     mt5_verify,
+    news,
     ogul_activity,
     performance,
     positions,
@@ -199,6 +200,7 @@ app.include_router(live.router, tags=["websocket"])
 app.include_router(settings.router, prefix="/api", tags=["settings"])
 app.include_router(mt5_verify.router, prefix="/api", tags=["mt5"])
 app.include_router(error_dashboard.router, prefix="/api", tags=["errors"])
+app.include_router(news.router, prefix="/api", tags=["news"])
 
 
 @app.get("/")
