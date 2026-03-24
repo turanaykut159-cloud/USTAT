@@ -141,6 +141,8 @@ class HEngine:
         self._trailing_mode: str = hybrid_cfg.get("trailing_mode", "atr")  # "atr" | "profit"
         self._trailing_profit_gap: float = hybrid_cfg.get("trailing_profit_gap", 100.0)  # TRY
         self._native_sltp: bool = hybrid_cfg.get("native_sltp", False)
+        self._trailing_min_pct: float = hybrid_cfg.get("trailing_min_pct", 0.015)  # %1.5
+        self._trailing_max_pct: float = hybrid_cfg.get("trailing_max_pct", 0.080)  # %8.0
 
         sltp_mode = "NATIVE (MT5)" if self._native_sltp else "SOFTWARE (H-Oğul)"
         trailing_desc = (
@@ -597,17 +599,11 @@ class HEngine:
             profit = mt5_pos.get("profit", 0.0)
             swap = mt5_pos.get("swap", 0.0)
 
-            # ── Netting hacim kontrolü ──────────────────────────────
+            # ── Netting hacim senkronizasyonu ─────────────────────
             mt5_volume = mt5_pos.get("volume", hp.volume)
             if mt5_volume != hp.volume:
-                vol_key = f"vol_warn_{ticket}"
-                if vol_key not in self._close_retry_counts:
-                    logger.warning(
-                        f"Netting hacim uyuşmazlığı: ticket={ticket} "
-                        f"{hp.symbol} — engine={hp.volume} lot, "
-                        f"MT5={mt5_volume} lot (dışarıdan lot eklenmiş olabilir)"
-                    )
-                    self._close_retry_counts[vol_key] = 1
+                mt5_entry = mt5_pos.get("price_open", hp.entry_price)
+                self._sync_netting_volume(hp, mt5_volume, mt5_entry)
 
             if current_price <= 0:
                 continue
@@ -713,6 +709,83 @@ class HEngine:
             f"PnL={total_pnl:.2f}"
         )
         return True
+
+    # ═════════════════════════════════════════════════════════════════
+    #  NETTING SYNC — MT5 hacim/giriş fiyatı değişikliğini otomatik benimse
+    # ═════════════════════════════════════════════════════════════════
+
+    def _sync_netting_volume(
+        self, hp: HybridPosition, mt5_volume: float, mt5_entry: float,
+    ) -> None:
+        """VİOP netting'de dışarıdan yapılan lot ekleme/çıkarma değişikliğini
+        otomatik olarak hibrit pozisyona senkronize eder.
+
+        Lot ekleme (volume artış):
+            - volume, entry_price güncellenir
+            - SL/TP yeni entry'den ATR ile yeniden hesaplanır
+            - breakeven_hit sıfırlanır (yeni giriş seviyesinden yeniden değerlendirilir)
+
+        Lot çıkarma (volume azalış — kısmi kâr alma):
+            - volume güncellenir
+            - entry_price güncellenir (MT5'ten)
+            - SL/TP mevcut kalır (koruma devam eder)
+            - breakeven_hit mevcut kalır
+        """
+        old_volume = hp.volume
+        old_entry = hp.entry_price
+        old_sl = hp.current_sl
+        old_tp = hp.current_tp
+        old_be = hp.breakeven_hit
+
+        hp.volume = mt5_volume
+        hp.entry_price = mt5_entry
+
+        # Lot ekleme — SL/TP yeni giriş fiyatından yeniden hesapla
+        if mt5_volume > old_volume:
+            if hp.direction == "BUY":
+                hp.current_sl = mt5_entry - (self._sl_atr_mult * hp.entry_atr)
+                hp.current_tp = mt5_entry + (self._tp_atr_mult * hp.entry_atr)
+            else:
+                hp.current_sl = mt5_entry + (self._sl_atr_mult * hp.entry_atr)
+                hp.current_tp = mt5_entry - (self._tp_atr_mult * hp.entry_atr)
+            hp.breakeven_hit = False
+
+            logger.info(
+                f"Netting SYNC (lot ekleme): ticket={hp.ticket} {hp.symbol} "
+                f"lot {old_volume}→{mt5_volume}, entry {old_entry:.4f}→{mt5_entry:.4f}, "
+                f"SL {old_sl:.4f}→{hp.current_sl:.4f}, "
+                f"TP {old_tp:.4f}→{hp.current_tp:.4f} "
+                f"(breakeven sıfırlandı)"
+            )
+        else:
+            # Lot çıkarma — SL/TP koru, sadece hacim güncelle
+            logger.info(
+                f"Netting SYNC (lot çıkarma): ticket={hp.ticket} {hp.symbol} "
+                f"lot {old_volume}→{mt5_volume}, entry {old_entry:.4f}→{mt5_entry:.4f} "
+                f"(SL/TP korundu)"
+            )
+
+        # DB güncelle
+        self.db.update_hybrid_position(hp.ticket, {
+            "volume": hp.volume,
+            "entry_price": hp.entry_price,
+            "current_sl": hp.current_sl,
+            "current_tp": hp.current_tp,
+            "breakeven_hit": int(hp.breakeven_hit),
+        })
+
+        # Olay geçmişine kaydet
+        event_type = "NETTING_SYNC_ADD" if mt5_volume > old_volume else "NETTING_SYNC_REDUCE"
+        self.db.insert_hybrid_event(
+            ticket=hp.ticket, symbol=hp.symbol, event=event_type,
+            details={
+                "old_volume": old_volume, "new_volume": mt5_volume,
+                "old_entry": old_entry, "new_entry": mt5_entry,
+                "old_sl": old_sl, "new_sl": hp.current_sl,
+                "old_tp": old_tp, "new_tp": hp.current_tp,
+                "breakeven_reset": old_be and not hp.breakeven_hit,
+            },
+        )
 
     # ═════════════════════════════════════════════════════════════════
     #  BREAKEVEN — Kâr ≥ breakeven_mult × entry_atr → SL = entry
@@ -936,6 +1009,19 @@ class HEngine:
 
         if new_sl is None:
             return
+
+        # Min/Max trailing mesafe sınırı (VİOP Rapor uyumu)
+        if current_price > 0:
+            min_dist = current_price * self._trailing_min_pct
+            max_dist = current_price * self._trailing_max_pct
+            if hp.direction == "BUY":
+                distance = current_price - new_sl
+                clamped = max(min_dist, min(distance, max_dist))
+                new_sl = current_price - clamped
+            else:
+                distance = new_sl - current_price
+                clamped = max(min_dist, min(distance, max_dist))
+                new_sl = current_price + clamped
 
         # SL sadece daha iyi yöne taşınır
         if hp.direction == "BUY":

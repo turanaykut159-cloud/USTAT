@@ -2129,6 +2129,101 @@ C3 — Kritik fonksiyon düzeltmesi (Kırmızı Bölge dosyası: mt5_bridge.py)
 
 ---
 
+## #67 — Trailing Mesafe Sınırları — VİOP Rapor Uyumu (2026-03-25)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-25 |
+| **Neden** | VİOP Tam Rapor dokümanıyla OĞUL karşılaştırması sonucu eksik bulunan özellik |
+| **Tetikleyen** | CEO: "dosyayı incele, oğul işlem yönetim sistemiyle kıyasla" → karşılaştırma → CEO onayı |
+| **Sınıf** | C2 — Yeni özellik (trailing stop'a koruma katmanı ekleme) |
+
+### Değişiklik
+Trailing stop mesafesine fiyata göre yüzdesel alt ve üst sınır eklendi:
+- **Min %1.5**: Aşırı sakin günlerde (ATR çok düşük) trailing mesafesi normal fiyat gürültüsünün altına düşmez
+- **Max %8.0**: Aşırı volatil günlerde (ATR çok yüksek) trailing mesafesi koruma işlevini yitirmez
+
+### Uygulama Noktaları
+| Dosya | Değişiklik | Etkilenen Fonksiyonlar |
+|-------|-----------|----------------------|
+| `engine/ogul.py` | `TRAILING_MIN_PCT=0.015`, `TRAILING_MAX_PCT=0.080` sabitleri + `_clamp_trailing_distance()` yardımcı fonksiyonu + 6 noktada clamp uygulaması | Universal trailing (BUY/SELL), Legacy TF trailing (BUY/SELL), Legacy BO trailing (BUY/SELL) |
+| `engine/h_engine.py` | Config'den `trailing_min_pct` ve `trailing_max_pct` okunması + `_check_trailing()` içinde clamp uygulaması | `__init__()`, `_check_trailing()` |
+
+### Test
+Standalone birim testi 7 senaryo ile doğrulandı: normal (değişmez), min clamp (BUY/SELL), max clamp (BUY/SELL), edge case (price=0). Tüm testler PASSED.
+
+### Not
+Tick adımına yuvarlama (0.01 TL) `mt5_bridge.py`'de zaten mevcut olduğu doğrulandı (send_order + modify_position). Ekstra işlem gerekmedi.
+
+---
+
+## #66 — SSE Tur Tutarsızlığı (Manuel/Hibrit Flipping) (2026-03-25)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-25 |
+| **Neden** | CEO rapor: "YİNE MANUEL/HİBRİT DEĞİŞİYOR. SONRADAN EKLENEN LOT İLE ALAKASI YOKMUŞ." |
+| **Kök Neden** | SSE live endpoint (live.py) sadece strateji adına bakıyordu, hybrid_tickets kontrolü yoktu |
+| **Sınıf** | C2 — Bug fix (API katmanı, Kırmızı Bölge dışı) |
+
+### Kök Neden Analizi
+REST endpoint (`positions.py`) `_tur_for_position()` ile hybrid_tickets set'ini kontrol edip doğru "Hibrit" döndürüyordu. Ancak SSE endpoint (`live.py`) bu kontrolü yapmıyordu — sadece strateji adını kontrol edip "Manuel" veya "Otomatik" döndürüyordu. Frontend her 2 saniyede REST ve SSE'den gelen veriyi karşılaştırınca tur sürekli Manuel↔Hibrit arasında flip ediyordu.
+
+### Düzeltme
+`api/routes/live.py` ~satır 193: `_h_engine` referansı alınıp `_hybrid_tickets` set'i oluşturuldu. ~satır 238: tur hesaplamasında önce `ticket in _hybrid_tickets` kontrolü eklendi — positions.py mantığıyla birebir tutarlı.
+
+| Dosya | Değişiklik |
+|-------|-----------|
+| `api/routes/live.py` | hybrid_tickets lookup + tur hesaplama düzeltmesi (~15 satır) |
+
+---
+
+## #65 — Zombie Process Koruması (CIM Fallback) (2026-03-25)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-25 |
+| **Neden** | Restart sonrası eski engine process (admin seviye) port 8000'i tutmaya devam etti, API stale veri döndü |
+| **Kök Neden** | `taskkill /F` admin process'leri öldüremedi, yeni engine port 8000'e bind olamadı |
+| **Sınıf** | C2 — Startup robustluğu iyileştirmesi |
+
+### Düzeltme
+`start_ustat.py` `kill_port()` fonksiyonuna CIM fallback eklendi: `taskkill /F` başarısız olursa `Get-CimInstance Win32_Process | Invoke-CimMethod Terminate` ile ikinci deneme yapılır.
+
+| Dosya | Değişiklik |
+|-------|-----------|
+| `start_ustat.py` | `kill_port()` CIM fallback (~14 satır) |
+
+---
+
+## #64 — Büyük Lot Geçiş Hazırlığı — Araştırma Notu (2026-03-24)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-24 |
+| **Durum** | BEKLET — Test bitince uygulanacak |
+| **Tetikleyen** | CEO: "Yarın büyük işlemde sıkıntı olmasın, araştır" |
+
+### Tespit Edilen 3 Kritik Engelleyici
+
+| # | Sorun | Dosya | Detay |
+|---|-------|-------|-------|
+| 1 | `MAX_LOT_PER_CONTRACT = 1.0` hardcoded | `engine/ogul.py:120` | Config'den okunmuyor, tüm lotlar 1.0 ile sınırlı |
+| 2 | `max_position_size = 1.0` varsayılan | `engine/models/risk.py:20` | Config yüklenmiyor |
+| 3 | Config → RiskParams aktarımı eksik | `engine/main.py:99-112` | `max_lot_per_contract` okunmuyor |
+
+### Ek Ayarlanması Gerekenler
+- `hybrid.daily_loss_limit: 500 TRY` → lot ölçeğiyle oransal artırılmalı
+- `graduated_lot` parametreleri baba.py'de hardcoded → config'den okunmalı
+
+### Sorunsuz Alanlar
+MT5 Bridge lot doğrulaması, netting koruması, profit trailing formülü, yüzde bazlı risk limitleri — hepsi büyük lot'ta doğru çalışır.
+
+### Karar
+CEO: "Test bitince değiştirelim." — 1.0 lot sınırı test dönemi güvenlik ağı olarak kalacak.
+
+---
+
 ## #63 — Kâr Bazlı Trailing Stop (Profit Trailing) (2026-03-24)
 
 ### Bağlam

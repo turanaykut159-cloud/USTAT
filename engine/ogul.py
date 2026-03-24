@@ -315,6 +315,12 @@ CHANDELIER_WEIGHT: float = 0.3         # hibrit karışım: %30 chandelier + %70
 
 # ── 5. Maksimum Pozisyon Süresi ──────────────────────────────────
 MAX_HOLD_ENABLED: bool = True
+# ── 6. Trailing Mesafe Sınırları (VİOP Rapor uyumu) ─────────────
+#    ATR trailing mesafesinin fiyata göre yüzdesel alt/üst sınırı.
+#    Aşırı sakin günlerde (ATR çok düşük) trailing gürültüde tetiklenmez,
+#    aşırı volatil günlerde (ATR çok yüksek) trailing koruma işlevini yitirmez.
+TRAILING_MIN_PCT: float = 0.015   # min trailing mesafesi = fiyatın %1.5'i
+TRAILING_MAX_PCT: float = 0.080   # max trailing mesafesi = fiyatın %8.0'i
 MAX_HOLD_BARS: int = 96                # 96 × M15 = 24 saat (1.5 işlem günü)
 MAX_HOLD_PROFIT_EXIT: bool = True      # süre dolunca kârdaysa kapat
 MAX_HOLD_LOSS_TIGHTEN: bool = True     # süre dolunca zarardaysa SL sıkılaştır
@@ -323,6 +329,49 @@ MAX_HOLD_LOSS_TIGHTEN: bool = True     # süre dolunca zarardaysa SL sıkılaşt
 # ═════════════════════════════════════════════════════════════════════
 #  YARDIMCI FONKSİYONLAR
 # ═════════════════════════════════════════════════════════════════════
+
+
+def _clamp_trailing_distance(
+    direction: str,
+    current_price: float,
+    new_sl: float,
+    min_pct: float = TRAILING_MIN_PCT,
+    max_pct: float = TRAILING_MAX_PCT,
+) -> float:
+    """Trailing SL mesafesini fiyatın %min_pct - %max_pct arasına sınırla.
+
+    VİOP Rapor uyumu:
+        - Aşırı sakin günlerde (ATR çok düşük) trailing mesafesi %1.5'in altına
+          düşmez — normal gürültüde erken tetiklenme önlenir.
+        - Aşırı volatil günlerde (ATR çok yüksek) trailing mesafesi %8'in üstüne
+          çıkmaz — stop koruma işlevini yitirmez.
+
+    Args:
+        direction: "BUY" veya "SELL"
+        current_price: Anlık fiyat.
+        new_sl: Hesaplanmış trailing SL.
+        min_pct: Min trailing mesafe yüzdesi (varsayılan %1.5).
+        max_pct: Max trailing mesafe yüzdesi (varsayılan %8.0).
+
+    Returns:
+        Sınırlandırılmış SL değeri.
+    """
+    if current_price <= 0:
+        return new_sl
+
+    min_dist = current_price * min_pct
+    max_dist = current_price * max_pct
+
+    if direction == "BUY":
+        # BUY: SL fiyatın altında → mesafe = current_price - new_sl
+        distance = current_price - new_sl
+        clamped = max(min_dist, min(distance, max_dist))
+        return current_price - clamped
+    else:
+        # SELL: SL fiyatın üstünde → mesafe = new_sl - current_price
+        distance = new_sl - current_price
+        clamped = max(min_dist, min(distance, max_dist))
+        return current_price + clamped
 
 
 def _business_days_until(target: date, from_date: date) -> int:
@@ -3344,6 +3393,11 @@ class Ogul:
                 else:
                     new_trailing = base_trailing
 
+                # Min/Max trailing mesafe sınırı (VİOP Rapor uyumu)
+                new_trailing = _clamp_trailing_distance(
+                    "BUY", current_price, new_trailing,
+                )
+
                 if new_trailing > trade.trailing_sl:
                     try:
                         result = self.mt5.modify_position(
@@ -3379,6 +3433,11 @@ class Ogul:
                     )
                 else:
                     new_trailing = base_trailing
+
+                # Min/Max trailing mesafe sınırı (VİOP Rapor uyumu)
+                new_trailing = _clamp_trailing_distance(
+                    "SELL", current_price, new_trailing,
+                )
 
                 update = False
                 if trade.trailing_sl <= 0:
@@ -4047,6 +4106,7 @@ class Ogul:
 
         if trade.direction == "BUY":
             new_sl = current_price - trail_mult * atr_val
+            new_sl = _clamp_trailing_distance("BUY", current_price, new_sl)
             if new_sl > trade.trailing_sl:
                 try:
                     mod_result = self.mt5.modify_position(
@@ -4072,6 +4132,7 @@ class Ogul:
                         )
         else:  # SELL
             new_sl = current_price + trail_mult * atr_val
+            new_sl = _clamp_trailing_distance("SELL", current_price, new_sl)
             if new_sl < trade.trailing_sl:
                 try:
                     mod_result = self.mt5.modify_position(
@@ -4241,6 +4302,7 @@ class Ogul:
 
         if trade.direction == "BUY":
             new_sl = current_price - trail_mult * atr_val
+            new_sl = _clamp_trailing_distance("BUY", current_price, new_sl)
             if new_sl > trade.trailing_sl:
                 try:
                     mod_result = self.mt5.modify_position(
@@ -4258,6 +4320,7 @@ class Ogul:
                     )
         else:
             new_sl = current_price + trail_mult * atr_val
+            new_sl = _clamp_trailing_distance("SELL", current_price, new_sl)
             if new_sl < trade.trailing_sl:
                 try:
                     mod_result = self.mt5.modify_position(
