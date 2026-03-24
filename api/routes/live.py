@@ -193,6 +193,12 @@ async def _send_all_updates(ws: WebSocket):
     _OTOMATIK_STRATEJILER = frozenset({"trend_follow", "mean_reversion", "breakout"})
     if cache_ok and pipeline.latest_positions is not None:
         ogul = get_ogul()
+        # Hibrit ticket seti — positions.py ile tutarlı tür sınıflandırması
+        from api.deps import get_h_engine as _get_h_engine
+        _h_engine = _get_h_engine()
+        _hybrid_tickets: set = set()
+        if _h_engine and getattr(_h_engine, "hybrid_positions", None):
+            _hybrid_tickets = set(_h_engine.hybrid_positions.keys())
         pos_list = []
         for p in pipeline.latest_positions:
             _type = p.get("type", -1)
@@ -230,9 +236,12 @@ async def _send_all_updates(ws: WebSocket):
                         voting_score = getattr(trade, "voting_score", 0)
                         break
 
-            # tur alanı: Otomatik / Manuel (positions.py ile tutarlı)
-            strat_key = strategy.strip().lower()
-            tur = "Otomatik" if strat_key in _OTOMATIK_STRATEJILER else "Manuel"
+            # tur alanı: Hibrit / Otomatik / Manuel (positions.py ile tutarlı)
+            if ticket in _hybrid_tickets:
+                tur = "Hibrit"
+            else:
+                strat_key = strategy.strip().lower()
+                tur = "Otomatik" if strat_key in _OTOMATIK_STRATEJILER else "Manuel"
 
             pos_list.append({
                 "ticket": ticket,
