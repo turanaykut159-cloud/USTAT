@@ -100,6 +100,20 @@ def kill_port(port):
                     if "SUCCESS" in r.stdout.upper():
                         log(f"  Port {port} -> PID {pid} sonlandirildi")
                         killed.add(pid)
+                    else:
+                        # taskkill başarısız (admin process) — CIM ile dene
+                        r2 = subprocess.run(
+                            ["powershell", "-Command",
+                             f"Get-CimInstance Win32_Process -Filter 'ProcessId={pid}' "
+                             f"| Invoke-CimMethod -MethodName Terminate"],
+                            capture_output=True, text=True,
+                            creationflags=CREATE_NO_WINDOW,
+                        )
+                        if "0" in r2.stdout:
+                            log(f"  Port {port} -> PID {pid} sonlandirildi (CIM)")
+                            killed.add(pid)
+                        else:
+                            log(f"  UYARI: Port {port} PID {pid} sonlandirilamadi!")
         return len(killed) > 0
     except:
         return False
