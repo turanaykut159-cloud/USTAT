@@ -152,8 +152,8 @@
     "daily_loss_limit": 500.0,
     "sl_atr_mult": 2.0,
     "tp_atr_mult": 2.0,
-    "breakeven_atr_mult": 1.0,
-    "trailing_trigger_atr_mult": 1.5,
+    "breakeven_atr_mult": 0.5,
+    "trailing_trigger_atr_mult": 1.0,
     "trailing_distance_atr_mult": 1.0
   }
 }

@@ -2079,3 +2079,28 @@ Denetim raporu (#57 audit) ve çalışma perspektifi araştırması sonuçların
 |-------|-----------|
 | `USTAT_OKU.docx` | v2.0 → v3.0 (sayısal güncellemeler + 3 yeni bölüm) |
 | `docs/USTAT_v5_gelisim_tarihcesi.md` | Bu giriş (#59) |
+
+---
+
+## #60 — Hibrit Motor Breakeven/Trailing Parametre Optimizasyonu (2026-03-24)
+
+### Bağlam
+F_ASELS SELL pozisyonu +215 TRY kâra ulaşmasına rağmen breakeven tetiklenmedi ve pozisyon -155 TRY zarara döndü. Analiz sonucu breakeven eşiğinin (1.0×ATR = 2.91 puan) çok yüksek olduğu, 5 işlemden sadece 1'inde breakeven'in çalıştığı tespit edildi.
+
+### Değişiklik
+- `breakeven_atr_mult`: 1.0 → **0.5** (eşik: ~1.46 puan / ~146 TRY)
+- `trailing_trigger_atr_mult`: 1.5 → **1.0** (eşik: ~2.91 puan / ~291 TRY)
+
+### Etki Analizi
+- +215 TRY senaryosunda breakeven artık tetiklenir (2.15 > 1.46 puan)
+- Trailing stop daha erken devreye girer (1.0×ATR vs 1.5×ATR)
+- Kârlı pozisyonların korunma olasılığı artar
+
+### Sınıflandırma
+C2 — Parametre değişikliği (config dosyası, kod değişikliği yok)
+
+### Değişen Dosyalar
+| Dosya | Değişiklik |
+|-------|-----------|
+| `config/default.json` | breakeven_atr_mult: 1.0→0.5, trailing_trigger_atr_mult: 1.5→1.0 |
+| `docs/USTAT_v5_gelisim_tarihcesi.md` | Bu giriş (#60) |
