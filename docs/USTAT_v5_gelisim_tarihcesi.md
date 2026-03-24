@@ -2129,6 +2129,43 @@ C3 — Kritik fonksiyon düzeltmesi (Kırmızı Bölge dosyası: mt5_bridge.py)
 
 ---
 
+## #63 — Kâr Bazlı Trailing Stop (Profit Trailing) (2026-03-24)
+
+### Bağlam
+ATR bazlı trailing stop, fiyattan sabit ATR mesafede SL koyuyordu. Bu durumda pozisyon +535 TRY kârda olmasına rağmen SL neredeyse giriş fiyatında kalıyordu (2.91 TRY = ~330 TRY korunmayan alan). CEO talebi: "Kâr arttıkça belli bir miktarı garantiye alsın."
+
+### Çözüm — Profit Trailing Modu (v5.7.1)
+Yeni `trailing_mode: "profit"` seçeneği eklendi. ATR modu korundu (`trailing_mode: "atr"`).
+
+**Mantık:** `kilitli_kâr = mevcut_kâr - nefes_payı` → TRY'yi fiyat mesafesine çevirip SL olarak ayarlar.
+
+**Örnek (SELL, gap=100 TRY):**
+| Kâr | Kilitli | SL Pozisyonu |
+|-----|---------|-------------|
+| 100 TRY | 0 (breakeven) | Giriş fiyatı |
+| 200 TRY | 100 TRY | Entry − 100/çarpan |
+| 500 TRY | 400 TRY | Entry − 400/çarpan |
+
+**TRY → fiyat dönüşümü:** `symbol_info.trade_contract_size × volume` ile hesaplanır. Symbol_info alınamazsa ATR moduna fallback yapar.
+
+### Config Parametreleri
+```json
+"trailing_mode": "profit",
+"trailing_profit_gap": 100.0
+```
+
+### Sınıflandırma
+C3 — H-Engine trailing mantığı (kâr koruma stratejisi değişikliği)
+
+### Değişen Dosyalar
+| Dosya | Değişiklik |
+|-------|-----------|
+| `engine/h_engine.py` | `_calc_profit_trailing_sl()` yeni metod + `_calc_atr_trailing_sl()` refactor + `_check_trailing()` mod seçimi (~60 satır) |
+| `config/default.json` | `trailing_mode`, `trailing_profit_gap` parametreleri |
+| `docs/USTAT_v5_gelisim_tarihcesi.md` | Bu giriş (#63) |
+
+---
+
 ## #62 — Motor Bazlı Floating Ayrıştırma (CEO Option C) (2026-03-24)
 
 ### Bağlam

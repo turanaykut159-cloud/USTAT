@@ -10,7 +10,8 @@ Yönetim kuralları:
     1. Giriş SL  = entry_price ± (entry_atr × sl_atr_mult)
     2. Giriş TP  = entry_price ± (entry_atr × tp_atr_mult)
     3. Breakeven = Kâr ≥ breakeven_atr_mult × entry_atr → SL = entry_price
-    4. Trailing  = Kâr ≥ trailing_trigger × entry_atr → SL = price ∓ distance × entry_atr
+    4a. Trailing (ATR mod)    = Kâr ≥ trigger × ATR → SL = price ∓ distance × ATR
+    4b. Trailing (profit mod) = Kâr > gap TRY → SL = entry ∓ (kâr-gap)/çarpan
     5. entry_atr devir anında sabitlerir, değişmez.
 
 SL/TP modları:
@@ -137,14 +138,21 @@ class HEngine:
         self._breakeven_atr_mult: float = hybrid_cfg.get("breakeven_atr_mult", 1.0)
         self._trailing_trigger_mult: float = hybrid_cfg.get("trailing_trigger_atr_mult", 1.5)
         self._trailing_distance_mult: float = hybrid_cfg.get("trailing_distance_atr_mult", 1.0)
+        self._trailing_mode: str = hybrid_cfg.get("trailing_mode", "atr")  # "atr" | "profit"
+        self._trailing_profit_gap: float = hybrid_cfg.get("trailing_profit_gap", 100.0)  # TRY
         self._native_sltp: bool = hybrid_cfg.get("native_sltp", False)
 
         sltp_mode = "NATIVE (MT5)" if self._native_sltp else "SOFTWARE (H-Oğul)"
+        trailing_desc = (
+            f"PROFIT (gap={self._trailing_profit_gap} TRY)"
+            if self._trailing_mode == "profit"
+            else f"ATR (trigger={self._trailing_trigger_mult}×, dist={self._trailing_distance_mult}×)"
+        )
         logger.info(
             f"H-Engine başlatıldı: max_concurrent={self._max_concurrent}, "
             f"daily_limit={self._config_daily_limit}, "
             f"SL={self._sl_atr_mult}×ATR, TP={self._tp_atr_mult}×ATR, "
-            f"SL/TP modu={sltp_mode}"
+            f"SL/TP modu={sltp_mode}, trailing={trailing_desc}"
         )
 
     # ═════════════════════════════════════════════════════════════════
@@ -821,7 +829,82 @@ class HEngine:
         )
 
     # ═════════════════════════════════════════════════════════════════
-    #  TRAILING STOP — Kâr ≥ trigger × ATR → SL = price ∓ distance × ATR
+    #  TRAILING SL HESAPLAMA — ATR ve Profit modları
+    # ═════════════════════════════════════════════════════════════════
+
+    def _calc_atr_trailing_sl(
+        self, hp: HybridPosition, current_price: float,
+    ) -> float | None:
+        """ATR bazlı trailing SL hesapla (klasik mod).
+
+        Koşul: kâr ≥ trailing_trigger × entry_atr
+        Hesap: SL = current_price ∓ distance × entry_atr
+
+        Returns:
+            Yeni SL değeri, koşul sağlanmıyorsa None.
+        """
+        price_diff = self._price_profit(hp, current_price)
+        trailing_threshold = self._trailing_trigger_mult * hp.entry_atr
+
+        if price_diff < trailing_threshold:
+            return None
+
+        distance = self._trailing_distance_mult * hp.entry_atr
+        if hp.direction == "BUY":
+            return current_price - distance
+        return current_price + distance
+
+    def _calc_profit_trailing_sl(
+        self, hp: HybridPosition, current_price: float,
+        profit: float, swap: float,
+    ) -> float | None:
+        """Kâr bazlı trailing SL hesapla (v5.7.1 — CEO onaylı).
+
+        Mantık: (mevcut_kâr - nefes_payı) TRY'yi fiyat mesafesine çevirip
+        giriş fiyatından o kadar uzağa SL koyar.
+
+        Örnek (SELL, gap=100 TRY):
+            Kâr=300 TRY → kilitle=200 TRY → SL = entry - 200/çarpan
+            Kâr=500 TRY → kilitle=400 TRY → SL = entry - 400/çarpan
+
+        Returns:
+            Yeni SL değeri, koşul sağlanmıyorsa None.
+        """
+        total_pnl = profit + swap
+        gap = self._trailing_profit_gap
+
+        # Kâr nefes payını aşmadıysa trailing başlamaz
+        if total_pnl <= gap:
+            return None
+
+        lock_trl = total_pnl - gap  # kilitlenecek TRY
+
+        # TRY → fiyat mesafesi dönüşümü (symbol_info'dan kontrat çarpanı)
+        sym = self.mt5.get_symbol_info(hp.symbol)
+        if sym is None or sym.trade_contract_size <= 0:
+            logger.warning(
+                f"Profit trailing: symbol_info alınamadı [{hp.symbol}] "
+                f"— ATR moduna fallback"
+            )
+            return self._calc_atr_trailing_sl(hp, current_price)
+
+        # profit = price_diff × volume × contract_size (VİOP basit formül)
+        trl_per_point = hp.volume * sym.trade_contract_size
+        if trl_per_point <= 0:
+            return None
+
+        lock_points = lock_trl / trl_per_point
+
+        # SL = giriş fiyatından lock_points kadar kâr yönünde
+        if hp.direction == "BUY":
+            new_sl = hp.entry_price + lock_points
+        else:
+            new_sl = hp.entry_price - lock_points
+
+        return new_sl
+
+    # ═════════════════════════════════════════════════════════════════
+    #  TRAILING STOP — Ana kontrol
     # ═════════════════════════════════════════════════════════════════
 
     def _check_trailing(
@@ -830,36 +913,35 @@ class HEngine:
     ) -> None:
         """Trailing stop kontrolü — breakeven sonrası devreye girer.
 
-        Koşul: breakeven_hit == True VE kâr ≥ trailing_trigger × entry_atr
-        Etki: SL = current_price - distance × entry_atr (BUY)
-               SL = current_price + distance × entry_atr (SELL)
+        İki mod destekler (config trailing_mode):
+            "atr"    → Klasik ATR mesafe bazlı trailing (eski davranış)
+            "profit" → Kâr bazlı trailing: (kâr - gap) TRY'yi fiyata çevirip
+                        SL olarak kilitler. Daha sezgisel, para odaklı.
+
         Kural: SL sadece daha iyi yöne taşınır (BUY: yukarı, SELL: aşağı)
 
         Args:
             hp: Hibrit pozisyon.
             current_price: Güncel fiyat.
-            profit: MT5 profit.
+            profit: MT5 profit (swap hariç).
             swap: Birikmiş swap.
         """
         if not hp.breakeven_hit:
             return
 
-        price_diff = self._price_profit(hp, current_price)
-        trailing_threshold = self._trailing_trigger_mult * hp.entry_atr
+        if self._trailing_mode == "profit":
+            new_sl = self._calc_profit_trailing_sl(hp, current_price, profit, swap)
+        else:
+            new_sl = self._calc_atr_trailing_sl(hp, current_price)
 
-        if price_diff < trailing_threshold:
+        if new_sl is None:
             return
 
-        # Trailing SL hesapla
-        distance = self._trailing_distance_mult * hp.entry_atr
+        # SL sadece daha iyi yöne taşınır
         if hp.direction == "BUY":
-            new_sl = current_price - distance
-            # SL sadece yukarı taşınır
             if new_sl <= hp.current_sl:
                 return
         else:
-            new_sl = current_price + distance
-            # SL sadece aşağı taşınır
             if new_sl >= hp.current_sl:
                 return
 
@@ -920,19 +1002,22 @@ class HEngine:
             "current_sl": new_sl,
             "trailing_active": 1,
         })
+        total_pnl = profit + swap
         self.db.insert_hybrid_event(
             ticket=hp.ticket, symbol=hp.symbol, event="TRAILING_UPDATE",
             details={
                 "old_sl": old_sl, "new_sl": new_sl,
                 "price": current_price, "entry_atr": hp.entry_atr,
                 "mode": "native" if self._native_sltp else "software",
+                "trailing_mode": self._trailing_mode,
+                "pnl": round(total_pnl, 2),
             },
         )
 
         logger.info(
             f"Trailing SL: ticket={hp.ticket} {hp.symbol} "
-            f"SL {old_sl:.4f} → {new_sl:.4f} (fiyat={current_price:.4f}) "
-            f"[{'native' if self._native_sltp else 'software'}]"
+            f"SL {old_sl:.4f} → {new_sl:.4f} (fiyat={current_price:.4f}, "
+            f"kâr={total_pnl:.0f} TRY) [{self._trailing_mode}]"
         )
 
     # ═════════════════════════════════════════════════════════════════

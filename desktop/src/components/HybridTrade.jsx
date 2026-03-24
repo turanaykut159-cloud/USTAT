@@ -425,8 +425,8 @@ export default function HybridTrade() {
                     <td className="mono">{hp.volume?.toFixed(2) ?? '\u2014'}</td>
                     <td className="mono">{formatPrice(hp.entry_price)}</td>
                     <td className="mono">{formatPrice(hp.current_price)}</td>
-                    <td className="mono text-dim">{formatPrice(hp.current_sl)}</td>
-                    <td className="mono text-dim">{formatPrice(hp.current_tp)}</td>
+                    <td className="mono text-dim">{formatPrice(hp.current_sl, 2, 2)}</td>
+                    <td className="mono text-dim">{formatPrice(hp.current_tp, 2, 2)}</td>
                     <td className={`mono op-pnl-cell ${pnlClass(hpPnl)}`}>
                       <b>{formatMoney(hpPnl)}</b>
                     </td>
