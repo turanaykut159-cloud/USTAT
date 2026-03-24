@@ -802,6 +802,11 @@ class MT5Bridge:
                         mt5_type = mt5.ORDER_TYPE_SELL_LIMIT
 
                 # ── ADIM 1: Emir SL/TP OLMADAN gönder ──────────────────
+                # VİOP limit emirleri: GTC + expiration = seans sonu.
+                # VİOP exchange GTC emirlerde expiration zorunlu tutar.
+                # Eksikse retcode=10022 (Invalid expiration) döner.
+                # ORDER_TIME_DAY exchange'lerde desteklenmeyebilir,
+                # bu yüzden GTC + açık expiration kullanıyoruz.
                 request: dict[str, Any] = {
                     "action": action,
                     "symbol": mt5_name,
@@ -812,6 +817,14 @@ class MT5Bridge:
                     "type_time": mt5.ORDER_TIME_GTC,
                     "comment": "USTAT",
                 }
+
+                # Pending (limit) emirlere seans sonu expiration ekle
+                if action == mt5.TRADE_ACTION_PENDING:
+                    from datetime import datetime as _dt, timedelta as _td
+                    _today = _dt.now().date()
+                    # Seans sonu: 18:10 (VİOP kapanış)
+                    _expiry = _dt.combine(_today, _dt.min.time().replace(hour=18, minute=10))
+                    request["expiration"] = int(_expiry.timestamp())
 
                 logger.info(
                     f"Emir gönderiliyor (SL/TP ayrı): {direction} {lot} lot "

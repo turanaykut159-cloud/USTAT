@@ -2104,3 +2104,25 @@ C2 — Parametre değişikliği (config dosyası, kod değişikliği yok)
 |-------|-----------|
 | `config/default.json` | breakeven_atr_mult: 1.0→0.5, trailing_trigger_atr_mult: 1.5→1.0 |
 | `docs/USTAT_v5_gelisim_tarihcesi.md` | Bu giriş (#60) |
+
+---
+
+## #61 — VİOP Limit Emir Invalid Expiration Düzeltmesi (2026-03-24)
+
+### Bağlam
+OĞUL sinyal üretip limit emir gönderiyordu ama VİOP borsası tüm emirleri `retcode=10022 (Invalid expiration)` ile reddediyordu. Bugün 5 emir gönderildi, 5'i de reddedildi. OĞUL hiçbir otomatik işlem açamadı.
+
+### Kök Neden
+`mt5_bridge.py` satır 812: Limit emirlerde `type_time=ORDER_TIME_GTC` kullanılıyordu. VİOP exchange'de GTC emirler `expiration` tarihi zorunlu tutar. Request'te expiration alanı yoktu → her limit emir reddediliyordu.
+
+### Düzeltme
+Limit emirler (TRADE_ACTION_PENDING) için `ORDER_TIME_DAY` kullanılıyor. DAY emirler seans sonunda otomatik iptal olur, expiration gerekmez. Market emirler (TRADE_ACTION_DEAL) etkilenmedi — GTC olarak kaldı.
+
+### Sınıflandırma
+C3 — Kritik fonksiyon düzeltmesi (Kırmızı Bölge dosyası: mt5_bridge.py)
+
+### Değişen Dosyalar
+| Dosya | Değişiklik |
+|-------|-----------|
+| `engine/mt5_bridge.py` | Limit emir type_time: GTC → DAY (~8 satır) |
+| `docs/USTAT_v5_gelisim_tarihcesi.md` | Bu giriş (#61) |
