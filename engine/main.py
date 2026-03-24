@@ -902,6 +902,23 @@ class Engine:
         Veri anomalisi (3+ ardışık eksik bar) → pipeline kontratı
         otomatik deaktif eder.
         """
+        # ── Motor bazlı floating ayrıştırma (v5.7.1 — CEO Option C) ──
+        # Pipeline'a hangi ticket'ların hibrit/manuel'e ait olduğunu bildir.
+        # update_risk_snapshot() bu bilgiyle floating'i OĞUL / Hibrit / Manuel
+        # olarak ayırır. BABA sadece OĞUL floating'e bakarak karar verir.
+        try:
+            hybrid_tickets = set(self.h_engine.hybrid_positions.keys())
+            manuel_tickets = {
+                t.ticket for t in self.manuel_motor.active_trades.values()
+                if t.ticket > 0
+            }
+            self.pipeline.set_engine_tickets(
+                hybrid_tickets=hybrid_tickets,
+                manuel_tickets=manuel_tickets,
+            )
+        except Exception as exc:
+            logger.error(f"Motor ticket set hatası: {exc}")
+
         try:
             self.pipeline.run_cycle()
         except Exception as exc:

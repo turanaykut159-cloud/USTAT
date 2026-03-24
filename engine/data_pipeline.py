@@ -115,6 +115,12 @@ class DataPipeline:
         self.latest_positions: list[dict] = []   # Pozisyon dict listesi
         self._cache_time: datetime | None = None  # Son cache güncelleme zamanı
 
+        # Motor bazlı floating ayrıştırma (v5.7.1 — CEO onaylı Option C)
+        # main.py her cycle'da h_engine + manuel_motor ticket'larını set eder.
+        # update_risk_snapshot() bu set'leri kullanarak floating'i ayırır.
+        self._hybrid_tickets: set[int] = set()
+        self._manuel_tickets: set[int] = set()
+
         # DATA_GAP spam throttle: sembol başına son event zamanı
         # Aynı sembol/timeframe için 5 dakikada en fazla 1 DB event yazılır
         self._last_gap_event: dict[str, datetime] = {}
@@ -122,6 +128,25 @@ class DataPipeline:
 
         # Peak equity baseline doğrulaması
         self._validate_peak_equity()
+
+    def set_engine_tickets(
+        self,
+        hybrid_tickets: set[int] | None = None,
+        manuel_tickets: set[int] | None = None,
+    ) -> None:
+        """Motor sahiplik bilgisini güncelle — main.py her cycle'da çağırır.
+
+        Bu bilgi update_risk_snapshot() tarafından floating PnL'yi
+        motor bazlı ayırmak için kullanılır.
+
+        Args:
+            hybrid_tickets: H-Engine tarafından yönetilen pozisyon ticket'ları.
+            manuel_tickets: ManuelMotor tarafından yönetilen pozisyon ticket'ları.
+        """
+        if hybrid_tickets is not None:
+            self._hybrid_tickets = hybrid_tickets
+        if manuel_tickets is not None:
+            self._manuel_tickets = manuel_tickets
 
     def is_cache_stale(self, max_age_seconds: float = 15.0) -> bool:
         """Cache'in yaşını kontrol et.
@@ -661,6 +686,22 @@ class DataPipeline:
                 p.get("profit", 0.0) + p.get("swap", 0.0) for p in positions
             )
 
+            # ── Motor bazlı floating ayrıştırma (v5.7.1 — CEO Option C) ──
+            # Hibrit ve manuel ticket'lara ait floating ayrılır,
+            # kalan pozisyonlar OĞUL'a ait sayılır.
+            hybrid_floating = 0.0
+            manuel_floating = 0.0
+            ogul_floating = 0.0
+            for p in positions:
+                pnl = p.get("profit", 0.0) + p.get("swap", 0.0)
+                t = p.get("ticket", 0)
+                if t in self._hybrid_tickets:
+                    hybrid_floating += pnl
+                elif t in self._manuel_tickets:
+                    manuel_floating += pnl
+                else:
+                    ogul_floating += pnl
+
             # Günlük PnL — gün başı equity'den fark
             daily_pnl = self._calculate_daily_pnl(account.equity)
 
@@ -680,6 +721,9 @@ class DataPipeline:
                 "equity": account.equity,
                 "balance": account.balance,
                 "floating_pnl": floating_pnl,
+                "ogul_floating_pnl": ogul_floating,
+                "hybrid_floating_pnl": hybrid_floating,
+                "manuel_floating_pnl": manuel_floating,
                 "daily_pnl": daily_pnl,
                 "positions_json": positions,
                 "regime": regime,
@@ -691,7 +735,10 @@ class DataPipeline:
 
             logger.debug(
                 f"Risk snapshot: equity={account.equity:.2f}, "
-                f"floating={floating_pnl:.2f}, daily={daily_pnl:.2f}, "
+                f"floating={floating_pnl:.2f} "
+                f"(oğul={ogul_floating:.2f} hibrit={hybrid_floating:.2f} "
+                f"manuel={manuel_floating:.2f}), "
+                f"daily={daily_pnl:.2f}, "
                 f"dd={drawdown:.4f}, margin%={margin_usage:.1f}"
             )
             return snapshot

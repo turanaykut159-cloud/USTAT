@@ -2126,3 +2126,34 @@ C3 — Kritik fonksiyon düzeltmesi (Kırmızı Bölge dosyası: mt5_bridge.py)
 |-------|-----------|
 | `engine/mt5_bridge.py` | Limit emir type_time: GTC → DAY (~8 satır) |
 | `docs/USTAT_v5_gelisim_tarihcesi.md` | Bu giriş (#61) |
+
+---
+
+## #62 — Motor Bazlı Floating Ayrıştırma (CEO Option C) (2026-03-24)
+
+### Bağlam
+BABA risk kontrolü `_check_floating_loss()` tüm hesaptaki floating PnL'yi tek havuzda değerlendiriyordu. Hibrit motor -150 TRY floating'deyken %1.5 eşiği aşılıyor ve OĞUL'un yeni işlem açması engelleniyordu — OĞUL'un kendi floating'i 0 olmasına rağmen.
+
+### Kök Neden
+`data_pipeline.update_risk_snapshot()` tüm MT5 pozisyonlarının floating'ini tek `floating_pnl` olarak hesaplıyordu. Hangi pozisyonun hangi motora ait olduğu bilgisi yoktu. BABA bu toplam floating'e bakarak OĞUL'u bloke ediyordu.
+
+### Düzeltme (CEO onaylı Option C — İki Katmanlı Mimari)
+**Katman 1 — Motor Bazlı Risk:** `data_pipeline` artık floating'i üç motora ayırır (OĞUL / Hibrit / Manuel). BABA'nın `_check_floating_loss()` sadece `ogul_floating_pnl`'ye bakarak %1.5 kontrolü yapar. Hibrit zararı OĞUL'u bloke etmez.
+
+**Katman 2 — Master Koruma:** Yeni `_check_master_floating()` metodu tüm motorların toplam floating'ini %5 eşiğiyle kontrol eder. Aşılırsa Kill-Switch L2 tetiklenir — tüm motorlar durur.
+
+**Veri akışı:** `main.py` → her cycle'da `h_engine.hybrid_positions` ve `manuel_motor.active_trades` ticket setlerini `data_pipeline.set_engine_tickets()` ile iletir → `update_risk_snapshot()` ticket bazlı ayrıştırma yapar.
+
+### Geriye Dönük Uyumluluk
+Eski snapshot'larda `ogul_floating_pnl` yoksa, `_check_floating_loss()` toplam `floating_pnl`'ye fallback yapar.
+
+### Sınıflandırma
+C3 — Kritik fonksiyon düzeltmesi (mimari değişiklik, 3 dosya)
+
+### Değişen Dosyalar
+| Dosya | Değişiklik |
+|-------|-----------|
+| `engine/data_pipeline.py` | `set_engine_tickets()` + motor bazlı floating hesaplama (~45 satır) |
+| `engine/baba.py` | `_check_floating_loss()` OĞUL bazlı + `_check_master_floating()` yeni (~80 satır) |
+| `engine/main.py` | Hybrid/Manuel ticket aktarımı (~17 satır) |
+| `docs/USTAT_v5_gelisim_tarihcesi.md` | Bu giriş (#62) |

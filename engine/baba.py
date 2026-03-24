@@ -1409,10 +1409,21 @@ class Baba:
             verdict.lot_multiplier = 0.5
             verdict.details["weekly_halved"] = True
 
-        # 8. Floating loss (%1.5+)
+        # 8. Floating loss (%1.5+) — sadece OĞUL pozisyonları (v5.7.1)
         if self._check_floating_loss(risk_params, snap=snap):
             verdict.can_trade = False
-            verdict.reason = f"Floating loss > %{risk_params.max_floating_loss*100:.1f} — yeni işlem engeli"
+            verdict.reason = f"OĞUL floating loss > %{risk_params.max_floating_loss*100:.1f} — yeni işlem engeli"
+            return verdict
+
+        # 8.5. Master floating koruma (%5) — TÜM motorlar (v5.7.1 — CEO Option C)
+        if self._check_master_floating(snap=snap):
+            self._activate_kill_switch(
+                KILL_SWITCH_L2, "master_floating",
+                "Master floating koruma: tüm motorlar toplam %5 aşıldı",
+            )
+            verdict.can_trade = False
+            verdict.reason = "Master floating koruma (%5) — tüm motorlar durduruldu"
+            verdict.kill_switch_level = KILL_SWITCH_L2
             return verdict
 
         # 9. Günlük işlem sayısı (v14: sadece otomatik işlemler sınırlanır)
@@ -1648,14 +1659,20 @@ class Baba:
         return None
 
     def _check_floating_loss(self, risk_params: RiskParams, snap: dict | None = None) -> bool:
-        """Floating (açık pozisyon) kayıp kontrolü.
+        """Floating (açık pozisyon) kayıp kontrolü — motor bazlı ayrıştırma.
+
+        v5.7.1 (CEO Option C):
+          Katman 1 — OĞUL floating: sadece OĞUL pozisyonlarının kayıp oranı (%1.5).
+                     Hibrit/Manuel floating bu kontrolü ETKİLEMEZ.
+          Katman 2 — Master floating: TÜM motorların toplam kayıp oranı (%5).
+                     Bu eşik aşılırsa Kill-Switch L2 tetiklenir (check_risk_limits'te).
 
         Args:
             risk_params: Risk parametreleri.
             snap: Önceden alınmış risk snapshot'ı. None ise DB'den çekilir.
 
         Returns:
-            True → floating loss > %1.5 → yeni işlem engeli.
+            True → OĞUL floating loss > %1.5 → yeni işlem engeli.
         """
         if snap is None:
             snap = self._db.get_latest_risk_snapshot()
@@ -1663,19 +1680,60 @@ class Baba:
             return False
 
         equity = snap.get("equity", 0.0)
-        floating_pnl = snap.get("floating_pnl", 0.0)
-
         if equity <= 0:
             return False
 
-        if floating_pnl < 0:
-            # Standart finans formülü: floating loss / equity
-            # (Rapor AÇIK #2 düzeltmesi — eski formül balance bazlıydı)
-            floating_loss_pct = abs(floating_pnl) / equity
-            if floating_loss_pct >= risk_params.max_floating_loss:
+        # ── Katman 1: OĞUL bazlı floating kontrol (%1.5) ──
+        # ogul_floating_pnl snapshot'ta varsa onu kullan,
+        # yoksa geriye dönük uyumluluk için toplam floating_pnl'ye düş.
+        ogul_floating = snap.get("ogul_floating_pnl")
+        if ogul_floating is None:
+            # Eski snapshot (motor ayrıştırma öncesi) — fallback
+            ogul_floating = snap.get("floating_pnl", 0.0)
+
+        if ogul_floating < 0:
+            ogul_loss_pct = abs(ogul_floating) / equity
+            if ogul_loss_pct >= risk_params.max_floating_loss:
                 logger.warning(
-                    f"FLOATING LOSS ENGELİ: %{floating_loss_pct*100:.2f} "
+                    f"OĞUL FLOATING LOSS ENGELİ: %{ogul_loss_pct*100:.2f} "
                     f"(limit=%{risk_params.max_floating_loss*100:.1f})"
+                )
+                return True
+        return False
+
+    def _check_master_floating(self, snap: dict | None = None) -> bool:
+        """Hesap seviyesi master floating koruma — TÜM motorlar.
+
+        v5.7.1 (CEO Option C — Katman 2):
+          Tüm motorların toplam floating kaybı equity'nin %5'ini aşarsa
+          Kill-Switch L2 tetiklenir. Bu, tek bir motorun kontrolsüz
+          büyümesine karşı son savunma hattıdır.
+
+        Args:
+            snap: Önceden alınmış risk snapshot'ı. None ise DB'den çekilir.
+
+        Returns:
+            True → toplam floating loss > %5 → Kill-Switch tetikle.
+        """
+        _MASTER_FLOATING_LIMIT = 0.05  # %5
+
+        if snap is None:
+            snap = self._db.get_latest_risk_snapshot()
+        if not snap:
+            return False
+
+        equity = snap.get("equity", 0.0)
+        if equity <= 0:
+            return False
+
+        floating_pnl = snap.get("floating_pnl", 0.0)
+        if floating_pnl < 0:
+            total_loss_pct = abs(floating_pnl) / equity
+            if total_loss_pct >= _MASTER_FLOATING_LIMIT:
+                logger.warning(
+                    f"MASTER FLOATING KORUMA: %{total_loss_pct*100:.2f} "
+                    f"(limit=%{_MASTER_FLOATING_LIMIT*100:.1f}) — "
+                    f"TÜM MOTORLAR toplam floating aşıldı"
                 )
                 return True
         return False
