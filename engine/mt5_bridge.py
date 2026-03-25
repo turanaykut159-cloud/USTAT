@@ -18,7 +18,7 @@ import math
 import threading
 import time as _time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import MetaTrader5 as mt5
@@ -1547,7 +1547,7 @@ class MT5Bridge:
                     "price_current": pos.price_current,
                     "profit": pos.profit,
                     "swap": pos.swap,
-                    "time": datetime.fromtimestamp(pos.time).isoformat(),
+                    "time": datetime.fromtimestamp(pos.time, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
                 })
 
             logger.debug(f"Açık pozisyon sayısı: {len(result)}")
