@@ -2,6 +2,58 @@
 
 ---
 
+## #69 — Kademeli Trailing Stop + Breakeven Floor (2026-03-25)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-25 |
+| **Sınıf** | C2 — Motor davranış değişikliği |
+| **Neden** | Mevcut profit trailing'de min %1.5 mesafe + 100 TRY gap birleşimi ~280 TRY'ye kadar "etkisiz bölge" yaratıyordu: trailing aktif ama kilitlenmiş kâr 0 TRY |
+| **Tetikleyen** | CEO talebi: F_TKFEN SELL pozisyon analizi sırasında tespit edilen mantık hatası |
+| **Kapsam** | engine/h_engine.py, config/default.json |
+
+### Sorun Analizi
+
+F_TKFEN SELL @ 92.40 örneğinde:
+- Kâr 100-280 TRY aralığında trailing teknik olarak aktif
+- Ama min distance (%1.5) SL'yi entry'nin üzerine zorluyordu
+- Yön kontrolü bunu engelliyor → SL hiç hareket etmiyor = 0 TRY kilitli kâr
+- Profesyonel sistemlerde trailing aktifken en azından breakeven korunur
+
+### Çözüm: 3 Fazlı Kademeli Koruma
+
+Sabit gap (kâr - 100 TRY) yerine kâr seviyesine göre artan kilitleme oranı:
+
+| Faz | Eşik | Kilitleme | Mantık |
+|-----|-------|-----------|--------|
+| Breakeven | kâr > 0 | %0 (SL=entry) | "Artık kaybetme" |
+| Erken Trailing | kâr ≥ 100 | %30 | "Bir şey kazan" |
+| Normal Trailing | kâr ≥ 250 | %50 | "Yarısını koru" |
+| Agresif Trailing | kâr ≥ 500 | %70 | "Çoğunu koru" |
+
+Ek olarak min distance clamp sonrası **breakeven floor** eklendi — SL asla entry'den kötüye gidemez.
+
+### Değişen Dosyalar
+
+| Dosya | Değişiklik |
+|-------|-----------|
+| `engine/h_engine.py` | `_calc_profit_trailing_sl()`: kademeli oran sistemi, `_check_trailing()`: breakeven floor |
+| `config/default.json` | `trailing_graduated`, `trailing_graduated_tiers` parametreleri |
+
+### Eklenen
+- Kademeli oran sistemi (4 faz, config'den ayarlanabilir)
+- Breakeven floor (min distance SL'yi entry'den kötüye çekemesin)
+- Tier bazlı debug logging
+
+### Çıkartılan
+- (yok — eski sabit gap modu `trailing_graduated: false` ile hâlâ kullanılabilir)
+
+### Geriye Uyumluluk
+- `trailing_graduated: false` yapılırsa eski davranış birebir korunur
+- Tier eşikleri config'den serbestçe ayarlanabilir
+
+---
+
 ## #57 — Gelişim Tarihçesi Audit: Yapılmadı/Atlandı/Yarım Kaldı Analizi (2026-03-23)
 
 | Alan | Detay |

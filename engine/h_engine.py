@@ -144,12 +144,30 @@ class HEngine:
         self._trailing_min_pct: float = hybrid_cfg.get("trailing_min_pct", 0.015)  # %1.5
         self._trailing_max_pct: float = hybrid_cfg.get("trailing_max_pct", 0.080)  # %8.0
 
-        sltp_mode = "NATIVE (MT5)" if self._native_sltp else "SOFTWARE (H-Oğul)"
-        trailing_desc = (
-            f"PROFIT (gap={self._trailing_profit_gap} TRY)"
-            if self._trailing_mode == "profit"
-            else f"ATR (trigger={self._trailing_trigger_mult}×, dist={self._trailing_distance_mult}×)"
+        # ── Kademeli Oran Sistemi (3 Fazlı Koruma) ───────────────
+        self._trailing_graduated: bool = hybrid_cfg.get("trailing_graduated", False)
+        raw_tiers = hybrid_cfg.get("trailing_graduated_tiers", [
+            {"min_profit": 0,   "lock_ratio": 0.0,  "label": "breakeven"},
+            {"min_profit": 100, "lock_ratio": 0.30,  "label": "erken_trailing"},
+            {"min_profit": 250, "lock_ratio": 0.50,  "label": "normal_trailing"},
+            {"min_profit": 500, "lock_ratio": 0.70,  "label": "agresif_trailing"},
+        ])
+        # Büyükten küçüğe sırala — en yüksek eşikten başlayarak kontrol edeceğiz
+        self._trailing_tiers: list[dict] = sorted(
+            raw_tiers, key=lambda t: t["min_profit"], reverse=True
         )
+
+        sltp_mode = "NATIVE (MT5)" if self._native_sltp else "SOFTWARE (H-Oğul)"
+        if self._trailing_mode == "profit" and self._trailing_graduated:
+            tier_info = ", ".join(
+                f"{t['label']}≥{t['min_profit']}→%{t['lock_ratio']*100:.0f}"
+                for t in sorted(raw_tiers, key=lambda t: t["min_profit"])
+            )
+            trailing_desc = f"PROFIT KADEMELİ ({tier_info})"
+        elif self._trailing_mode == "profit":
+            trailing_desc = f"PROFIT (gap={self._trailing_profit_gap} TRY)"
+        else:
+            trailing_desc = f"ATR (trigger={self._trailing_trigger_mult}×, dist={self._trailing_distance_mult}×)"
         logger.info(
             f"H-Engine başlatıldı: max_concurrent={self._max_concurrent}, "
             f"daily_limit={self._config_daily_limit}, "
@@ -931,26 +949,52 @@ class HEngine:
         self, hp: HybridPosition, current_price: float,
         profit: float, swap: float,
     ) -> float | None:
-        """Kâr bazlı trailing SL hesapla (v5.7.1 — CEO onaylı).
+        """Kâr bazlı trailing SL hesapla (v5.8 — Kademeli Oran Sistemi).
 
-        Mantık: (mevcut_kâr - nefes_payı) TRY'yi fiyat mesafesine çevirip
-        giriş fiyatından o kadar uzağa SL koyar.
+        İki mod:
+        1) Kademeli (trailing_graduated=true):
+           Kâr seviyesine göre artan oranda kilitleme.
+           Faz 1 (breakeven) : kâr>0     → SL=entry (zarar yok)
+           Faz 2 (erken)     : kâr≥100   → kârın %30'u kilitli
+           Faz 3 (normal)    : kâr≥250   → kârın %50'si kilitli
+           Faz 4 (agresif)   : kâr≥500   → kârın %70'i kilitli
 
-        Örnek (SELL, gap=100 TRY):
-            Kâr=300 TRY → kilitle=200 TRY → SL = entry - 200/çarpan
-            Kâr=500 TRY → kilitle=400 TRY → SL = entry - 400/çarpan
+        2) Eski mod (trailing_graduated=false):
+           Sabit gap: lock = kâr - gap
 
         Returns:
             Yeni SL değeri, koşul sağlanmıyorsa None.
         """
         total_pnl = profit + swap
-        gap = self._trailing_profit_gap
 
-        # Kâr nefes payını aşmadıysa trailing başlamaz
-        if total_pnl <= gap:
-            return None
+        # ── Kademeli Oran Sistemi ──────────────────────────────
+        if self._trailing_graduated:
+            # Kâr <= 0 ise trailing başlamaz
+            if total_pnl <= 0:
+                return None
 
-        lock_trl = total_pnl - gap  # kilitlenecek TRY
+            # Tier bul (büyükten küçüğe sıralı, ilk eşleşen kazanır)
+            lock_ratio = 0.0
+            tier_label = "breakeven"
+            for tier in self._trailing_tiers:
+                if total_pnl >= tier["min_profit"]:
+                    lock_ratio = tier["lock_ratio"]
+                    tier_label = tier.get("label", "?")
+                    break
+
+            lock_trl = total_pnl * lock_ratio  # kilitlenecek TRY
+
+            logger.debug(
+                f"Kademeli trailing [{hp.symbol}] t={hp.ticket}: "
+                f"kâr={total_pnl:.0f} TRY, faz={tier_label}, "
+                f"oran=%{lock_ratio*100:.0f}, kilit={lock_trl:.0f} TRY"
+            )
+        else:
+            # ── Eski sabit gap modu ────────────────────────────
+            gap = self._trailing_profit_gap
+            if total_pnl <= gap:
+                return None
+            lock_trl = total_pnl - gap
 
         # TRY → fiyat mesafesi dönüşümü (symbol_info'dan kontrat çarpanı)
         sym = self.mt5.get_symbol_info(hp.symbol)
@@ -1022,6 +1066,24 @@ class HEngine:
                 distance = new_sl - current_price
                 clamped = max(min_dist, min(distance, max_dist))
                 new_sl = current_price + clamped
+
+        # ── Breakeven Floor (v5.8) ─────────────────────────────
+        # Min distance SL'yi entry'den kötüye çekebilir.
+        # Bu floor, SL'nin asla entry'den kötü olmamasını garanti eder.
+        # SELL: SL entry'nin üstüne çıkamaz (yukarı = kötü)
+        # BUY:  SL entry'nin altına inemez  (aşağı = kötü)
+        if hp.direction == "SELL" and new_sl > hp.entry_price:
+            new_sl = hp.entry_price
+            logger.debug(
+                f"Breakeven floor uygulandı [{hp.symbol}] t={hp.ticket}: "
+                f"SL entry'ye çekildi ({hp.entry_price:.2f})"
+            )
+        elif hp.direction == "BUY" and new_sl < hp.entry_price:
+            new_sl = hp.entry_price
+            logger.debug(
+                f"Breakeven floor uygulandı [{hp.symbol}] t={hp.ticket}: "
+                f"SL entry'ye çekildi ({hp.entry_price:.2f})"
+            )
 
         # SL sadece daha iyi yöne taşınır
         if hp.direction == "BUY":

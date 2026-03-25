@@ -156,6 +156,13 @@
     "trailing_trigger_atr_mult": 1.0,
     "trailing_distance_atr_mult": 1.0,
     "trailing_mode": "profit",
-    "trailing_profit_gap": 100.0
+    "trailing_profit_gap": 100.0,
+    "trailing_graduated": true,
+    "trailing_graduated_tiers": [
+      {"min_profit": 0,   "lock_ratio": 0.0,  "label": "breakeven"},
+      {"min_profit": 100, "lock_ratio": 0.30,  "label": "erken_trailing"},
+      {"min_profit": 250, "lock_ratio": 0.50,  "label": "normal_trailing"},
+      {"min_profit": 500, "lock_ratio": 0.70,  "label": "agresif_trailing"}
+    ]
   }
 }
