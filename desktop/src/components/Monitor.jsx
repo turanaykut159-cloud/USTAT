@@ -195,6 +195,7 @@ export default function Monitor() {
   const orders = health?.orders || {};
   const layers = health?.layers || {};
   const sysInfo = health?.system || {};
+  const alarms = health?.alarms || {};
   const lastCycle = cycle?.last_cycle;
   const steps = lastCycle?.steps || {};
 
@@ -352,6 +353,27 @@ export default function Monitor() {
           <div style={{ fontSize: 11, color: '#c8dae8', letterSpacing: 2 }}>{time}</div>
         </div>
       </div>
+
+      {/* ═══ [ALARM] Emir Red Uyarısı ═══════════════════════════ */}
+      {(alarms?.consecutive_rejects ?? 0) >= 2 && (
+        <div style={{
+          background: 'linear-gradient(90deg, #2d1111 0%, #1a0808 100%)',
+          border: '1px solid #e74c3c',
+          borderRadius: 8, padding: '10px 16px', marginBottom: 12,
+          display: 'flex', alignItems: 'center', gap: 12,
+          animation: 'mnPulse 2s infinite',
+        }}>
+          <span style={{ fontSize: 18 }}>⚠️</span>
+          <div>
+            <div style={{ color: '#e74c3c', fontSize: 12, fontWeight: 'bold', letterSpacing: 1 }}>
+              EMİR RED ALARMI — {alarms.consecutive_rejects} ardışık emir reddedildi
+            </div>
+            <div style={{ color: '#ff9999', fontSize: 10, marginTop: 2 }}>
+              {alarms.last_reject_reason || 'Detay yok'}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ═══ [B] STATS BAR ═══════════════════════════════════════ */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 8, marginBottom: 16 }}>

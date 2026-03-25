@@ -617,12 +617,26 @@ class ContractProfile(BaseModel):
     preferred_direction: str = ""  # BUY veya SELL
 
 
+class RiskEventDetail(BaseModel):
+    """Hata atamasına bağlı risk olayı detayı."""
+    type: str = ""
+    timestamp: str = ""
+    message: str = ""
+
+
 class ErrorAttribution(BaseModel):
     """Hata atama kaydı — BABA veya OĞUL sorumluluğu."""
     trade_id: int
     error_type: str
     responsible: str  # "BABA" | "OGUL"
     description: str
+    # Zenginleştirilmiş alanlar (v13.x)
+    timestamp: str = ""
+    symbol: str = ""
+    pnl: float = 0.0
+    exit_reason: str = ""
+    risk_events: list[RiskEventDetail] = []
+    baba_notified: bool = False
 
 
 class NextDayAnalysis(BaseModel):
@@ -689,6 +703,7 @@ class HealthResponse(BaseModel):
     layers: dict = {}       # katman durumları (BABA, OĞUL, H-Engine, ÜSTAT)
     recent_events: list[dict] = []  # son 30 olay
     system: dict = {}       # sistem bilgileri (uptime, DB boyutu, WS istemci)
+    alarms: dict = {}       # alarm durumu (ardışık red sayısı, son hata)
 
 
 # Forward-ref güncelle

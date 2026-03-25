@@ -14,7 +14,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   getStatus, getTop5, getPositions, getTrades, reactivateSymbols,
-  getOgulActivity, connectLiveWS,
+  getOgulActivity, getHealth, connectLiveWS,
 } from '../services/api';
 import { formatMoney, formatPrice, pnlClass, elapsed } from '../utils/formatters';
 
@@ -66,19 +66,22 @@ export default function AutoTrading() {
     active_strategies: [], adx_value: 0,
   });
   const [loading, setLoading] = useState(true);
+  const [alarms, setAlarms] = useState({});
   const wsRef = useRef(null);
 
   const fetchAll = useCallback(async () => {
-    const [st, t5, pos, trades, ogul] = await Promise.all([
+    const [st, t5, pos, trades, ogul, h] = await Promise.all([
       getStatus(),
       getTop5(),
       getPositions(),
       getTrades({ limit: 50 }),
       getOgulActivity(),
+      getHealth().catch(() => ({})),
     ]);
     setStatus(st);
     setTop5(t5);
     setOgulActivity(ogul);
+    setAlarms(h?.alarms || {});
 
     // Otomatik pozisyonları filtrele
     const allPos = pos.positions || [];
@@ -172,6 +175,26 @@ export default function AutoTrading() {
   return (
     <div className="auto-page">
       <h2 className="auto-title">Otomatik İşlem Paneli</h2>
+
+      {/* ═══ EMİR RED ALARMI ═══════════════════════════════════════ */}
+      {(alarms?.consecutive_rejects ?? 0) >= 2 && (
+        <div style={{
+          background: 'linear-gradient(90deg, #2d1111 0%, #1a0808 100%)',
+          border: '1px solid #e74c3c', borderRadius: 8,
+          padding: '10px 16px', marginBottom: 12,
+          display: 'flex', alignItems: 'center', gap: 12,
+        }}>
+          <span style={{ fontSize: 18 }}>⚠️</span>
+          <div>
+            <div style={{ color: '#e74c3c', fontSize: 12, fontWeight: 'bold' }}>
+              EMİR RED ALARMI — {alarms.consecutive_rejects} ardışık emir reddedildi
+            </div>
+            <div style={{ color: '#ff9999', fontSize: 10, marginTop: 2 }}>
+              {alarms.last_reject_reason || 'Detay yok'}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ═══ ÜST: 4 Stat Kartı ════════════════════════════════════ */}
       <div className="auto-stats-row">

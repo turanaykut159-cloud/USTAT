@@ -339,6 +339,10 @@ class Baba:
         # ── Cross-motor referansı (fake sinyal koruması) ─────────────
         self.manuel_motor: Any | None = None  # main.py tarafından atanır
 
+        # ── ÜSTAT geri bildirim ─────────────────────────────────────
+        self._risk_miss_log: list[dict] = []
+        self._risk_miss_count: int = 0
+
         # ── Kill-switch durumu ───────────────────────────────────────
         self._kill_switch_level: int = KILL_SWITCH_NONE
         self._kill_switch_details: dict[str, Any] = {}
@@ -1941,6 +1945,51 @@ class Baba:
         score += new_lot * new_weight * new_sign
 
         return abs(score)
+
+    # ═════════════════════════════════════════════════════════════════
+    #  ÜSTAT GERİ BİLDİRİM
+    # ═════════════════════════════════════════════════════════════════
+
+    def receive_feedback(self, attribution: dict) -> None:
+        """ÜSTAT'tan hata atama geri bildirimi al.
+
+        RISK_MISS atandığında ÜSTAT bu metodu çağırır.
+        BABA gelen bilgiyi loglar ve risk_miss sayacını günceller.
+
+        Args:
+            attribution: Hata atama dict'i (trade_id, error_type, symbol vb).
+        """
+        if not hasattr(self, "_risk_miss_log"):
+            self._risk_miss_log: list[dict] = []
+            self._risk_miss_count: int = 0
+
+        self._risk_miss_log.append(attribution)
+        self._risk_miss_count = getattr(self, "_risk_miss_count", 0) + 1
+
+        # Max 50 kayıt tut
+        if len(self._risk_miss_log) > 50:
+            self._risk_miss_log = self._risk_miss_log[-50:]
+
+        symbol = attribution.get("symbol", "?")
+        trade_id = attribution.get("trade_id", 0)
+        logger.warning(
+            f"[BABA] ÜSTAT geri bildirimi: RISK_MISS — trade#{trade_id} "
+            f"{symbol}, toplam miss: {self._risk_miss_count}"
+        )
+
+        # DB'ye de kaydet
+        if self._db:
+            try:
+                self._db.insert_event(
+                    event_type="BABA_FEEDBACK",
+                    message=(
+                        f"ÜSTAT RISK_MISS bildirimi: trade#{trade_id} {symbol}. "
+                        f"Toplam miss sayısı: {self._risk_miss_count}"
+                    ),
+                    severity="WARNING",
+                )
+            except Exception:
+                pass
 
     # ═════════════════════════════════════════════════════════════════
     #  KILL-SWITCH

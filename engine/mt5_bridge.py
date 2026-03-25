@@ -824,7 +824,8 @@ class MT5Bridge:
                     _today = _dt.now().date()
                     # Seans sonu: 18:10 (VİOP kapanış)
                     _expiry = _dt.combine(_today, _dt.min.time().replace(hour=18, minute=10))
-                    request["expiration"] = int(_expiry.timestamp())
+                    request["type_time"] = mt5.ORDER_TIME_SPECIFIED
+                    request["expiration"] = _expiry
 
                 logger.info(
                     f"Emir gönderiliyor (SL/TP ayrı): {direction} {lot} lot "
@@ -857,7 +858,7 @@ class MT5Bridge:
                         "retcode": result.retcode,
                         "comment": result.comment,
                     }
-                    # Health: reddedilen emir kaydı
+                    # Health: reddedilen emir kaydı + ardışık red alarmı
                     if self._health:
                         from engine.health import OrderTiming
                         self._health.record_order(OrderTiming(
@@ -868,10 +869,29 @@ class MT5Bridge:
                             success=False,
                             retcode=result.retcode,
                         ))
+                        self._health.record_order_reject(
+                            symbol, result.retcode, result.comment,
+                        )
+                    # Event bus: başarısız emir bildir (dashboard + WS)
+                    try:
+                        from engine.event_bus import emit as _emit_event
+                        _emit_event("ORDER_REJECTED", {
+                            "symbol": symbol,
+                            "direction": direction,
+                            "retcode": result.retcode,
+                            "comment": result.comment,
+                            "timestamp": _time.time(),
+                        })
+                    except Exception:
+                        pass
                     return None
 
                 order_result = result._asdict()
                 order_result["sl_tp_applied"] = False
+
+                # Başarılı emir — ardışık red sayacını sıfırla
+                if self._health:
+                    self._health.clear_reject_streak()
 
                 logger.info(
                     f"Emir başarılı: ticket={order_result.get('order')}, "

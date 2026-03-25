@@ -63,6 +63,106 @@ function CategoryTip({ active, payload }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+//  HATA ATAMA PANELİ (Zenginleştirilmiş)
+// ═══════════════════════════════════════════════════════════════════
+
+function ErrorAttributionPanel({ data }) {
+  const raw = data && data.length > 0 ? data.slice(0, 15) : [];
+
+  // Fallback: description'dan symbol ve pnl parse et (backend restart öncesi)
+  // Örnek: "F_OYAKC: İşlem süresince ... Zarar: -25.00 TL"
+  const items = useMemo(() => raw.map(ea => {
+    const sym = ea.symbol || (() => {
+      const m = ea.description?.match(/^(F_\w+)/);
+      return m ? m[1] : '';
+    })();
+    const pnl = ea.pnl || (() => {
+      const m = ea.description?.match(/Zarar:\s*(-?[\d.,]+)/);
+      return m ? parseFloat(m[1].replace(',', '.')) : 0;
+    })();
+    return { ...ea, symbol: sym, pnl };
+  }), [raw]);
+
+  // İstatistik özet
+  const stats = useMemo(() => {
+    if (!items.length) return null;
+    const babaCount = items.filter(ea => ea.responsible === 'BABA').length;
+    const ogulCount = items.filter(ea => ea.responsible === 'OGUL').length;
+    const totalLoss = items.reduce((sum, ea) => sum + (ea.pnl || 0), 0);
+    return { total: items.length, baba: babaCount, ogul: ogulCount, loss: totalLoss };
+  }, [items]);
+
+  // Zaman formatla: "13.03 17:45"
+  // Desteklenen formatlar: "2026-03-13T17:45:11" veya "2026-03-13 17:45:11"
+  const fmtTime = (ts) => {
+    if (!ts) return '—';
+    const normalized = ts.replace('T', ' ');
+    const parts = normalized.split(' ');
+    if (parts.length >= 2) {
+      const [y, m, d] = parts[0].split('-');
+      const time = parts[1].substring(0, 5);
+      return `${d}.${m} ${time}`;
+    }
+    return ts.substring(0, 16);
+  };
+
+  // Description'dan symbol kısmını çıkar (tekrar gösterme)
+  const trimDesc = (desc, sym) => {
+    if (!desc) return '';
+    // "F_OYAKC: İşlem süresince..." → "İşlem süresince..."
+    if (sym && desc.startsWith(sym + ':')) return desc.substring(sym.length + 1).trim();
+    if (sym && desc.startsWith(sym + ' ')) return desc.substring(sym.length + 1).trim();
+    return desc;
+  };
+
+  return (
+    <div className="ub-brain-panel ub-ea-panel">
+      <div className="ub-bp-header">
+        <span className="ub-bp-icon">🔍</span>
+        <h3 className="ub-bp-title">Hata Atama Raporu</h3>
+      </div>
+
+      {stats ? (
+        <>
+          {/* İstatistik özet başlığı */}
+          <div className="ub-ea-stats">
+            <span className="ub-ea-stat">Toplam: {stats.total}</span>
+            <span className="ub-ea-stat ub-ea-stat--baba">BABA: {stats.baba}</span>
+            <span className="ub-ea-stat ub-ea-stat--ogul">OGUL: {stats.ogul}</span>
+            <span className="ub-ea-stat ub-ea-stat--loss">Zarar: {fmt(stats.loss)} TL</span>
+          </div>
+
+          {/* Attribution listesi — tek satır, açılır menü yok */}
+          <div className="ub-bp-list ub-ea-list">
+            {items.map((ea, i) => (
+              <div key={i} className="ub-ea-row">
+                <div className="ub-ea-main">
+                  <span className="ub-ea-time">{fmtTime(ea.timestamp)}</span>
+                  <span className="ub-ea-symbol">{ea.symbol || '—'}</span>
+                  <span className={`ub-ea-pnl ${(ea.pnl || 0) < 0 ? 'loss' : ''}`}>
+                    {fmt(ea.pnl)} TL
+                  </span>
+                  <span className={`ub-bp-badge ub-bp--${ea.responsible.toLowerCase()}`}>
+                    {ea.responsible}
+                  </span>
+                  <span className="ub-bp-type">{ea.error_type}</span>
+                  <span className="ub-ea-summary">{trimDesc(ea.description, ea.symbol)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : (
+        <div className="ub-bp-empty">
+          <p>Kim hata yapti? BABA veya OGUL sorumluluk atamasi.</p>
+          <span className="ub-bp-waiting">Veri bekleniyor</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
 //  ANA BİLEŞEN
 // ═══════════════════════════════════════════════════════════════════
 
@@ -275,23 +375,11 @@ export default function UstatBrain() {
         ) : <EmptyState icon="🎯" text="Rejim verisi yok" />}
       </div>
 
-      {/* ═══ 7. BEYIN PANELLERI ═════════════════════════════════════ */}
-      <div className="ub-panels">
+      {/* ═══ 7a. HATA ATAMA — Tam Genişlik ═══════════════════════════ */}
+      <ErrorAttributionPanel data={brain?.error_attributions} />
 
-        {/* Hata Atama */}
-        <BrainPanel
-          title="Hata Atama Raporu"
-          icon="🔍"
-          placeholder="Kim hata yapti? BABA veya OGUL sorumluluk atamasi."
-          data={brain?.error_attributions}
-          render={(items) => items.slice(0, 10).map((ea, i) => (
-            <div key={i} className="ub-bp-row">
-              <span className={`ub-bp-badge ub-bp--${ea.responsible.toLowerCase()}`}>{ea.responsible}</span>
-              <span className="ub-bp-type">{ea.error_type}</span>
-              <span className="ub-bp-desc">{ea.description}</span>
-            </div>
-          ))}
-        />
+      {/* ═══ 7b. BEYIN PANELLERI ════════════════════════════════════ */}
+      <div className="ub-panels">
 
         {/* Ertesi Gun Analizi */}
         <BrainPanel

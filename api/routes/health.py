@@ -72,11 +72,14 @@ async def get_health():
     mt5_data: dict = {}
     orders_data: dict = {}
 
+    alarms_data: dict = {}
+
     if engine and hasattr(engine, "health"):
         snap = engine.health.snapshot()
         cycle_data = snap.get("cycle", {})
         mt5_data = snap.get("mt5", {})
         orders_data = snap.get("orders", {})
+        alarms_data = snap.get("alarms", {})
 
     # ── 2. Katman durumları ───────────────────────────────────────
     layers = _build_layers()
@@ -94,6 +97,7 @@ async def get_health():
         layers=layers,
         recent_events=recent_events,
         system=system,
+        alarms=alarms_data,
     )
 
 

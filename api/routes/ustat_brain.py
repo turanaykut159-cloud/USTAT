@@ -32,6 +32,7 @@ from api.schemas import (
     EventItem,
     NextDayAnalysis,
     RegulationSuggestion,
+    RiskEventDetail,
     StrategyPool,
     StrategyProfile,
     TradeCategories,
@@ -272,14 +273,59 @@ async def get_ustat_brain(
         ustat = get_ustat()
 
         # Hata atamaları (ÜSTAT brain cycle'dan)
+        # Trade lookup tablosu — eski attributionlara eksik alanları doldurmak için
+        trade_by_id = {t.get("id"): t for t in trades if t.get("id")}
+        # Risk events (eski attribution'lara timeline eklemek için)
+        all_events = events_raw
+
         error_attributions: list[ErrorAttribution] = []
         if ustat:
             for ea in (ustat.get_error_attributions() or []):
+                # ── Fallback enrichment: eski attribution'da eksik alan varsa trade'den doldur
+                ts = ea.get("timestamp") or ""
+                sym = ea.get("symbol") or ""
+                pnl_val = ea.get("pnl") or 0.0
+                exit_r = ea.get("exit_reason") or ""
+                risk_evts = ea.get("risk_events") or []
+                baba_n = ea.get("baba_notified", False)
+
+                if not ts or not sym:
+                    t = trade_by_id.get(ea.get("trade_id"))
+                    if t:
+                        ts = ts or str(t.get("exit_time") or t.get("entry_time") or "")
+                        sym = sym or str(t.get("symbol") or "")
+                        pnl_val = pnl_val or round(float(t.get("pnl") or 0), 2)
+                        exit_r = exit_r or str(t.get("exit_reason") or "")
+                        # Risk events — trade süresi içindeki olaylar
+                        if not risk_evts:
+                            entry = str(t.get("entry_time") or "")
+                            exit_ = str(t.get("exit_time") or "")
+                            if entry and exit_:
+                                risk_evts = [
+                                    {"type": e.get("type", ""), "timestamp": str(e.get("timestamp", "")), "message": str(e.get("message", ""))}
+                                    for e in all_events
+                                    if "RISK" in str(e.get("type", "")) and entry <= str(e.get("timestamp", "")) <= exit_
+                                ]
+
+                risk_details = [
+                    RiskEventDetail(
+                        type=re.get("type", ""),
+                        timestamp=re.get("timestamp", ""),
+                        message=re.get("message", ""),
+                    )
+                    for re in risk_evts
+                ]
                 error_attributions.append(ErrorAttribution(
                     trade_id=ea.get("trade_id", 0),
                     error_type=ea.get("error_type", ""),
                     responsible=ea.get("responsible", ""),
                     description=ea.get("description", ""),
+                    timestamp=ts,
+                    symbol=sym,
+                    pnl=pnl_val,
+                    exit_reason=exit_r,
+                    risk_events=risk_details,
+                    baba_notified=baba_n,
                 ))
 
         # Ertesi gün analizleri (ÜSTAT brain cycle'dan)

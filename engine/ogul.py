@@ -1261,8 +1261,9 @@ class Ogul:
 
                 structural_tp = get_structural_tp(
                     direction_str, best.price,
-                    pa_trend.swing_highs, pa_trend.swing_lows,
+                    pa_levels,
                     atr_val,
+                    sl=best.sl,
                 )
                 if structural_tp is not None:
                     # Yapısal TP daha uzak ise kullan (daha iyi R:R)

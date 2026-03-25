@@ -232,6 +232,23 @@ class Engine:
             return
         self.health.record_connection_established()
 
+        # 1.1 Startup Smoke Test — kritik kontroller
+        from engine.health import run_startup_smoke_test
+        smoke = run_startup_smoke_test(self.mt5)
+        if not smoke.passed:
+            failed = [c for c in smoke.checks if c["status"] == "FAIL"]
+            fail_names = ", ".join(c["name"] for c in failed)
+            logger.critical(
+                f"Smoke test BAŞARISIZ — engine başlatılamıyor. "
+                f"Başarısız: {fail_names}"
+            )
+            self._log_event(
+                "SMOKE_TEST_FAIL",
+                f"Smoke test başarısız: {fail_names}",
+                "CRITICAL",
+            )
+            return
+
         # 1.5. MT5 işlem geçmişi senkronizasyonu (tek seferlik)
         self._sync_mt5_history()
 

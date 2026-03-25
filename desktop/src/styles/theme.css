@@ -5339,6 +5339,192 @@ h2 {
   font-weight: 700;
 }
 
+/* ── HATA ATAMA PANEL (Zenginleştirilmiş) ─────────────────────── */
+.ub-ea-panel {
+  min-height: 340px;
+  max-height: none;
+}
+
+.ub-ea-stats {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 6px;
+  border: 1px solid rgba(48, 54, 61, 0.3);
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 11px;
+}
+
+.ub-ea-stat { color: var(--text-secondary); }
+.ub-ea-stat--baba { color: #d29922; font-weight: 600; }
+.ub-ea-stat--ogul { color: #58a6ff; font-weight: 600; }
+.ub-ea-stat--loss { color: var(--loss); font-weight: 600; }
+
+.ub-ea-list {
+  max-height: 320px;
+}
+
+.ub-ea-row {
+  border-radius: 6px;
+  border: 1px solid transparent;
+  transition: border-color 0.15s, background 0.15s;
+  overflow: hidden;
+}
+
+.ub-ea-row:hover {
+  border-color: rgba(48, 54, 61, 0.5);
+}
+
+.ub-ea-row--open {
+  border-color: rgba(48, 54, 61, 0.6);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.ub-ea-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  cursor: pointer;
+  font-size: 11.5px;
+  user-select: none;
+  width: 100%;
+}
+
+.ub-ea-main:hover {
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.ub-ea-time {
+  color: var(--text-dim);
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 11px;
+  min-width: 110px;
+  flex-shrink: 0;
+}
+
+.ub-ea-symbol {
+  color: var(--text-primary);
+  font-weight: 700;
+  font-size: 12px;
+  min-width: 80px;
+  flex-shrink: 0;
+}
+
+.ub-ea-pnl {
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-weight: 600;
+  font-size: 11.5px;
+  min-width: 90px;
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
+
+.ub-ea-pnl.loss { color: var(--loss); }
+
+.ub-ea-summary {
+  color: var(--text-secondary);
+  font-size: 11px;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ub-ea-chevron {
+  color: var(--text-dim);
+  font-size: 10px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* Detay paneli */
+.ub-ea-detail {
+  padding: 8px 10px 10px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px solid rgba(48, 54, 61, 0.3);
+  animation: eaSlideDown 0.15s ease-out;
+}
+
+@keyframes eaSlideDown {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.ub-ea-desc {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.ub-ea-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 0;
+}
+
+.ub-ea-timeline-label {
+  font-size: 10px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 2px;
+}
+
+.ub-ea-event {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  padding-left: 8px;
+  border-left: 2px solid rgba(210, 153, 34, 0.3);
+}
+
+.ub-ea-event-time {
+  color: var(--text-dim);
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 10px;
+  min-width: 36px;
+}
+
+.ub-ea-event-type {
+  color: #d29922;
+  font-weight: 600;
+  font-size: 10.5px;
+}
+
+.ub-ea-event-msg {
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  flex: 1;
+}
+
+.ub-ea-meta {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.ub-ea-meta strong {
+  color: var(--text-secondary);
+}
+
+.ub-ea-notify {
+  font-size: 10.5px;
+}
+
+.ub-ea-notify--yes {
+  color: var(--profit);
+}
+
+.ub-ea-notify--no {
+  color: var(--text-dim);
+}
+
 /* ── EMPTY STATE ──────────────────────────────────────────────────── */
 .ub-empty {
   display: flex;

@@ -367,6 +367,34 @@ class Ustat:
 
         attributed_ids = {ea.get("trade_id") for ea in self.error_attributions}
 
+        # Eski attributionlara eksik alanları doldur (migration)
+        for ea in self.error_attributions:
+            if "timestamp" not in ea or not ea.get("timestamp"):
+                ea.setdefault("timestamp", "")
+                ea.setdefault("symbol", "")
+                ea.setdefault("pnl", 0.0)
+                ea.setdefault("exit_reason", "")
+                ea.setdefault("risk_events", [])
+                ea.setdefault("baba_notified", False)
+                # Eski attribution için trade'den bilgi çekmeye çalış
+                tid = ea.get("trade_id", 0)
+                for t in trades:
+                    if t.get("id") == tid:
+                        ea["timestamp"] = t.get("exit_time", "") or t.get("entry_time", "")
+                        ea["symbol"] = t.get("symbol", "")
+                        ea["pnl"] = round(t.get("pnl", 0.0) or 0.0, 2)
+                        ea["exit_reason"] = t.get("exit_reason", "")
+                        # İşlem süresindeki risk olayları
+                        entry = t.get("entry_time", "")
+                        exit_ = t.get("exit_time", "")
+                        if entry and exit_:
+                            ea["risk_events"] = [
+                                {"type": e.get("type", ""), "timestamp": e.get("timestamp", ""), "message": e.get("message", "")}
+                                for e in risk_events
+                                if entry <= e.get("timestamp", "") <= exit_
+                            ]
+                        break
+
         for trade in losing_trades:
             trade_id = trade.get("id", 0)
             if trade_id in attributed_ids:
@@ -374,6 +402,15 @@ class Ustat:
 
             attribution = self._determine_fault(trade, risk_events)
             if attribution:
+                # BABA geri bildirim döngüsü: RISK_MISS ise BABA'ya bildir
+                if attribution.get("responsible") == "BABA" and baba is not None:
+                    try:
+                        if hasattr(baba, "receive_feedback"):
+                            baba.receive_feedback(attribution)
+                            attribution["baba_notified"] = True
+                    except Exception as exc:
+                        logger.warning(f"BABA feedback hatası: {exc}")
+
                 self.error_attributions.append(attribution)
                 self._log_event(
                     "ERROR_ATTRIBUTION",
@@ -418,11 +455,33 @@ class Ustat:
             and entry_time <= e.get("timestamp", "") <= exit_time
         ]
 
+        # Risk olaylarının detay listesi (UI timeline için)
+        risk_event_details = [
+            {
+                "type": e.get("type", ""),
+                "timestamp": e.get("timestamp", ""),
+                "message": e.get("message", ""),
+            }
+            for e in risk_during_trade
+        ]
+
+        # Ortak zenginleştirilmiş alanlar
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        base_fields = {
+            "trade_id": trade_id,
+            "timestamp": now_str,
+            "symbol": symbol,
+            "pnl": round(pnl, 2),
+            "exit_reason": exit_reason,
+            "risk_events": risk_event_details,
+            "baba_notified": False,
+        }
+
         # 1. BABA hatası: Risk sinyali vardı ama pozisyon kapatılmadı
         safe_exits = ("RISK_CLOSE", "KILL_SWITCH", "BABA_CLOSE")
         if risk_during_trade and exit_reason not in safe_exits:
             return {
-                "trade_id": trade_id,
+                **base_fields,
                 "error_type": "RISK_MISS",
                 "responsible": "BABA",
                 "description": (
@@ -436,7 +495,7 @@ class Ustat:
         ogul_fault_exits = ("SL_HIT", "TIMEOUT", "EXPIRY")
         if exit_reason in ogul_fault_exits:
             return {
-                "trade_id": trade_id,
+                **base_fields,
                 "error_type": "PROFIT_MISS",
                 "responsible": "OGUL",
                 "description": (
@@ -449,7 +508,7 @@ class Ustat:
         # 3. Anlamlı zarar ama neden belirsiz → genel kayıt
         if abs(pnl) >= ATTRIBUTION_MIN_LOSS:
             return {
-                "trade_id": trade_id,
+                **base_fields,
                 "error_type": "GENERAL_LOSS",
                 "responsible": "OGUL",
                 "description": (

@@ -1,17 +1,25 @@
-"""ÜSTAT Engine — Sistem sağlığı metrik toplayıcı (memory-only).
+"""ÜSTAT Engine — Sistem sağlığı metrik toplayıcı + Startup Smoke Test.
 
 Thread-safe, deque tabanlı metrik depolama.
 DB'ye YAZMAZ — sadece bellekte tutar, API üzerinden okunur.
 Overhead: ~0.01ms per cycle (perf_counter çağrıları).
+
+Startup Smoke Test: Uygulama başladığında MT5 bağlantısı, emir
+gönderebilme yeteneği ve expiration hesabını doğrular.
+Başarısız olursa engine BAŞLAMAZ — sessiz hata YASAK.
 """
 
 from __future__ import annotations
 
+import logging
 import threading
 import time as _time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime as _dt
 from typing import Any
+
+_logger = logging.getLogger(__name__)
 
 
 # ── Metrik geçmişi büyüklükleri ────────────────────────────────
@@ -245,4 +253,184 @@ class HealthCollector:
                 "timeout_count": self.order_timeout_count,
                 "last_10": last_10_orders,
             },
+            "alarms": {
+                "consecutive_rejects": self._consecutive_rejects,
+                "last_reject_reason": self._last_reject_reason,
+            },
         }
+
+    # ── Alarm state ───────────────────────────────────────────────
+    _consecutive_rejects: int = 0
+    _last_reject_reason: str = ""
+
+    def record_order_reject(self, symbol: str, retcode: int, comment: str) -> None:
+        """Ardışık emir reddi say — 3'te alarm."""
+        with self._lock:
+            self._consecutive_rejects += 1
+            self._last_reject_reason = f"{symbol}: retcode={retcode} {comment}"
+            if self._consecutive_rejects >= 3:
+                _logger.critical(
+                    f"[ALARM] {self._consecutive_rejects} ardışık emir reddedildi! "
+                    f"Son: {self._last_reject_reason}"
+                )
+
+    def clear_reject_streak(self) -> None:
+        """Başarılı emir sonrası sayacı sıfırla."""
+        with self._lock:
+            self._consecutive_rejects = 0
+            self._last_reject_reason = ""
+
+
+# ═════════════════════════════════════════════════════════════════════
+#  STARTUP SMOKE TEST
+# ═════════════════════════════════════════════════════════════════════
+
+@dataclass
+class SmokeTestResult:
+    """Smoke test sonuçları."""
+    passed: bool = True
+    checks: list[dict[str, Any]] = field(default_factory=list)
+
+    def fail(self, name: str, reason: str) -> None:
+        self.passed = False
+        self.checks.append({"name": name, "status": "FAIL", "reason": reason})
+        _logger.error(f"[SMOKE] ✗ {name}: {reason}")
+
+    def ok(self, name: str, detail: str = "") -> None:
+        self.checks.append({"name": name, "status": "OK", "detail": detail})
+        _logger.info(f"[SMOKE] ✓ {name} {detail}")
+
+
+def run_startup_smoke_test(mt5_bridge) -> SmokeTestResult:
+    """Startup smoke test — engine başlamadan önce kritik kontroller.
+
+    Kontroller:
+        1. MT5 bağlantısı aktif mi?
+        2. Sembol bilgisi çekilebiliyor mu?
+        3. Order expiration hesabı geçerli mi?
+        4. Tick verisi alınabiliyor mu?
+        5. Account bilgisi okunabiliyor mu?
+
+    Args:
+        mt5_bridge: MT5Bridge instance (bağlantı kurulmuş olmalı).
+
+    Returns:
+        SmokeTestResult — passed=False ise engine başlamamalı.
+    """
+    result = SmokeTestResult()
+    _logger.info("=" * 50)
+    _logger.info("[SMOKE] Startup Smoke Test başlıyor...")
+    _logger.info("=" * 50)
+
+    try:
+        import MetaTrader5 as mt5
+    except ImportError:
+        result.fail("MT5_IMPORT", "MetaTrader5 paketi yüklenemedi")
+        return result
+
+    # ── 1. MT5 Bağlantı Kontrolü ──────────────────────────────
+    try:
+        terminal_info = mt5.terminal_info()
+        if terminal_info is None:
+            result.fail("MT5_CONNECTION", "terminal_info() None döndü — bağlantı yok")
+        elif not terminal_info.connected:
+            result.fail("MT5_CONNECTION", "Terminal bağlı değil (connected=False)")
+        else:
+            result.ok("MT5_CONNECTION", f"build={terminal_info.build}")
+    except Exception as exc:
+        result.fail("MT5_CONNECTION", str(exc))
+
+    # ── 2. Sembol Bilgisi ─────────────────────────────────────
+    # VİOP'ta baz isimler (F_THYAO) değil, vade ekli isimler (F_THYAO0326)
+    # görünür olur.  Bridge instance varsa eşlenmiş map'i kullan,
+    # yoksa mt5_bridge.WATCHED_SYMBOLS baz isimlerini MT5'te tüm
+    # visible semboller arasında prefix ile ara.
+    test_symbol = None
+    try:
+        # Önce bridge instance'ın eşlediği gerçek sembol isimlerini dene
+        if mt5_bridge and hasattr(mt5_bridge, "_symbol_map") and mt5_bridge._symbol_map:
+            for base, resolved in mt5_bridge._symbol_map.items():
+                info = mt5.symbol_info(resolved)
+                if info is not None and info.visible:
+                    test_symbol = resolved
+                    break
+
+        # Bridge map yoksa fallback: WATCHED_SYMBOLS prefix araması
+        if not test_symbol:
+            from engine.mt5_bridge import WATCHED_SYMBOLS
+            for base in WATCHED_SYMBOLS:
+                # Önce doğrudan dene
+                info = mt5.symbol_info(base)
+                if info is not None and info.visible:
+                    test_symbol = base
+                    break
+                # VİOP vade ekli arama (ör. F_THYAO → F_THYAO0*)
+                symbols = mt5.symbols_get(base + "0*")
+                if symbols:
+                    for s in symbols:
+                        if s.visible:
+                            test_symbol = s.name
+                            break
+                if test_symbol:
+                    break
+
+        if test_symbol:
+            result.ok("SYMBOL_INFO", f"Test sembolü: {test_symbol}")
+        else:
+            result.fail("SYMBOL_INFO", "Hiçbir izlenen sembol erişilebilir değil")
+    except Exception as exc:
+        result.fail("SYMBOL_INFO", str(exc))
+
+    # ── 3. Tick Verisi ─────────────────────────────────────────
+    if test_symbol:
+        try:
+            tick = mt5.symbol_info_tick(test_symbol)
+            if tick is None or tick.bid == 0:
+                result.fail("TICK_DATA", f"{test_symbol}: tick verisi alınamadı")
+            else:
+                result.ok("TICK_DATA", f"{test_symbol}: bid={tick.bid} ask={tick.ask}")
+        except Exception as exc:
+            result.fail("TICK_DATA", str(exc))
+
+    # ── 4. Account Bilgisi ─────────────────────────────────────
+    try:
+        account = mt5.account_info()
+        if account is None:
+            result.fail("ACCOUNT_INFO", "account_info() None döndü")
+        else:
+            result.ok("ACCOUNT_INFO", f"#{account.login} balance={account.balance}")
+    except Exception as exc:
+        result.fail("ACCOUNT_INFO", str(exc))
+
+    # ── 5. Order Expiration Hesabı ─────────────────────────────
+    try:
+        today = _dt.now().date()
+        expiry = _dt.combine(today, _dt.min.time().replace(hour=18, minute=10))
+        now = _dt.now()
+        if expiry <= now:
+            result.fail(
+                "ORDER_EXPIRATION",
+                f"Expiry ({expiry}) geçmişte — seans bitmiş olabilir"
+            )
+        else:
+            diff_min = (expiry - now).total_seconds() / 60
+            result.ok("ORDER_EXPIRATION", f"Seans sonuna {diff_min:.0f} dk kaldı")
+    except Exception as exc:
+        result.fail("ORDER_EXPIRATION", str(exc))
+
+    # ── Sonuç ──────────────────────────────────────────────────
+    passed_count = sum(1 for c in result.checks if c["status"] == "OK")
+    total_count = len(result.checks)
+    _logger.info("=" * 50)
+    if result.passed:
+        _logger.info(
+            f"[SMOKE] ✓ TÜM TESTLER GEÇTİ ({passed_count}/{total_count})"
+        )
+    else:
+        _logger.critical(
+            f"[SMOKE] ✗ SMOKE TEST BAŞARISIZ "
+            f"({passed_count}/{total_count} geçti)"
+        )
+    _logger.info("=" * 50)
+
+    return result
