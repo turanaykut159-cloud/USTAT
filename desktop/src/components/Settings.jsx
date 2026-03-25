@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.7 — Ayarlar ekranı.
+ * ÜSTAT v5.8 — Ayarlar ekranı.
  *
  * Bölümler:
  *   1. MT5 Bağlantı Bilgileri (sunucu, hesap, şifre maskeli)

@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.7 — MT5 Launcher Service (Renderer tarafı).
+ * ÜSTAT v5.8 — MT5 Launcher Service (Renderer tarafı).
  *
  * Electron preload IPC köprüsü üzerinden main process ile iletişim kurar.
  * State machine: IDLE → CHECKING → CREDENTIALS → LAUNCHING → WAITING → CONNECTED
@@ -40,6 +40,30 @@ function getAPI() {
   return null;
 }
 
+/**
+ * Chrome/tarayıcı modu mu?
+ * electronAPI yoksa → tarayıcı modundayız.
+ */
+function isBrowserMode() {
+  return !getAPI();
+}
+
+/**
+ * Tarayıcı modunda FastAPI endpoint'ini doğrudan çağır.
+ * Electron yokken /api/mt5/verify ile MT5 bağlantısını kontrol eder.
+ *
+ * @returns {Promise<{ connected: boolean, account?: object, message: string }>}
+ */
+async function browserVerifyMT5() {
+  try {
+    const resp = await fetch('http://localhost:8000/api/mt5/verify');
+    if (!resp.ok) return { connected: false, message: `API yanıt hatası: ${resp.status}` };
+    return await resp.json();
+  } catch (err) {
+    return { connected: false, message: `API erişim hatası: ${err.message}` };
+  }
+}
+
 // ── Credential İşlemleri ─────────────────────────────────────────
 
 /**
@@ -50,7 +74,21 @@ function getAPI() {
  */
 export async function checkSavedCredentials() {
   const api = getAPI();
-  if (!api) return { hasSaved: false };
+
+  // Chrome/tarayıcı modu: Electron yok, doğrudan API ile MT5 durumunu kontrol et
+  if (!api) {
+    const result = await browserVerifyMT5();
+    if (result.connected && result.account) {
+      return {
+        hasSaved: true,
+        server: result.account.server || '',
+        login: String(result.account.login || ''),
+        passwordMask: '******',
+        _browserMode: true,
+      };
+    }
+    return { hasSaved: false, _browserMode: true };
+  }
 
   try {
     return await api.getSavedCredentials();
@@ -94,8 +132,19 @@ export async function clearSavedCredentials() {
  */
 export async function launchWithCredentials(creds = {}) {
   const api = getAPI();
+
+  // Chrome/tarayıcı modu: MT5 zaten bağlıysa alreadyConnected döndür
   if (!api) {
-    return { success: false, message: 'Electron API bulunamadı.', needsCredentials: false };
+    const result = await browserVerifyMT5();
+    if (result.connected) {
+      return { success: true, alreadyConnected: true, message: 'MT5 zaten bağlı (tarayıcı modu).' };
+    }
+    return {
+      success: false,
+      message: 'MT5 henüz bağlı değil. Önce masaüstü uygulamasından MT5 bağlantısını kurun.',
+      needsCredentials: false,
+      _browserMode: true,
+    };
   }
 
   try {
@@ -113,7 +162,17 @@ export async function launchWithCredentials(creds = {}) {
  */
 export async function getMT5Status() {
   const api = getAPI();
-  if (!api) return { running: false, hasSaved: false };
+
+  // Chrome/tarayıcı modu: API üzerinden durum kontrol
+  if (!api) {
+    const result = await browserVerifyMT5();
+    return {
+      running: result.connected,
+      hasSaved: result.connected,
+      server: result.account?.server,
+      login: result.account?.login ? String(result.account.login) : undefined,
+    };
+  }
 
   try {
     return await api.getMT5Status();
@@ -155,8 +214,10 @@ export async function sendOTP(otpCode) {
  */
 export async function verifyMT5Connection() {
   const api = getAPI();
+
+  // Chrome/tarayıcı modu: doğrudan FastAPI endpoint'i kullan
   if (!api) {
-    return { connected: false, message: 'Electron API bulunamadı.' };
+    return await browserVerifyMT5();
   }
 
   try {

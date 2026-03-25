@@ -1,4 +1,101 @@
-# ÜSTAT v5.7 — Gelişim Tarihçesi
+# ÜSTAT v5.8 — Gelişim Tarihçesi
+
+---
+
+## #71 — Güvenli Çıkış & Watchdog Singleton Düzeltmesi (2026-03-26)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-26 |
+| **Sınıf** | C3 — Kritik altyapı düzeltmesi (startup/shutdown güvenilirliği) |
+| **Neden** | Kullanıcı "Güvenli Çıkış" yaptığında uygulama otomatik olarak yeniden başlıyordu. Üç farklı watchdog katmanı (start_ustat.py, ustat_agent.py, desktop/main.js) shutdown.signal dosyasını tutarsız işliyordu. |
+| **Tetikleyen** | CEO: "Güvenli çıkış yaptığımda hiçbir katman uygulamayı ve MT5'i açmak için istek göndermesin." |
+| **Kapsam** | start_ustat.py, ustat_agent.py |
+
+### Sorun Analizi — 3 Kök Neden
+
+**Kök Neden 1: Signal dosyası silme yarışı**
+`check_shutdown_signal()` (start_ustat.py satır 333-334) signal dosyasını okuduktan sonra `os.remove()` ile siliyordu. Birden fazla watchdog çalıştığında ilk watchdog signal'i sildi → ikinci watchdog göremedi → restart tetikledi.
+
+**Kök Neden 2: Singleton PID kilidi regresyonu**
+İlk düzeltmede `ctypes.windll.kernel32.OpenProcess()` ile PID kontrolü yapıldı. Ancak eski `start_ustat.py` process'i child process'ler (API, Vite, Electron) bitene kadar hayatta kaldı → yeni watchdog başlayamadı → crash recovery bozuldu.
+
+**Kök Neden 3: Ajan monitörü bağımsız çalışıyordu**
+`ustat_agent.py`'nin `_check_and_heal()` ve `_try_restart_ustat()` metotları shutdown.signal kontrolü yapmıyordu → ajan bağımsız olarak restart tetikleyebiliyordu.
+
+### Çözüm — 6 Değişiklik
+
+| # | Dosya | Değişiklik | Etkilenen Fonksiyonlar |
+|---|-------|-----------|----------------------|
+| 1 | `start_ustat.py` | Signal dosyası artık `check_shutdown_signal()` içinde SİLİNMEZ — tüm watchdog'lar görebilir | `check_shutdown_signal()` |
+| 2 | `start_ustat.py` | Timestamp-based singleton: watchdog.pid her 15sn güncellenir, >60sn eskiyse stale kabul | `watchdog_loop()` |
+| 3 | `start_ustat.py` | Watchdog heartbeat: her döngüde PID dosyası güncellenir (singleton kanıtı) | `watchdog_loop()` while bloğu |
+| 4 | `start_ustat.py` | `main()` koşullu signal temizlik: <120sn taze signal → başlatma iptal, >=120sn eski → temizle devam et | `main()` |
+| 5 | `start_ustat.py` | Restart öncesi SON signal kontrolü (yarış durumu önlemi) + finally'de PID dosyası temizliği | `watchdog_loop()`, `main()` finally |
+| 6 | `ustat_agent.py` | `_check_and_heal()` ve `_try_restart_ustat()` başında shutdown.signal kontrolü eklendi | `_check_and_heal()`, `_try_restart_ustat()` |
+
+### Yeni Sabit
+- `WATCHDOG_PID_FILE = os.path.join(USTAT_DIR, "watchdog.pid")` — singleton watchdog kilidi
+
+### Test Sonuçları — 4/4 GEÇER
+
+| Test | Senaryo | Sonuç |
+|------|---------|-------|
+| 1 - Crash Recovery | API force-kill → watchdog 15sn'de tespit → restart #1 | ✅ Uygulama yeniden başladı |
+| 2 - Güvenli Çıkış | shutdown.signal + stop_app → watchdog durdu, ajan "restart atlanıyor" | ✅ Restart olmadı |
+| 3 - Taze Signal Engeli | Signal 87sn yaşında → main() "baslatma iptal" | ✅ Uygulama açılmadı |
+| 4 - Ertesi Gün Başlatma | Signal 305sn yaşında → "Eski signal temizlendi" → normal başlatma | ✅ Uygulama açıldı |
+
+### Eklenen
+- `WATCHDOG_PID_FILE` sabiti (start_ustat.py)
+- Singleton heartbeat mekanizması (start_ustat.py watchdog_loop)
+- `main()` koşullu signal temizlik mantığı (start_ustat.py)
+- shutdown.signal kontrolü (ustat_agent.py _check_and_heal, _try_restart_ustat)
+
+### Kaldırılan / Değiştirilen Davranışlar
+- `check_shutdown_signal()` artık signal dosyasını silmiyor (eski: os.remove)
+- `main()` artık signal'i koşulsuz silmiyor (eski: her başlatmada sil)
+- `ctypes.windll.kernel32.OpenProcess()` singleton kontrolü kaldırıldı → timestamp-based kontrole geçildi
+
+---
+
+## #70 — OĞUL Manuel Pozisyon Koruma Kalkanı (2026-03-25)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-25 |
+| **Sınıf** | C1 — Kritik hata düzeltme |
+| **Neden** | OĞUL, ManuelMotor üzerinden açılan F_HALKB SELL 3.0 lot pozisyonu signal_loss nedeniyle kapattı. Manuel pozisyonlar yalnızca BABA korumasında olmalı, OĞUL müdahale etmemeli. |
+| **Tetikleyen** | CEO: "HALKBANK İÇİN MANUEL İŞLEM AÇMIŞTIM. KAPANDI. KİM KAPATTI?" |
+| **Kapsam** | engine/ogul.py |
+
+### Sorun Analizi
+
+F_HALKB SELL 3.0 lot @ 38.78 (ticket 8050355559):
+- 14:07:04 — ÜSTAT ManuelMotor üzerinden açıldı, DB'de strategy='manual' kaydı mevcut
+- 14:21:18 — OĞUL oylama sistemi signal_loss tespit etti ve kapattı (K/Z: -45 TRY)
+- BABA pozisyonu doğru şekilde "manuel" olarak tanıyordu ve atladı
+- Ama OĞUL'un `_manage_position` içindeki manuel kontrol yetersiz kaldı
+
+### Çözüm — 5 Katmanlı Koruma Sistemi
+
+**Katman 1: `_manage_active_trades` ön-filtre (YENİ)**
+Manuel sembolleri OĞUL active_trades'ten cycle başında temizle
+
+**Katman 2: `_manage_position` ManuelMotor active_trades kontrolü (MEVCUT)**
+Ticket bazlı kontrol — ManuelMotor'da eşleşme varsa atla
+
+**Katman 3: `_manage_position` ManuelMotor sembol kontrolü (YENİ)**
+Aynı sembol ManuelMotor'da varsa → active_trades'den kaldır
+
+**Katman 4: `_manage_position` DB bazlı kontrol (YENİ)**
+DB'de strategy='manual' + exit_time=None + ticket eşleşmesi → active_trades'den kaldır
+
+**Katman 5: `restore_active_trades` post-restore doğrulama (YENİ)**
+Restore sonrası tüm active_trades'i DB ile çapraz kontrol et, manuel olanları temizle
+
+**Ek: ManuelMotor boş uyarısı (YENİ)**
+Restore sırasında ManuelMotor boşsa ama DB'de aktif manuel pozisyon varsa WARNING log yaz ve DB'den koruma listesini doldur
 
 ---
 

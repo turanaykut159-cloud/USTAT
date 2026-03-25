@@ -1,5 +1,5 @@
 """
-USTAT v5.7 - Baslatici
+USTAT v5.8 - Baslatici
 
 API + Vite + Electron baslatir.
 Her adimi PORT KONTROLU ile dogrulayarak ilerler.
@@ -315,6 +315,7 @@ SHUTDOWN_SIGNAL_FILE = os.path.join(USTAT_DIR, "shutdown.signal")  # v5.5: Elect
 WATCHDOG_STALE_SECS = 45       # v5.4.1: heartbeat bu kadar saniye eskiyse engine ölmüş kabul et
 WATCHDOG_CHECK_INTERVAL = 15   # v5.4.1: kontrol aralığı (saniye)
 MAX_AUTO_RESTARTS = 5          # v5.4.1: maksimum ardışık otomatik yeniden başlatma
+WATCHDOG_PID_FILE = os.path.join(USTAT_DIR, "watchdog.pid")  # v5.7.2: singleton watchdog kilidi
 
 
 def check_shutdown_signal():
@@ -329,11 +330,8 @@ def check_shutdown_signal():
     try:
         if os.path.exists(SHUTDOWN_SIGNAL_FILE):
             log(f"[WATCHDOG] shutdown.signal bulundu — kullanici kasitli kapatti")
-            # Signal dosyasını temizle
-            try:
-                os.remove(SHUTDOWN_SIGNAL_FILE)
-            except Exception:
-                pass
+            # v5.7.2: Signal dosyasını SİLME — birden fazla watchdog olabilir, hepsi görmeli
+            # Signal sadece main() başlangıcında temizlenir (yeni başlatma = temiz sayfa)
             return True
     except Exception:
         pass
@@ -367,6 +365,30 @@ def watchdog_loop():
       3. Electron'u yeniden başlat
     """
     restart_count = 0
+
+    # v5.7.2: Singleton watchdog — başka AKTİF bir watchdog çalışıyorsa başlatma
+    # Kontrol: watchdog.pid dosyasının son güncelleme zamanı < 60sn ise aktif demek
+    # Watchdog her döngüde (15sn) PID dosyasını günceller, 60sn eskiyse ölmüş/durmuş
+    try:
+        if os.path.exists(WATCHDOG_PID_FILE):
+            pid_age = time.time() - os.path.getmtime(WATCHDOG_PID_FILE)
+            if pid_age < 60:
+                with open(WATCHDOG_PID_FILE, "r") as f:
+                    old_pid = f.read().strip()
+                log(f"[WATCHDOG] Aktif watchdog mevcut (PID {old_pid}, {pid_age:.0f}sn once guncellendi) — bu watchdog baslatilmayacak")
+                return
+            else:
+                log(f"[WATCHDOG] Eski watchdog.pid bulundu ({pid_age:.0f}sn) — stale, devam ediliyor")
+    except (ValueError, FileNotFoundError, OSError):
+        pass
+
+    # Kendi PID'imizi yaz (timestamp olarak dosya zamanı kullanılır)
+    try:
+        with open(WATCHDOG_PID_FILE, "w") as f:
+            f.write(str(os.getpid()))
+    except Exception:
+        pass
+
     log("[WATCHDOG] Engine watchdog baslatildi")
     log(f"  Stale esigi: {WATCHDOG_STALE_SECS}sn, kontrol araligi: {WATCHDOG_CHECK_INTERVAL}sn")
 
@@ -378,6 +400,13 @@ def watchdog_loop():
 
     while True:
         time.sleep(WATCHDOG_CHECK_INTERVAL)
+
+        # v5.7.2: PID dosyasını güncelle (singleton heartbeat — her 15sn)
+        try:
+            with open(WATCHDOG_PID_FILE, "w") as f:
+                f.write(str(os.getpid()))
+        except Exception:
+            pass
 
         # v5.5: Önce kasıtlı kapanış sinyali kontrol et
         if check_shutdown_signal():
@@ -411,6 +440,11 @@ def watchdog_loop():
             break
 
         log(f"[WATCHDOG] Otomatik yeniden baslatma #{restart_count}/{MAX_AUTO_RESTARTS}")
+
+        # v5.7.1: Restart öncesi SON shutdown.signal kontrolü (yarış durumu önlemi)
+        if check_shutdown_signal():
+            log("[WATCHDOG] Restart oncesi shutdown.signal tespit edildi — watchdog durduruluyor")
+            break
 
         # Eski process'leri temizle
         try:
@@ -453,11 +487,18 @@ def main():
     log(f"Python: {sys.executable}")
     log(f"Watchdog: {'AKTIF' if is_watchdog else 'DEVRE DISI'}")
 
-    # v5.5: Eski shutdown sinyalini temizle (yeni başlatma)
+    # v5.7.2: shutdown.signal koşullu temizlik
+    # Taze signal (< 120sn) = kullanıcı az önce güvenli çıkış yaptı → başlatma
+    # Eski signal (>= 120sn) = ertesi gün başlatma → temizle, devam et
     try:
         if os.path.exists(SHUTDOWN_SIGNAL_FILE):
-            os.remove(SHUTDOWN_SIGNAL_FILE)
-            log("Eski shutdown.signal temizlendi")
+            signal_age = time.time() - os.path.getmtime(SHUTDOWN_SIGNAL_FILE)
+            if signal_age < 120:
+                log(f"shutdown.signal taze ({signal_age:.0f}sn) — kullanici kasitli kapatti, baslatma iptal")
+                return
+            else:
+                os.remove(SHUTDOWN_SIGNAL_FILE)
+                log(f"Eski shutdown.signal temizlendi ({signal_age:.0f}sn)")
     except Exception:
         pass
 
@@ -489,6 +530,13 @@ def main():
             log("[WATCHDOG] Ctrl+C — watchdog durduruluyor")
         except Exception as exc:
             log(f"[WATCHDOG] Beklenmeyen hata: {exc}")
+        finally:
+            # v5.7.2: Watchdog PID dosyasını temizle
+            try:
+                if os.path.exists(WATCHDOG_PID_FILE):
+                    os.remove(WATCHDOG_PID_FILE)
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 /**
- * ÜSTAT v5.7 — Üst bilgi çubuğu.
+ * ÜSTAT v5.8 — Üst bilgi çubuğu.
  *
- * Sol:  ÜSTAT v5.7 logosu | Kill-switch (L1/L2/L3) | Bağlantı durumu (yeşil/kırmızı nokta)
+ * Sol:  ÜSTAT v5.8 logosu | Kill-switch (L1/L2/L3) | Bağlantı durumu (yeşil/kırmızı nokta)
  * Sağ:  Bakiye | Equity | Floating | Günlük K/Z (MT5, 2sn) | Pin | Saat
  */
 
@@ -107,7 +107,7 @@ export default function TopBar() {
 
       {/* ── SOL: Logo + Faz + Bağlantı ─────────────────────────── */}
       <div className="top-bar-left">
-        <h1>ÜSTAT <span className="version">v5.7</span></h1>
+        <h1>ÜSTAT <span className="version">v5.8</span></h1>
         {initialLoading && <span className="tb-loading">Yükleniyor...</span>}
 
         <span
