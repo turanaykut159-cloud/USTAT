@@ -33,6 +33,8 @@ export default function ManualTrade() {
   const [symbol, setSymbol] = useState('F_THYAO');
   const [direction, setDirection] = useState('');  // '' | 'BUY' | 'SELL'
   const [lot, setLot] = useState(1.0);
+  const [sl, setSl] = useState(0);
+  const [tp, setTp] = useState(0);
 
   // ── API state ────────────────────────────────────────────────
   const [checking, setChecking] = useState(false);
@@ -102,6 +104,19 @@ export default function ManualTrade() {
 
     if (result.can_trade) {
       setLot(result.suggested_lot || 1.0);
+      // SL/TP otomatik hesapla: backend suggested veya ATR bazlı
+      const price = result.current_price || 0;
+      const atr = result.atr_value || 0;
+      if (result.suggested_sl > 0) {
+        setSl(result.suggested_sl);
+      } else if (price > 0 && atr > 0) {
+        setSl(direction === 'BUY' ? price - atr * 2 : price + atr * 2);
+      }
+      if (result.suggested_tp > 0) {
+        setTp(result.suggested_tp);
+      } else if (price > 0 && atr > 0) {
+        setTp(direction === 'BUY' ? price + atr * 3 : price - atr * 3);
+      }
       setPhase('checked');
     }
   }, [symbol, direction]);
@@ -110,7 +125,7 @@ export default function ManualTrade() {
   const handleExecute = useCallback(async () => {
     setExecuting(true);
 
-    const result = await executeManualTrade(symbol, direction, lot);
+    const result = await executeManualTrade(symbol, direction, lot, sl, tp);
     setExecResult(result);
     setExecuting(false);
     setPhase('done');
@@ -129,6 +144,8 @@ export default function ManualTrade() {
     setExecResult(null);
     setPhase('select');
     setLot(1.0);
+    setSl(0);
+    setTp(0);
   }, []);
 
   // Sembol değişince sıfırla
@@ -211,30 +228,41 @@ export default function ManualTrade() {
               <label>Fiyat Bilgisi</label>
               <div className="mt-price-info">
                 {direction === 'BUY' ? 'Ask' : 'Bid'}: {formatPrice(checkResult.current_price, 4, 4)}
+                {' | '}ATR(14): {formatPrice(checkResult.atr_value, 4, 4)}
               </div>
-              <div className="mt-price-info">
-                ATR(14): {formatPrice(checkResult.atr_value, 4, 4)}
+            </div>
+          )}
+
+          {/* SL/TP Ayarları — kontrol sonrası, düzenlenebilir */}
+          {phase === 'checked' && checkResult?.can_trade && (
+            <div className="mt-form-group">
+              <label>Stop Loss (SL)</label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <input
+                  type="number"
+                  className="mt-lot-input"
+                  value={sl}
+                  onChange={(e) => setSl(parseFloat(e.target.value) || 0)}
+                  step={0.01}
+                />
+                <span className="mt-price-info">Önerilen: 2×ATR</span>
               </div>
-              {checkResult.atr_value > 0 && checkResult.current_price > 0 && (
-                <>
-                  <div className="mt-price-info">
-                    SL: {formatPrice(
-                      direction === 'BUY'
-                        ? checkResult.current_price - checkResult.atr_value * 2
-                        : checkResult.current_price + checkResult.atr_value * 2,
-                      4, 4
-                    )} (2xATR)
-                  </div>
-                  <div className="mt-price-info">
-                    TP: {formatPrice(
-                      direction === 'BUY'
-                        ? checkResult.current_price + checkResult.atr_value * 3
-                        : checkResult.current_price - checkResult.atr_value * 3,
-                      4, 4
-                    )} (3xATR)
-                  </div>
-                </>
-              )}
+            </div>
+          )}
+
+          {phase === 'checked' && checkResult?.can_trade && (
+            <div className="mt-form-group">
+              <label>Take Profit (TP)</label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <input
+                  type="number"
+                  className="mt-lot-input"
+                  value={tp}
+                  onChange={(e) => setTp(parseFloat(e.target.value) || 0)}
+                  step={0.01}
+                />
+                <span className="mt-price-info">Önerilen: 3×ATR</span>
+              </div>
             </div>
           )}
 

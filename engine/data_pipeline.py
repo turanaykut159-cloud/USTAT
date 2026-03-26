@@ -190,6 +190,26 @@ class DataPipeline:
         # Risk snapshot her zaman güncellenir (BABA stale cache'den korunur)
         self.update_risk_snapshot()
 
+        # Deaktive sembol otomatik recovery: MT5'ten tick alınabiliyorsa geri aktif et
+        if self._deactivated:
+            for sym in list(self._deactivated):
+                try:
+                    tick = self._mt5.get_tick(sym)
+                    if tick is not None and tick.bid > 0:
+                        self._deactivated.discard(sym)
+                        logger.warning(
+                            f"Sembol otomatik geri aktif: {sym} "
+                            f"(MT5 tick alındı: bid={tick.bid})"
+                        )
+                        self._db.insert_event(
+                            event_type="SYMBOL_REACTIVATED",
+                            message=f"{sym} otomatik geri aktif edildi (tick OK)",
+                            severity="INFO",
+                            action="auto_reactivate",
+                        )
+                except Exception:
+                    pass  # Hâlâ erişilemiyor, sonraki cycle'da dene
+
         total = (datetime.now() - t_start).total_seconds()
         if total > 3.0:
             logger.info(f"run_cycle yavaş: {total:.1f}s")

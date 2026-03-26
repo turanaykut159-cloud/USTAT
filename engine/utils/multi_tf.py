@@ -265,9 +265,10 @@ def analyze_multi_tf(
         details["m5_rsi"] = result.m5.rsi
 
     # ── Toplam Skor ────────────────────────────────────────────
-    h1_score = result.h1.score if result.h1 else 50.0  # Veri yoksa nötr
-    m15_score = result.m15.score if result.m15 else 50.0
-    m5_score = result.m5.score if result.m5 else 50.0
+    # Veri eksik → nötr (50) yerine penaltı (25) uygula — güvenlik katmanı
+    h1_score = result.h1.score if result.h1 else 25.0
+    m15_score = result.m15.score if result.m15 else 25.0
+    m5_score = result.m5.score if result.m5 else 25.0
 
     result.total_score = (
         h1_score * W_H1 / 100.0 +

@@ -5,6 +5,7 @@ JSON dosyasından ve ortam değişkenlerinden konfigürasyon okur.
 
 import json
 import os
+import threading
 from pathlib import Path
 
 from engine.logger import get_logger
@@ -26,6 +27,7 @@ class Config:
         self._path = Path(config_path) if config_path else CONFIG_PATH
         self._data: dict = {}
         self._is_loaded: bool = False
+        self._rw_lock = threading.Lock()  # Thread safety: set/save/get koruması
         self._load()
 
     def _load(self) -> None:
@@ -89,28 +91,30 @@ class Config:
         return value if value is not None else default
 
     def set(self, key: str, value) -> None:
-        """Konfigürasyon değeri güncelle (bellekte).
+        """Konfigürasyon değeri güncelle (bellekte, thread-safe).
 
         Args:
             key: Konfigürasyon anahtarı (nokta ile ayrılmış).
             value: Yeni değer.
         """
-        keys = key.split(".")
-        target = self._data
-        for k in keys[:-1]:
-            if k not in target or not isinstance(target[k], dict):
-                target[k] = {}
-            target = target[k]
-        target[keys[-1]] = value
+        with self._rw_lock:
+            keys = key.split(".")
+            target = self._data
+            for k in keys[:-1]:
+                if k not in target or not isinstance(target[k], dict):
+                    target[k] = {}
+                target = target[k]
+            target[keys[-1]] = value
         logger.info(f"Config güncellendi: {key} = {value}")
 
     def save(self) -> None:
-        """Bellekteki konfigürasyonu JSON dosyasına kaydet."""
-        try:
-            with open(self._path, "w", encoding="utf-8") as f:
-                json.dump(self._data, f, indent=2, ensure_ascii=False)
-                f.write("\n")
-            logger.info(f"Config dosyaya kaydedildi: {self._path}")
-        except OSError as exc:
-            logger.error(f"Config kayıt hatası: {self._path} — {exc}")
-            raise
+        """Bellekteki konfigürasyonu JSON dosyasına kaydet (thread-safe)."""
+        with self._rw_lock:
+            try:
+                with open(self._path, "w", encoding="utf-8") as f:
+                    json.dump(self._data, f, indent=2, ensure_ascii=False)
+                    f.write("\n")
+                logger.info(f"Config dosyaya kaydedildi: {self._path}")
+            except OSError as exc:
+                logger.error(f"Config kayıt hatası: {self._path} — {exc}")
+                raise

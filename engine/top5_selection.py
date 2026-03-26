@@ -253,6 +253,9 @@ class Top5Selector:
         # 2. Normalize
         final_scores = self._normalize_and_weight(raw_scores)
 
+        # 2.5 ÜSTAT kontrat profili bonusu
+        final_scores = self._apply_ustat_bonus(final_scores)
+
         # 3. Sırala
         ranked = sorted(
             final_scores.items(), key=lambda x: x[1], reverse=True,
@@ -516,6 +519,70 @@ class Top5Selector:
         diff = abs(atr_ratio - ideal)
         score = 100.0 * float(np.exp(-(diff / VOLFIT_TOLERANCE) ** 2))
         return max(0.0, min(100.0, score))
+
+    # ── ÜSTAT Kontrat Profili Bonusu ──────────────────────────────────
+
+    def _apply_ustat_bonus(self, final_scores: dict[str, float]) -> dict[str, float]:
+        """ÜSTAT kontrat profillerinden bonus/ceza uygula.
+
+        Win-rate ve ortalama PnL bazında skor ayarlaması:
+          - win_rate > %65 ve trade_count >= 10 → +15 puan
+          - win_rate > %55 ve trade_count >= 10 → +8 puan
+          - win_rate < %35 ve trade_count >= 10 → -12 puan
+          - avg_pnl > 0 ve trade_count >= 10 → +5 puan
+          - avg_pnl < -50 ve trade_count >= 10 → -8 puan
+          - trade_count < 10 → bonus yok (yetersiz veri)
+
+        Returns:
+            Güncellenmiş final_scores.
+        """
+        if self._ustat is None:
+            return final_scores
+
+        try:
+            profiles = self._ustat.get_contract_profiles()
+        except Exception:
+            return final_scores
+
+        if not profiles:
+            return final_scores
+
+        adjusted = dict(final_scores)
+        for symbol, score in final_scores.items():
+            profile = profiles.get(symbol)
+            if profile is None:
+                continue
+
+            trade_count = profile.get("trade_count", 0)
+            if trade_count < 10:
+                continue  # Yetersiz veri — bonus/ceza yok
+
+            bonus = 0.0
+            win_rate = profile.get("win_rate", 50.0)
+            avg_pnl = profile.get("avg_pnl", 0.0)
+
+            # Win-rate bonusu/cezası
+            if win_rate > 65.0:
+                bonus += 15.0
+            elif win_rate > 55.0:
+                bonus += 8.0
+            elif win_rate < 35.0:
+                bonus -= 12.0
+
+            # PnL bonusu/cezası
+            if avg_pnl > 0:
+                bonus += 5.0
+            elif avg_pnl < -50.0:
+                bonus -= 8.0
+
+            if bonus != 0.0:
+                adjusted[symbol] = score + bonus
+                logger.debug(
+                    f"ÜSTAT bonus [{symbol}]: {bonus:+.1f} "
+                    f"(wr={win_rate:.1f}%, pnl={avg_pnl:.1f}, n={trade_count})"
+                )
+
+        return adjusted
 
     # ── Normalizasyon ─────────────────────────────────────────────────
 

@@ -6,6 +6,7 @@
     "trading_open": "09:45",
     "trading_close": "17:45",
     "max_concurrent": 5,
+    "max_total_positions": 8,
     "max_lot_per_contract": 1.0,
     "margin_reserve_pct": 0.2,
     "paper_mode": false
@@ -25,6 +26,7 @@
     "cooldown_hours": 4,
     "fake_signal_threshold": 5,
     "baseline_date": "2026-03-19 00:00",
+    "master_floating_loss_pct": 0.05,
     "sltp_max_retries": 3,
     "close_max_retries": 3
   },
@@ -140,6 +142,7 @@
     "negative_threshold": -0.3,
     "critical_threshold": -0.85,
     "olay_trigger_sentiment": -0.7,
+    "olay_confidence_min": 0.6,
     "max_age_seconds": 3600,
     "cooldown_seconds": 60,
     "alpha_decay_rate": 0.023,
@@ -147,7 +150,7 @@
   },
   "hybrid": {
     "enabled": true,
-    "native_sltp": false,
+    "native_sltp": true,
     "max_concurrent": 3,
     "daily_loss_limit": 500.0,
     "sl_atr_mult": 2.0,

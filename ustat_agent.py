@@ -517,13 +517,16 @@ class Monitor:
             log("shutdown.signal mevcut — kullanıcı kasıtlı kapattı, restart atlanıyor", "MONITOR")
             return
 
-        # 1. API düştüyse ve engine hâlâ çalışıyorsa → alarm
-        if not state.api_alive and state.engine_running:
-            if self._can_heal("api_restart", 600):
-                log("API düşmüş ama engine çalışıyor — ÜSTAT restart denenecek", "HEAL")
+        # 1. API düştüyse → restart dene (engine durumu fark etmez)
+        if not state.api_alive:
+            if self._can_heal("api_restart", 300):
+                reason = "API düşmüş"
+                if not state.engine_running:
+                    reason = "API ve Engine ikisi de düşmüş"
+                log(f"{reason} — ÜSTAT restart denenecek", "HEAL")
                 self.alerts.fire(
                     Severity.CRITICAL, SystemComponent.API,
-                    "API yanıt vermiyor. Otomatik restart deneniyor.",
+                    f"{reason}. Otomatik restart deneniyor.",
                     action_taken="restart_attempted",
                 )
                 self._try_restart_ustat()

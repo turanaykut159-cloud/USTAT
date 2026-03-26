@@ -986,7 +986,8 @@ class NewsBridge:
         if worst is None:
             return None
 
-        if worst.sentiment_score <= self._olay_trigger and worst.confidence >= 0.6:
+        _olay_confidence = self._cfg("news.olay_confidence_min", 0.6)
+        if worst.sentiment_score <= self._olay_trigger and worst.confidence >= _olay_confidence:
             return {
                 "reason": f"Olumsuz haber: {worst.headline[:60]}",
                 "trigger": "news",

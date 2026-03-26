@@ -3,6 +3,8 @@
 Cross-motor netting race condition'ı önlemek için paylaşılan kilit mekanizması.
 OĞUL sinyal üretimi ve H-Engine transfer işlemi aynı kilidi paylaşır.
 
+v5.8.1: Timeout mekanizması eklendi — crash durumunda kilitler otomatik temizlenir.
+
 Kullanım:
     from engine.netting_lock import acquire_symbol, release_symbol, is_symbol_locked
 
@@ -14,17 +16,38 @@ Kullanım:
             release_symbol("F_THYAO", owner="ogul")
 """
 
+import time as _time
 import threading
 from engine.logger import get_logger
 
 logger = get_logger(__name__)
 
 _lock = threading.Lock()
-_locked_symbols: dict[str, str] = {}  # symbol → owner
+_locked_symbols: dict[str, dict] = {}  # symbol → {"owner": str, "acquired_at": float}
+
+# Kilit timeout: 120 saniye (2 dakika) — bu süre içinde release edilmezse stale kabul edilir
+LOCK_TIMEOUT_SEC: float = 120.0
+
+
+def _cleanup_stale() -> None:
+    """Süresi dolmuş kilitleri temizle (her acquire/is_locked çağrısında çalışır)."""
+    now = _time.monotonic()
+    stale = [
+        sym for sym, info in _locked_symbols.items()
+        if now - info["acquired_at"] > LOCK_TIMEOUT_SEC
+    ]
+    for sym in stale:
+        owner = _locked_symbols[sym]["owner"]
+        age = now - _locked_symbols[sym]["acquired_at"]
+        del _locked_symbols[sym]
+        logger.warning(
+            f"Netting kilit STALE TEMİZLİK: {sym} ← {owner} "
+            f"({age:.0f}sn > {LOCK_TIMEOUT_SEC:.0f}sn timeout)"
+        )
 
 
 def acquire_symbol(symbol: str, owner: str) -> bool:
-    """Sembol kilidini al (atomik).
+    """Sembol kilidini al (atomik + timeout korumalı).
 
     Args:
         symbol: Kilitlenecek sembol (örn. "F_THYAO").
@@ -34,17 +57,24 @@ def acquire_symbol(symbol: str, owner: str) -> bool:
         True ise kilit alındı, False ise sembol başka motor tarafından kilitli.
     """
     with _lock:
+        _cleanup_stale()
+
         if symbol in _locked_symbols:
-            current_owner = _locked_symbols[symbol]
+            current_owner = _locked_symbols[symbol]["owner"]
             if current_owner != owner:
                 logger.debug(
                     f"Netting kilit RED: {symbol} zaten {current_owner} tarafından kilitli "
                     f"(talep eden: {owner})"
                 )
                 return False
-            # Aynı owner tekrar kilitliyorsa izin ver (reentrant)
+            # Aynı owner tekrar kilitliyorsa timestamp güncelle (reentrant)
+            _locked_symbols[symbol]["acquired_at"] = _time.monotonic()
             return True
-        _locked_symbols[symbol] = owner
+
+        _locked_symbols[symbol] = {
+            "owner": owner,
+            "acquired_at": _time.monotonic(),
+        }
         logger.debug(f"Netting kilit AL: {symbol} → {owner}")
         return True
 
@@ -57,7 +87,7 @@ def release_symbol(symbol: str, owner: str) -> None:
         owner: Kilidi bırakan motor (sadece kendi kilidi varsa serbest bırakır).
     """
     with _lock:
-        if symbol in _locked_symbols and _locked_symbols[symbol] == owner:
+        if symbol in _locked_symbols and _locked_symbols[symbol]["owner"] == owner:
             del _locked_symbols[symbol]
             logger.debug(f"Netting kilit SERBEST: {symbol} ← {owner}")
 
@@ -73,9 +103,11 @@ def is_symbol_locked(symbol: str, exclude_owner: str | None = None) -> bool:
         True ise sembol kilitli (başka biri tarafından).
     """
     with _lock:
+        _cleanup_stale()
+
         if symbol not in _locked_symbols:
             return False
-        if exclude_owner and _locked_symbols[symbol] == exclude_owner:
+        if exclude_owner and _locked_symbols[symbol]["owner"] == exclude_owner:
             return False
         return True
 
@@ -87,4 +119,5 @@ def get_locked_symbols() -> dict[str, str]:
         {symbol: owner} sözlüğünün kopyası.
     """
     with _lock:
-        return dict(_locked_symbols)
+        _cleanup_stale()
+        return {sym: info["owner"] for sym, info in _locked_symbols.items()}

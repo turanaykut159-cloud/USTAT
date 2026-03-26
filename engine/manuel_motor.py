@@ -28,8 +28,10 @@ ManuelMotor kapanmayı ``sync_positions()`` ile tespit eder.
 
 from __future__ import annotations
 
+import json
 import time as _time
 from datetime import datetime, time
+from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 import numpy as np
@@ -99,6 +101,11 @@ class ManuelMotor:
 
         # Kendi aktif işlem sözlüğü (OĞUL'dan AYRI)
         self.active_trades: dict[str, Trade] = {}
+
+        # v5.8.1: DB-bağımsız dosya marker (WAL kaybına karşı koruma)
+        self._marker_path = Path(config.get(
+            "engine.db_path", "database/trades.db"
+        )).parent / "manual_positions.json"
 
         # v5.8/CEO-FAZ2: margin_reserve_pct config'den okunuyor
         self._margin_reserve_pct: float = float(
@@ -405,10 +412,8 @@ class ManuelMotor:
         )
 
         # 5. MARKET emir gönder
-        # SL/TP: MT5'e gönderilMEZ (GCM VİOP TRADE_ACTION_SLTP desteklemiyor,
-        # 3 başarısız denemeden sonra send_order pozisyonu force-close eder).
-        # ManuelMotor tasarımı: kullanıcı açar, kullanıcı kapatır.
-        # SL/TP değerleri sadece risk göstergesi olarak bellekte tutulur.
+        # v5.8: Manuel emirlerde SL/TP, emir sonrası modify_position ile MT5'e yazılır.
+        # OĞUL ile aynı 2-aşamalı yaklaşım: önce emir, sonra SL/TP ekle.
         order_result = self.mt5.send_order(
             symbol=symbol,
             direction=direction,
@@ -452,9 +457,40 @@ class ManuelMotor:
             result["message"] = "Emir gönderildi ama SL/TP hatası nedeniyle kapatıldı"
             return result
 
+        # 6b. SL/TP MT5'e yaz (modify_position — OĞUL ile aynı 2-aşamalı yaklaşım)
+        position_ticket = order_result.get("order", 0)
+        sl_tp_applied = False
+        if position_ticket and sl > 0 and tp > 0:
+            for attempt in range(3):
+                try:
+                    mod_result = self.mt5.modify_position(
+                        ticket=position_ticket, sl=sl, tp=tp,
+                    )
+                    if mod_result is not None:
+                        sl_tp_applied = True
+                        logger.info(
+                            f"Manuel SL/TP MT5'e yazıldı [{symbol}]: "
+                            f"ticket={position_ticket} SL={sl:.4f} TP={tp:.4f}"
+                        )
+                        break
+                    else:
+                        logger.warning(
+                            f"Manuel SL/TP yazma denemesi {attempt+1}/3 başarısız [{symbol}]"
+                        )
+                except Exception as exc:
+                    logger.error(f"Manuel SL/TP modify hatası [{symbol}]: {exc}")
+
+            if not sl_tp_applied:
+                logger.warning(
+                    f"Manuel SL/TP MT5'e yazılamadı [{symbol}] — "
+                    f"pozisyon açık ama yazılım SL/TP ile korunuyor"
+                )
+                # SL/TP yazılamasa bile pozisyonu KAPATMA — kullanıcı bilinçli açtı
+                # Risk göstergesi olarak bellekte tutulmaya devam eder
+
         # 7. Başarılı → state güncelle
         trade.state = TradeState.SENT
-        trade.order_ticket = order_result.get("order", 0)
+        trade.order_ticket = position_ticket
         trade.sent_at = now
 
         # 7. DB kayıt
@@ -471,6 +507,9 @@ class ManuelMotor:
 
         # 8. ManuelMotor active_trades'e ekle (OĞUL'a GİRMİYOR)
         self.active_trades[symbol] = trade
+
+        # 8.1. Dosya marker güncelle (v5.8.1: DB-bağımsız koruma)
+        self._save_marker()
 
         # 9. BABA sayaç güncelle
         if self.baba:
@@ -678,6 +717,9 @@ class ManuelMotor:
         # Aktif işlemlerden sil
         self.active_trades.pop(symbol, None)
 
+        # Dosya marker güncelle (v5.8.1)
+        self._save_marker()
+
     # ─────────────────────────────────────────────────────────────────
     #  RİSK GÖSTERGESİ (READ-ONLY)
     # ─────────────────────────────────────────────────────────────────
@@ -809,7 +851,13 @@ class ManuelMotor:
     # ─────────────────────────────────────────────────────────────────
 
     def restore_active_trades(self) -> None:
-        """Engine restart'ta manuel işlemleri MT5 + DB eşleyerek geri yükle."""
+        """Engine restart'ta manuel işlemleri MT5 + DB + marker eşleyerek geri yükle.
+
+        v5.8.1: Marker dosya fallback eklendi. DB WAL kaybı durumunda
+        bile manuel pozisyonlar korunur.
+
+        Kaynak önceliği: DB > marker dosya.
+        """
         try:
             positions = self.mt5.get_positions()
         except Exception as exc:
@@ -818,7 +866,12 @@ class ManuelMotor:
 
         if not positions:
             logger.info("ManuelMotor restore: açık pozisyon yok")
+            # Marker temizle (MT5'te pozisyon kalmamış)
+            self._save_marker()
             return
+
+        # v5.8.1: Marker dosyasını fallback olarak oku
+        marker_data = self._load_marker()
 
         restored_count = 0
         for pos in positions:
@@ -829,7 +882,7 @@ class ManuelMotor:
             if not symbol or not ticket:
                 continue
 
-            # DB'de eşleşen aktif trade ara
+            # Kaynak 1: DB'de eşleşen aktif trade ara
             trades = self.db.get_trades(symbol=symbol, limit=10)
             db_trade = next(
                 (
@@ -841,12 +894,31 @@ class ManuelMotor:
                 None,
             )
 
-            if db_trade is None:
-                continue  # Manuel değil → OĞUL'a ait
+            # Kaynak 2: Marker dosyasında var mı? (DB kaybına karşı fallback)
+            marker_info = marker_data.get(symbol)
+            marker_match = (
+                marker_info is not None
+                and int(marker_info.get("ticket", 0)) == ticket
+            )
 
-            strategy = db_trade.get("strategy", "")
-            regime_at_entry = db_trade.get("regime", "")
-            entry_time_str = db_trade.get("entry_time", "")
+            if db_trade is None and not marker_match:
+                continue  # Ne DB'de ne marker'da → Manuel değil → OĞUL'a ait
+
+            # Manuel pozisyon tespit edildi
+            if db_trade is None and marker_match:
+                logger.warning(
+                    f"ManuelMotor restore: {symbol} ticket={ticket} "
+                    f"DB'de YOK ama marker dosyasında var — marker'dan geri yükleniyor! "
+                    f"(WAL kaybı muhtemel)"
+                )
+
+            strategy = "manual"
+            regime_at_entry = db_trade.get("regime", "") if db_trade else ""
+            entry_time_str = db_trade.get("entry_time", "") if db_trade else ""
+
+            # Marker'dan entry_time fallback
+            if not entry_time_str and marker_info:
+                entry_time_str = marker_info.get("opened_at", "") or ""
 
             opened_at = None
             if entry_time_str:
@@ -866,7 +938,7 @@ class ManuelMotor:
                 ticket=ticket,
                 strategy=strategy,
                 trailing_sl=pos.get("sl", 0.0),
-                db_id=db_trade.get("id", 0),
+                db_id=db_trade.get("id", 0) if db_trade else 0,
                 regime_at_entry=regime_at_entry,
             )
             if opened_at:
@@ -876,22 +948,27 @@ class ManuelMotor:
             restored_count += 1
 
             # DB'yi MT5 pozisyonuyla senkronize et
-            sync_fields: dict[str, Any] = {}
-            db_lot = db_trade.get("lot", 0.0)
-            db_entry = db_trade.get("entry_price", 0.0)
-            if abs(trade.volume - db_lot) > 1e-8:
-                sync_fields["lot"] = trade.volume
-            if abs(trade.entry_price - db_entry) > 1e-4:
-                sync_fields["entry_price"] = trade.entry_price
-            if trade.ticket and not db_trade.get("mt5_position_id"):
-                sync_fields["mt5_position_id"] = trade.ticket
-            if sync_fields and trade.db_id > 0:
-                self.db.update_trade(trade.db_id, sync_fields)
+            if db_trade:
+                sync_fields: dict[str, Any] = {}
+                db_lot = db_trade.get("lot", 0.0)
+                db_entry = db_trade.get("entry_price", 0.0)
+                if abs(trade.volume - db_lot) > 1e-8:
+                    sync_fields["lot"] = trade.volume
+                if abs(trade.entry_price - db_entry) > 1e-4:
+                    sync_fields["entry_price"] = trade.entry_price
+                if trade.ticket and not db_trade.get("mt5_position_id"):
+                    sync_fields["mt5_position_id"] = trade.ticket
+                if sync_fields and trade.db_id > 0:
+                    self.db.update_trade(trade.db_id, sync_fields)
 
             logger.info(
                 f"ManuelMotor geri yüklendi [{symbol}]: ticket={ticket} "
-                f"{direction} {trade.volume} lot rejim={regime_at_entry}"
+                f"{direction} {trade.volume} lot"
+                f" kaynak={'DB' if db_trade else 'MARKER'}"
             )
+
+        # Marker'ı güncel active_trades ile senkronize et
+        self._save_marker()
 
         logger.info(f"ManuelMotor restore tamamlandı: {restored_count} pozisyon")
 
@@ -909,6 +986,79 @@ class ManuelMotor:
         low_arr = df["low"].values.astype(np.float64)
         atr_arr = calc_atr(high_arr, low_arr, close, ATR_PERIOD)
         return last_valid(atr_arr)
+
+    # ─────────────────────────────────────────────────────────────────
+    #  DOSYA MARKER (v5.8.1 — DB-bağımsız koruma)
+    # ─────────────────────────────────────────────────────────────────
+
+    def _save_marker(self) -> None:
+        """Aktif manuel pozisyonları JSON dosyaya yaz.
+
+        DB WAL kaybına karşı yedek koruma. Her pozisyon açma/kapama
+        işleminde çağrılır. Dosya küçük ve atomik yazılır.
+        """
+        try:
+            data = {}
+            for sym, trade in self.active_trades.items():
+                data[sym] = {
+                    "ticket": trade.ticket,
+                    "direction": trade.direction,
+                    "volume": trade.volume,
+                    "entry_price": trade.entry_price,
+                    "opened_at": trade.opened_at.isoformat() if trade.opened_at else None,
+                }
+            # Atomik yaz: önce temp dosyaya, sonra rename
+            tmp = self._marker_path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            tmp.replace(self._marker_path)
+            logger.debug(f"Manuel marker kaydedildi: {len(data)} pozisyon")
+        except Exception as exc:
+            logger.error(f"Manuel marker kaydetme hatası: {exc}")
+
+    def _load_marker(self) -> dict[str, dict]:
+        """JSON marker dosyasından manuel pozisyon listesini oku.
+
+        Returns:
+            {symbol: {ticket, direction, volume, ...}} veya boş dict.
+        """
+        try:
+            if self._marker_path.exists():
+                data = json.loads(self._marker_path.read_text(encoding="utf-8"))
+                logger.info(f"Manuel marker okundu: {len(data)} pozisyon")
+                return data
+        except Exception as exc:
+            logger.error(f"Manuel marker okuma hatası: {exc}")
+        return {}
+
+    def get_manual_symbols(self) -> set[str]:
+        """Tüm kaynaklardan (memory + marker dosya) manuel sembol setini döndür.
+
+        OĞUL bu metodu kullanarak DB'den bağımsız koruma sağlar.
+        """
+        symbols = set(self.active_trades.keys())
+        # Marker dosyasından da oku (memory boş olsa bile)
+        try:
+            marker_data = self._load_marker()
+            symbols.update(marker_data.keys())
+        except Exception:
+            pass
+        return symbols
+
+    def get_manual_tickets(self) -> set[int]:
+        """Tüm kaynaklardan (memory + marker dosya) manuel ticket setini döndür."""
+        tickets: set[int] = set()
+        for t in self.active_trades.values():
+            if t.ticket:
+                tickets.add(t.ticket)
+        try:
+            marker_data = self._load_marker()
+            for info in marker_data.values():
+                tk = info.get("ticket")
+                if tk:
+                    tickets.add(int(tk))
+        except Exception:
+            pass
+        return tickets
 
     def _is_trading_allowed(self, now: datetime | None = None) -> bool:
         """İşlem saatleri kontrolü (09:45-17:45)."""

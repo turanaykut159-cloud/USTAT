@@ -128,6 +128,8 @@ class Engine:
 
         # OĞUL'a ÜSTAT referansı ver (strateji havuzu + kontrat profilleri)
         self.ogul.ustat = self.ustat
+        # Top5Selector'a da ÜSTAT referansı ver (kontrat profili bonusu)
+        self.ogul._top5._ustat = self.ustat
 
         # ÜSTAT'a risk_params referansı ver (BABA risk parametreleri ayarlaması)
         self.ustat._risk_params = self.risk_params
@@ -323,25 +325,69 @@ class Engine:
                 close_positions = False
 
         if close_positions and total_open > 0:
-            logger.info(
-                f"Pozisyonlar kapatılıyor: {active} aktif + "
-                f"{hybrid_count} hibrit + {manual_count} manuel"
-            )
-            try:
-                failed = self.baba._close_all_positions("ENGINE_STOP")
-                if failed:
-                    logger.error(
-                        f"Kapatılamayan pozisyonlar (ticket): {failed}"
-                    )
-                    self._log_event_safe(
-                        "ENGINE_STOP",
-                        f"Kapatılamayan pozisyonlar: {failed}",
-                        "ERROR",
-                    )
-                else:
-                    logger.info("Tüm pozisyonlar başarıyla kapatıldı.")
-            except Exception as exc:
-                logger.error(f"Pozisyon kapatma hatası: {exc}")
+            # v5.8.1: Manuel pozisyonlar ENGINE_STOP'ta kapatılMAZ
+            # CEO talimatı: "manuel işlemlere oğul müdahale etmesin,
+            # sadece baba korumasında olsun"
+            if manual_count > 0:
+                logger.warning(
+                    f"ENGINE_STOP: {manual_count} manuel pozisyon AÇIK BIRAKILACAK "
+                    f"(sadece OĞUL/Hibrit kapatılıyor)"
+                )
+                # Manuel ticket'ları topla
+                manual_tickets = {
+                    t.ticket for t in self.manuel_motor.active_trades.values()
+                    if t.ticket
+                }
+                # OĞUL + Hibrit pozisyonları kapat (Manuel HARİÇ)
+                try:
+                    positions = self.mt5.get_positions()
+                    non_manual = [
+                        p for p in positions
+                        if p.get("ticket", 0) not in manual_tickets
+                    ]
+                    failed_tickets: list[int] = []
+                    for pos in non_manual:
+                        try:
+                            self.mt5.close_position(pos.get("ticket", 0))
+                        except Exception as exc:
+                            failed_tickets.append(pos.get("ticket", 0))
+                            logger.error(
+                                f"Pozisyon kapatma hatası [{pos.get('symbol')}]: {exc}"
+                            )
+                    if failed_tickets:
+                        self._log_event_safe(
+                            "ENGINE_STOP",
+                            f"Kapatılamayan pozisyonlar: {failed_tickets}",
+                            "ERROR",
+                        )
+                    else:
+                        logger.info(
+                            f"OĞUL/Hibrit pozisyonlar kapatıldı "
+                            f"({manual_count} manuel açık bırakıldı)."
+                        )
+                except Exception as exc:
+                    logger.error(f"Pozisyon kapatma hatası: {exc}")
+            else:
+                # Manuel pozisyon yok — hepsini kapat
+                logger.info(
+                    f"Pozisyonlar kapatılıyor: {active} aktif + "
+                    f"{hybrid_count} hibrit"
+                )
+                try:
+                    failed = self.baba._close_all_positions("ENGINE_STOP")
+                    if failed:
+                        logger.error(
+                            f"Kapatılamayan pozisyonlar (ticket): {failed}"
+                        )
+                        self._log_event_safe(
+                            "ENGINE_STOP",
+                            f"Kapatılamayan pozisyonlar: {failed}",
+                            "ERROR",
+                        )
+                    else:
+                        logger.info("Tüm pozisyonlar başarıyla kapatıldı.")
+                except Exception as exc:
+                    logger.error(f"Pozisyon kapatma hatası: {exc}")
         elif not close_positions and total_open > 0:
             logger.warning(
                 f"DİKKAT: {total_open} açık pozisyon var — "

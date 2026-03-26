@@ -275,9 +275,9 @@ export async function checkManualTrade(symbol, direction) {
   }
 }
 
-export async function executeManualTrade(symbol, direction, lot) {
+export async function executeManualTrade(symbol, direction, lot, sl = 0, tp = 0) {
   try {
-    const { data } = await client.post('/manual-trade/execute', { symbol, direction, lot });
+    const { data } = await client.post('/manual-trade/execute', { symbol, direction, lot, sl, tp });
     return data;
   } catch (err) {
     console.error('[ÜSTAT API] executeManualTrade:', err?.message ?? err);

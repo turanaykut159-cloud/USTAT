@@ -435,7 +435,32 @@ def watchdog_loop():
         # Auto-restart limiti
         restart_count += 1
         if restart_count > MAX_AUTO_RESTARTS:
-            log(f"[WATCHDOG] KRITIK: {MAX_AUTO_RESTARTS} ardisik restart basarisiz — watchdog durduruluyor")
+            log(f"[WATCHDOG] {MAX_AUTO_RESTARTS} restart basarisiz — agresif temizlik + son deneme")
+            # Agresif temizlik: tüm portları ve PID'leri zorla temizle
+            try:
+                cleanup()
+                for _pf in [HEARTBEAT_FILE, "api.pid"]:
+                    _fp = os.path.join(USTAT_DIR, _pf) if not os.path.isabs(_pf) else _pf
+                    if os.path.exists(_fp):
+                        os.remove(_fp)
+            except Exception:
+                pass
+            time.sleep(30)  # 30 saniye tam temizlik bekleme
+            # SON DENEME
+            if check_shutdown_signal():
+                break
+            log("[WATCHDOG] Son deneme baslatiliyor...")
+            if start_api():
+                if not port_open(5173):
+                    start_vite()
+                start_electron()
+                log("[WATCHDOG] Son deneme tamamlandi — 60sn heartbeat bekleniyor")
+                time.sleep(60)
+                if check_heartbeat():
+                    log("[WATCHDOG] Son deneme BASARILI — normal izlemeye donuluyor")
+                    restart_count = 0
+                    continue
+            log("[WATCHDOG] KRITIK: Son deneme de basarisiz — watchdog durduruluyor")
             log("[WATCHDOG] Manuel mudahale gerekli!")
             break
 
@@ -467,6 +492,11 @@ def watchdog_loop():
         # Vite kontrol
         if not port_open(5173):
             start_vite()
+
+        # Electron başlatmadan HEMEN ÖNCE son signal kontrolü (yarış penceresi kapatma)
+        if check_shutdown_signal():
+            log("[WATCHDOG] Electron oncesi shutdown.signal tespit edildi — watchdog durduruluyor")
+            break
 
         # Electron başlat
         start_electron()

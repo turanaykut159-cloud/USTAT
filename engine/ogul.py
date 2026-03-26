@@ -474,7 +474,7 @@ class Ogul:
         self.ustat: Any | None = None  # ÜSTAT referansı (main.py tarafından atanır)
 
         # ── Top 5 kontrat seçimi (v5.8/CEO-FAZ3: ayrı modüle taşındı) ──
-        self._top5 = Top5Selector(db=db, config=config)
+        self._top5 = Top5Selector(db=db, config=config, ustat_ref=None)
         # Geriye uyumluluk property'leri (mevcut kodun bozulmaması için)
         # self._current_top5, _current_scores, _last_refresh → _top5 delegasyonu
 
@@ -629,6 +629,7 @@ class Ogul:
 
         # Günlük zarar durdurucu aktifse sinyal üretme
         if self._daily_loss_stop:
+            logger.warning("Sinyal üretimi engellendi: günlük zarar durdurucu aktif (_daily_loss_stop=True)")
             return
 
         # ═══ SİNYAL DÖNGÜSÜ (M5 mum kapanışında tetiklenir — v5.7) ═════
@@ -642,13 +643,14 @@ class Ogul:
         # 7. Rejim kontrolü — aktif stratejiler
         strategies = regime.allowed_strategies
         if not strategies:
-            logger.debug(
-                f"Rejim {regime.regime_type.value}: tüm sinyaller deaktif"
+            logger.warning(
+                f"Sinyal üretimi engellendi: rejim {regime.regime_type.value} tüm stratejileri deaktif etti"
             )
             return
 
         # 8. İşlem saatleri kontrolü
         if not self._is_trading_allowed():
+            logger.info("Sinyal üretimi engellendi: işlem saatleri dışında")
             return
 
         # 10. Her sembol için sinyal üretimi
@@ -759,15 +761,18 @@ class Ogul:
                 sample_symbol = list(WATCHED_SYMBOLS)[0]
 
         if sample_symbol is None:
+            logger.warning("M5 mum kontrolü: sample_symbol=None (top5 boş, WATCHED_SYMBOLS boş)")
             return False
 
         try:
             df = self.db.get_bars(sample_symbol, "M5", limit=1)
             if df is None or df.empty:
+                logger.warning(f"M5 mum kontrolü: veri yok [{sample_symbol}] (df={df})")
                 return False
 
             latest_ts = str(df.iloc[-1].get("timestamp", ""))
             if not latest_ts:
+                logger.warning(f"M5 mum kontrolü: timestamp boş [{sample_symbol}]")
                 return False
 
             if latest_ts != self._last_m5_candle_ts:
@@ -1030,6 +1035,7 @@ class Ogul:
         # ── M15 verisi filtre/confluence için (eski ana veri, şimdi doğrulama) ──
         df = self.db.get_bars(symbol, "M15", limit=MIN_BARS_M15)
         if df.empty or len(df) < MIN_BARS_M15:
+            logger.warning(f"{symbol}: M15 verisi yetersiz ({len(df) if not df.empty else 0}/{MIN_BARS_M15} bar)")
             return None
 
         close = df["close"].values.astype(np.float64)
@@ -1112,12 +1118,21 @@ class Ogul:
         if not candidates:
             return None
 
-        # ── ÜSTAT strateji yönlendirmesi: tercih edilen stratejiye bonus ──
-        # ÜSTAT'ın rejim ve geçmiş veriye dayalı strateji tercihi,
-        # eşleşen sinyallerin strength'ine eklenir.
+        # ── ÜSTAT strateji yönlendirmesi: performans bazlı ağırlıklı tercih ──
+        # ÜSTAT rejim + geçmiş win-rate verisiyle strateji gücünü ayarlar.
+        # Tercih edilen + yüksek win-rate → güçlendir (×1.25)
+        # Tercih edilmeyen + düşük win-rate → zayıflat (×0.75)
+        # Yetersiz veri (< 10 işlem) → müdahale yok
         ustat_pref = self._get_ustat_strategy_hint()
-        if ustat_pref:
-            bonus = self._get_ustat_param("strategy_bonus", 10) / 100.0
+        if ustat_pref and self.ustat is not None:
+            try:
+                _params = self.ustat.get_active_params()
+                _win_rates = _params.get("strategy_win_rates", {})
+                _trade_counts = _params.get("strategy_trade_counts", {})
+            except Exception:
+                _win_rates = {}
+                _trade_counts = {}
+
             strategy_name_map = {
                 StrategyType.TREND_FOLLOW: "trend_follow",
                 StrategyType.MEAN_REVERSION: "mean_reversion",
@@ -1125,8 +1140,23 @@ class Ogul:
             }
             for cand in candidates:
                 cand_name = strategy_name_map.get(cand.strategy, "")
-                if cand_name == ustat_pref:
-                    cand.strength = min(1.0, cand.strength + bonus)
+                if not cand_name:
+                    continue
+                wr = _win_rates.get(cand_name, 50.0)
+                tc = _trade_counts.get(cand_name, 0)
+
+                if tc < 10:
+                    # Yetersiz veri — eski bonus sistemi (geriye uyumluluk)
+                    if cand_name == ustat_pref:
+                        cand.strength = min(1.0, cand.strength + 0.10)
+                    continue
+
+                if cand_name == ustat_pref and wr > 60.0:
+                    cand.strength = min(1.0, cand.strength * 1.25)
+                    logger.debug(f"ÜSTAT tercih güçlendirme [{cand_name}]: ×1.25 (wr={wr:.1f}%)")
+                elif cand_name != ustat_pref and wr < 40.0:
+                    cand.strength = max(0.05, cand.strength * 0.75)
+                    logger.debug(f"ÜSTAT tercih zayıflatma [{cand_name}]: ×0.75 (wr={wr:.1f}%)")
 
         # En güçlü sinyali seç (SE2 bonusu ile SE2 sinyali tercih edilir)
         best = max(candidates, key=lambda s: s.strength)
@@ -1818,6 +1848,7 @@ class Ogul:
         """
         df = self.db.get_bars(symbol, "H1", limit=MIN_BARS_H1)
         if df.empty or len(df) < TF_EMA_SLOW + 1:
+            logger.info(f"H1 teyit RED [{symbol}]: H1 verisi yetersiz ({len(df) if not df.empty else 0} bar)")
             return False
 
         close_h1 = df["close"].values.astype(np.float64)
@@ -1828,14 +1859,22 @@ class Ogul:
         es = last_valid(ema_slow_h1)
 
         if ef is None or es is None:
+            logger.info(f"H1 teyit RED [{symbol}]: EMA hesaplanamadı (ef={ef}, es={es})")
             return False
 
         if signal.signal_type == SignalType.BUY:
-            return ef > es
+            confirmed = ef > es
         elif signal.signal_type == SignalType.SELL:
-            return ef < es
+            confirmed = ef < es
+        else:
+            confirmed = False
 
-        return False
+        if not confirmed:
+            logger.info(
+                f"H1 teyit RED [{symbol}]: {signal.signal_type.value} — "
+                f"EMA_fast={ef:.4f}, EMA_slow={es:.4f}"
+            )
+        return confirmed
 
     # ═════════════════════════════════════════════════════════════════
     #  EMİR YÜRÜTME
@@ -2960,6 +2999,21 @@ class Ogul:
         if not self.active_trades:
             return
 
+        # ── v5.8.1: Manuel pozisyon ön-filtresi (DB-bağımsız) ────────
+        # ManuelMotor'a ait semboller OĞUL active_trades'te olmamalı.
+        # memory + marker dosya + DB üçlü kontrol.
+        if self.manuel_motor:
+            manual_symbols = self.manuel_motor.get_manual_symbols()
+            for ms in manual_symbols:
+                if ms in self.active_trades:
+                    logger.warning(
+                        f"Manuel ön-filtre: {ms} OĞUL active_trades'ten kaldırıldı "
+                        f"(ManuelMotor'a ait — memory/marker)"
+                    )
+                    self.active_trades.pop(ms)
+        if not self.active_trades:
+            return
+
         # MT5 pozisyonlarını BİR KERE al, sembol bazlı indexle
         try:
             positions = self.mt5.get_positions()
@@ -3103,14 +3157,37 @@ class Ogul:
         if current_price <= 0:
             return
 
-        # ── Manuel/Hibrit pozisyon güvenlik kontrolü ────────────────
+        # ── Manuel/Hibrit pozisyon güvenlik kontrolü (v5.8.1) ────────
+        # Katman 1: ManuelMotor — memory + marker dosya (DB-bağımsız!)
         if self.manuel_motor:
-            mt = self.manuel_motor.active_trades.get(symbol)
-            if mt and mt.ticket and mt.ticket == trade.ticket:
-                logger.debug(
-                    f"Manage: {symbol} ticket={trade.ticket} manuel — atlanıyor"
+            manual_syms = self.manuel_motor.get_manual_symbols()
+            manual_tks = self.manuel_motor.get_manual_tickets()
+            if trade.ticket in manual_tks or symbol in manual_syms:
+                logger.warning(
+                    f"Manage: {symbol} ticket={trade.ticket} manuel "
+                    f"(memory/marker) — OĞUL active_trades'den kaldırılıyor"
                 )
+                self.active_trades.pop(symbol, None)
                 return
+
+        # Katman 2: DB bazlı manuel kontrol (ek güvenlik)
+        if self.db:
+            try:
+                db_trades = self.db.get_trades(symbol=symbol, limit=5)
+                is_manual_in_db = any(
+                    t.get("exit_time") is None
+                    and t.get("strategy") == "manual"
+                    for t in db_trades
+                )
+                if is_manual_in_db:
+                    logger.warning(
+                        f"Manage: {symbol} ticket={trade.ticket} DB'de manuel — "
+                        f"OĞUL active_trades'den kaldırılıyor"
+                    )
+                    self.active_trades.pop(symbol, None)
+                    return
+            except Exception as exc:
+                logger.error(f"Manuel DB kontrol hatası [{symbol}]: {exc}")
 
         if self.h_engine and trade.ticket in self.h_engine.hybrid_positions:
             logger.debug(
@@ -4548,14 +4625,27 @@ class Ogul:
         orphan_count = 0
 
         # Manuel + Hibrit pozisyon ticket'larını topla — yetim sahiplenmesini engelle
-        # (1) ManuelMotor active_trades (restore sonrası dolu olabilir)
+        # v5.8.1: ManuelMotor.get_manual_*() → memory + marker dosya + DB üçlü kaynak
         manual_tickets: set[int] = set()
         manual_symbols: set[str] = set()
         if self.manuel_motor:
-            for s, t in self.manuel_motor.active_trades.items():
-                if t.ticket:
-                    manual_tickets.add(t.ticket)
-                manual_symbols.add(s)
+            manual_symbols = self.manuel_motor.get_manual_symbols()
+            manual_tickets = self.manuel_motor.get_manual_tickets()
+            logger.info(
+                f"OĞUL restore: Manuel koruma seti — "
+                f"{len(manual_symbols)} sembol, {len(manual_tickets)} ticket"
+            )
+        # Ek güvenlik: DB'de manuel pozisyon varsa ama ManuelMotor bilmiyorsa ekle
+        if self.db:
+            try:
+                all_trades = self.db.get_trades(limit=20)
+                for t in all_trades:
+                    if t.get("exit_time") is None and t.get("strategy") == "manual":
+                        sym = t.get("symbol")
+                        if sym:
+                            manual_symbols.add(sym)
+            except Exception as exc:
+                logger.error(f"DB manuel kontrol hatası (restore): {exc}")
 
         # (2) H-Engine hybrid_positions (restore sonrası dolu olabilir)
         hybrid_tickets: set[int] = set()
@@ -4700,6 +4790,28 @@ class Ogul:
                     f"Yetim pozisyon geri yüklendi [{symbol}]: ticket={ticket} "
                     f"{direction} {trade.volume} lot (DB eşleşmesi yok)"
                 )
+
+        # ── v5.8: Post-restore manuel pozisyon doğrulama ──────────────
+        # Restore sonrası active_trades içinde hâlâ manuel pozisyon kalmış
+        # olabilir (race condition). DB ile çapraz kontrol yap.
+        if self.db and self.active_trades:
+            for sym in list(self.active_trades):
+                try:
+                    sym_trades = self.db.get_trades(symbol=sym, limit=5)
+                    is_manual = any(
+                        t.get("exit_time") is None
+                        and t.get("strategy") == "manual"
+                        for t in sym_trades
+                    )
+                    if is_manual:
+                        logger.warning(
+                            f"Post-restore doğrulama: {sym} DB'de manuel — "
+                            f"OĞUL active_trades'den kaldırılıyor!"
+                        )
+                        self.active_trades.pop(sym)
+                        restored_count -= 1
+                except Exception as exc:
+                    logger.error(f"Post-restore DB kontrol hatası [{sym}]: {exc}")
 
         logger.info(
             f"Geri yükleme tamamlandı: {restored_count} aktif işlem "

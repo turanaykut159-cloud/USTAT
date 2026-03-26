@@ -527,7 +527,7 @@ def williams_r(
         if hl_range > 0:
             out[i] = (hh - close[i]) / hl_range * -100.0
         else:
-            out[i] = 0.0
+            out[i] = -50.0  # Sıfır aralık = nötr (oversold değil)
 
     return out
 

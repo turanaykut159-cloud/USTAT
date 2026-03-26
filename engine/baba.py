@@ -117,11 +117,11 @@ ATR_LOOKBACK: int  = 100
 # ── Çok katmanlı kayıp limit sabitleri ───────────────────────────────
 MAX_WEEKLY_LOSS_PCT:     float = 0.04
 MAX_MONTHLY_LOSS_PCT:    float = 0.07
-HARD_DRAWDOWN_PCT:       float = 0.12
+HARD_DRAWDOWN_PCT:       float = 0.15    # config: risk.hard_drawdown_pct
 CONSECUTIVE_LOSS_LIMIT:  int   = 3
-COOLDOWN_HOURS:          int   = 2       # v14: 4→2 saat (VİOP seans süresi kısa)
-MAX_FLOATING_LOSS_PCT:   float = 0.020   # v14: %1.5→%2.0
-MAX_DAILY_TRADES:        int   = 8       # v14: 5→8 (VİOP fırsat sıklığı)
+COOLDOWN_HOURS:          int   = 4       # config: risk.cooldown_hours
+MAX_FLOATING_LOSS_PCT:   float = 0.015   # config: risk.max_floating_loss_pct
+MAX_DAILY_TRADES:        int   = 5       # config: risk.max_daily_trades
 MAX_RISK_PER_TRADE_HARD: float = 0.02
 
 # ── Korelasyon sabitleri ─────────────────────────────────────────────
@@ -1221,12 +1221,11 @@ class Baba:
         if self._risk_state["daily_reset_date"] != today and market_open:
             self._reset_daily(today)
 
-        # Haftalık sıfırlama (Pazartesi ≥ 09:30)
+        # Haftalık sıfırlama (hafta değişmişse, piyasa açıkken)
         iso_cal = today.isocalendar()
         current_week = (iso_cal[0], iso_cal[1])
         if (
             self._risk_state["weekly_reset_week"] != current_week
-            and today.weekday() == 0
             and market_open
         ):
             self._reset_weekly(current_week)
@@ -1437,8 +1436,8 @@ class Baba:
             return verdict
 
         # 9.5 Hesap seviyesi toplam pozisyon limiti (v5.5.1)
-        # OĞUL(5) + H-Engine(3) + Manuel(3) = 11 teorik max → 8 ile sınırla
-        MAX_TOTAL_POSITIONS = 8
+        # OĞUL(5) + H-Engine(3) + Manuel(3) = 11 teorik max → config ile sınırla
+        MAX_TOTAL_POSITIONS = self._config.get("engine.max_total_positions", 8)
         try:
             total_positions = len(self._mt5.get_positions() or [])
             if total_positions >= MAX_TOTAL_POSITIONS:
@@ -1689,11 +1688,9 @@ class Baba:
 
         # ── Katman 1: OĞUL bazlı floating kontrol (%1.5) ──
         # ogul_floating_pnl snapshot'ta varsa onu kullan,
-        # yoksa geriye dönük uyumluluk için toplam floating_pnl'ye düş.
-        ogul_floating = snap.get("ogul_floating_pnl")
-        if ogul_floating is None:
-            # Eski snapshot (motor ayrıştırma öncesi) — fallback
-            ogul_floating = snap.get("floating_pnl", 0.0)
+        # yoksa 0.0 kabul et (tüm hesap zararını OĞUL'a yükleme).
+        # Master floating check (%5) zaten tüm hesabı koruyor.
+        ogul_floating = snap.get("ogul_floating_pnl", 0.0)
 
         if ogul_floating < 0:
             ogul_loss_pct = abs(ogul_floating) / equity
@@ -1719,7 +1716,7 @@ class Baba:
         Returns:
             True → toplam floating loss > %5 → Kill-Switch tetikle.
         """
-        _MASTER_FLOATING_LIMIT = 0.05  # %5
+        _MASTER_FLOATING_LIMIT = self._config.get("risk.master_floating_loss_pct", 0.05)
 
         if snap is None:
             snap = self._db.get_latest_risk_snapshot()
@@ -1951,10 +1948,12 @@ class Baba:
     # ═════════════════════════════════════════════════════════════════
 
     def receive_feedback(self, attribution: dict) -> None:
-        """ÜSTAT'tan hata atama geri bildirimi al.
+        """ÜSTAT'tan hata atama geri bildirimi al ve eşik bazlı aksiyon al.
 
         RISK_MISS atandığında ÜSTAT bu metodu çağırır.
-        BABA gelen bilgiyi loglar ve risk_miss sayacını günceller.
+        BABA gelen bilgiyi loglar, sayacı günceller ve eşiklere göre aksiyon alır:
+          - Aynı sembolde 3+ miss (24 saat) → L1 sembol durdur (1 gün)
+          - Toplam 5+ miss (24 saat) → floating_loss eşiğini %10 sıkılaştır (geçici)
 
         Args:
             attribution: Hata atama dict'i (trade_id, error_type, symbol vb).
@@ -1977,7 +1976,7 @@ class Baba:
             f"{symbol}, toplam miss: {self._risk_miss_count}"
         )
 
-        # DB'ye de kaydet
+        # DB'ye kaydet
         if self._db:
             try:
                 self._db.insert_event(
@@ -1990,6 +1989,49 @@ class Baba:
                 )
             except Exception:
                 pass
+
+        # ── ÜSTAT Feedback Aksiyonları ──
+        now = datetime.now()
+        cutoff = now - timedelta(hours=24)
+
+        # Son 24 saatteki miss'leri filtrele
+        cutoff_str = cutoff.strftime("%Y-%m-%d %H:%M:%S")
+        recent_misses = [
+            m for m in self._risk_miss_log
+            if m.get("timestamp", "") >= cutoff_str
+        ]
+
+        # Aksiyon 1: Aynı sembolde 3+ miss → L1 sembol durdur
+        symbol_miss_count = sum(
+            1 for m in recent_misses if m.get("symbol") == symbol
+        )
+        if symbol_miss_count >= 3 and symbol not in self._killed_symbols:
+            self._activate_kill_switch(
+                level=1,  # KILL_SWITCH_L1
+                reason=f"ÜSTAT feedback: {symbol} 24 saatte {symbol_miss_count} risk_miss",
+                symbols=[symbol],
+            )
+            logger.warning(
+                f"[BABA] ÜSTAT aksiyonu: {symbol} L1 durduruldu "
+                f"({symbol_miss_count} miss/24h)"
+            )
+
+        # Aksiyon 2: Toplam 5+ miss → floating_loss eşiğini geçici sıkılaştır
+        if len(recent_misses) >= 5:
+            feedback_key = "_ustat_floating_tightened"
+            if not getattr(self, feedback_key, False):
+                rp = getattr(self, "_risk_params_ref", None)
+                if rp is not None:
+                    old_val = rp.max_floating_loss
+                    new_val = round(max(0.008, old_val * 0.90), 4)
+                    if new_val != old_val:
+                        rp.max_floating_loss = new_val
+                        setattr(self, feedback_key, True)
+                        logger.warning(
+                            f"[BABA] ÜSTAT aksiyonu: floating_loss eşiği sıkılaştırıldı "
+                            f"%{old_val*100:.1f} → %{new_val*100:.1f} "
+                            f"({len(recent_misses)} miss/24h)"
+                        )
 
     # ═════════════════════════════════════════════════════════════════
     #  KILL-SWITCH
@@ -2266,6 +2308,10 @@ class Baba:
             positions = self._mt5.get_positions()
         except Exception as exc:
             logger.error(f"get_positions hatası (close_all): {exc}")
+            return failed_tickets
+
+        if not positions:
+            logger.warning("close_all_positions: Pozisyon listesi boş/alınamadı")
             return failed_tickets
 
         # Pozisyonları kâr/zarar durumuna göre ayır
@@ -2864,7 +2910,8 @@ class Baba:
             if last.get("action") == "cooldown_start":
                 try:
                     triggered = datetime.fromisoformat(last["timestamp"])
-                    end_time = triggered + timedelta(hours=COOLDOWN_HOURS)
+                    _cd_hours = self._config.get("risk.cooldown_hours", 4)
+                    end_time = triggered + timedelta(hours=_cd_hours)
                     if datetime.now() < end_time:
                         self._risk_state["cooldown_until"] = end_time
                         remaining = (end_time - datetime.now()).total_seconds()
@@ -2915,7 +2962,7 @@ class Baba:
         except Exception as exc:
             logger.error(f"get_tick hatası [USDTRY]: {exc}")
             return
-        if tick is not None:
+        if tick is not None and tick.bid > 0:
             self._usdtry_history.append(tick.bid)
             if len(self._usdtry_history) > self._spread_history_len:
                 self._usdtry_history = self._usdtry_history[-self._spread_history_len:]
@@ -2926,7 +2973,9 @@ class Baba:
             return 0.0
         first = self._usdtry_history[0]
         last  = self._usdtry_history[-1]
-        return abs(last - first) / first * 100 if first > 0 else 0.0
+        if first <= 0 or last <= 0:
+            return 0.0
+        return abs(last - first) / first * 100
 
 
 # ═════════════════════════════════════════════════════════════════════

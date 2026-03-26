@@ -412,9 +412,10 @@ function updateTrayMenu() {
     },
     { type: 'separator' },
     {
-      label: 'Çıkış',
+      label: 'Çıkış (Güvenli)',
       click: () => {
         app.isQuitting = true;
+        app._isSafeQuit = true;  // Tray çıkışı da güvenli kapanış
         app.quit();
       },
     },
@@ -532,6 +533,7 @@ function setupIPC() {
   ipcMain.handle('app:safeQuit', () => {
     elog('app:safeQuit cagrildi, cikis baslatiliyor');
     app.isQuitting = true;
+    app._isSafeQuit = true;  // SADECE güvenli çıkışta true — watchdog signal kontrolü
     // IPC yaniti gitsin diye quit'i bir sonraki tick'te calistir (bazen aninda quit IPC'yi kesiyor)
     setImmediate(() => {
       app.quit();
@@ -564,7 +566,14 @@ app.on('activate', () => {
 
 app.on('before-quit', () => {
   app.isQuitting = true;
-  killApiProcess();
+  if (app._isSafeQuit) {
+    // Kullanıcı bilinçli "Güvenli Çıkış" yaptı → signal yaz, restart engelle
+    killApiProcess();  // içinde writeShutdownSignal() var
+    elog('Güvenli çıkış: shutdown.signal yazıldı, watchdog restart yapmayacak');
+  } else {
+    // Crash, X butonu, Windows kapanması vb. → signal YAZMA, watchdog restart yapsın
+    elog('Beklenmeyen kapanış: shutdown.signal yazılmadı, watchdog restart yapacak');
+  }
 });
 
 /**

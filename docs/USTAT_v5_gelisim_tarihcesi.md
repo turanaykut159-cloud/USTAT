@@ -2,6 +2,109 @@
 
 ---
 
+## #72 — Tam Sistem Audit & Beyin Geliştirme (2026-03-26)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-26 |
+| **Sınıf** | C3/C4 — Çoklu kritik düzeltme + mimari geliştirme |
+| **Neden** | Kapsamlı sistem auditi: OĞUL işlem açamıyor, BABA config tutarsızlıkları, ÜSTAT pasif kalıyor, MT5 Bridge thread safety eksik, Manuel Motor SL/TP yazılmıyor, shutdown/restart mekanizması eksik. |
+| **Tetikleyen** | Kullanıcı: "Uygulama neden işlem açamıyor? Derinlemesine incele." |
+| **Kapsam** | ~20 dosya, 7 fazlı tam modül taraması (105 modülün 26'sı derinlemesine, tamamı tarandı) |
+
+### Değişiklikler — 8 Ana Kategori
+
+**1. OĞUL İşlem Açamama (P0-P2)**
+
+| Dosya | Değişiklik |
+|-------|-----------|
+| `engine/baba.py` | USD/TRY sıfır fiyat filtresi — MT5 bid=0.0 döndürdüğünde sahte OLAY tetiklemesi önlendi |
+| `engine/ogul.py` | Sessiz engellere WARNING/INFO log eklendi (6 nokta) — gözlemlenebilirlik |
+| `engine/baba.py` | `weekly_loss_halved` reset Pazartesi kısıtı kaldırıldı — hafta değişince hangi gün olursa olsun sıfırlanır |
+
+**2. BABA Config Tutarsızlıkları (D1-D5)**
+
+| Dosya | Değişiklik |
+|-------|-----------|
+| `engine/baba.py` | Cooldown geri yükleme config'den okuyor (COOLDOWN_HOURS sabiti→config) |
+| `engine/baba.py` | Ölü sabitler config ile eşitlendi (HARD_DRAWDOWN, COOLDOWN_HOURS, MAX_FLOATING_LOSS, MAX_DAILY_TRADES) |
+| `config/default.json` | `max_total_positions: 8`, `master_floating_loss_pct: 0.05` eklendi |
+| `engine/baba.py` | MAX_TOTAL_POSITIONS ve MASTER_FLOATING_LIMIT config'den okunuyor |
+| `engine/baba.py` | Floating loss fallback: tüm hesap zararı OĞUL'a yüklenmez (ogul_floating_pnl yoksa 0.0) |
+
+**3. ÜSTAT Beyin Geliştirme (5 Aşama)**
+
+| Aşama | Dosyalar | Değişiklik |
+|-------|---------|-----------|
+| 1 | `top5_selection.py`, `ogul.py`, `main.py` | Kontrat profilleri → Top5 seçimine bonus/ceza (win-rate+PnL bazlı) |
+| 2 | `ogul.py`, `ustat.py` | Strateji tercihi sabit +0.10 → performans bazlı çarpan (×1.25/×0.75) |
+| 3 | `ustat.py` | Parametre ayarlama: SL/TP/trailing veriye dayalı akıllı ayar + "iyi gideni bozma" kuralı |
+| 4 | `baba.py` | BABA feedback aksiyonu: 3+ miss→L1, 5+ miss→floating sıkılaştır |
+| 5 | `ustat.py` | Gerçek zamanlı 30dk mini-analiz: ardışık zarar/kâr pattern tespiti + geçici parametre ayarı (2h TTL) |
+
+**4. H-Engine Native SL/TP**
+
+| Dosya | Değişiklik |
+|-------|-----------|
+| `config/default.json` | `native_sltp: false → true` — MT5 broker seviyesinde SL/TP koruması aktif |
+
+**5. MT5 Bridge Audit (4 Düzeltme)**
+
+| Dosya | Değişiklik |
+|-------|-----------|
+| `engine/mt5_bridge.py` | `close_position()` ve `modify_position()`'a `_order_lock` eklendi (thread safety) |
+| `engine/mt5_bridge.py` | `get_positions()` API hatası vs 0 pozisyon ayrıldı (None vs []) |
+| `engine/mt5_bridge.py` | close_position filling mode IOC → RETURN (VİOP netting uyumlu) |
+| `engine/mt5_bridge.py` | Exception handler'lara `mt5.last_error()` eklendi |
+
+**6. Manuel Motor SL/TP**
+
+| Dosya | Değişiklik |
+|-------|-----------|
+| `engine/manuel_motor.py` | send_order sonrası `modify_position(ticket, sl, tp)` ile MT5'e SL/TP yazılıyor (3 deneme) |
+| `desktop/src/components/ManualTrade.jsx` | SL/TP düzenlenebilir input'lar eklendi (varsayılan 2×ATR SL, 3×ATR TP) |
+| `desktop/src/services/api.js` | `executeManualTrade()` sl/tp parametreleri eklendi |
+
+**7. Shutdown/Restart Mekanizması**
+
+| Dosya | Değişiklik |
+|-------|-----------|
+| `desktop/main.js` | `writeShutdownSignal()` SADECE güvenli çıkışta — crash/X butonu → signal yok → watchdog restart yapar |
+| `start_ustat.py` | Watchdog: 5 retry sonrası agresif temizlik + son deneme; Electron öncesi son signal kontrolü |
+| `ustat_agent.py` | API+Engine ikisi de down → restart; cooldown 600→300sn |
+
+**8. Modül Tarama Düzeltmeleri (8 Adet)**
+
+| Dosya | Değişiklik |
+|-------|-----------|
+| `engine/netting_lock.py` | 120sn timeout + stale lock otomatik temizlik |
+| `engine/config.py` | `set()/save()` threading.Lock koruması |
+| `engine/news_bridge.py` + `config/default.json` | OLAY trigger confidence eşiği config'e taşındı |
+| `engine/data_pipeline.py` | Deaktive sembol otomatik recovery (tick kontrolü) |
+| `engine/utils/multi_tf.py` | H1/M15/M5 veri eksik → 50 yerine 25 penaltı |
+| `engine/utils/indicators.py` | Williams %R sıfır aralık → -50 (nötr) |
+| `engine/utils/time_utils.py` | 2027 tatil takvimi eklendi |
+
+### Kök Neden Kanıtları (Log'dan)
+
+- USD/TRY sahte OLAY: `bid=0.0` → `%100 şoku` → L2 (log satır 120718-120730)
+- `weekly_loss_halved: True` persist ediliyor (log satır 22)
+- `risk_ok=False, top5=[]` gece 00:06'dan itibaren (log satır 417)
+
+### Test Sonuçları
+
+| Test | Sonuç |
+|------|-------|
+| Frontend build (`npm run build`) | ✅ 0 hata, 2.41s |
+
+### Dokümantasyon
+
+| Dosya | Değişiklik |
+|-------|-----------|
+| `CLAUDE.md` | v5.8'e tamamen yeniden yazıldı — 16 bölüm, tek kaynak |
+
+---
+
 ## #71 — Güvenli Çıkış & Watchdog Singleton Düzeltmesi (2026-03-26)
 
 | Alan | Detay |

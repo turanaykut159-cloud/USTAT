@@ -1092,9 +1092,11 @@ class MT5Bridge:
                 return order_result
 
             except Exception as exc:
-                logger.error(f"send_order istisnası [{symbol}]: {exc}")
+                mt5_err = mt5.last_error() if mt5 else None
+                logger.error(f"send_order istisnası [{symbol}]: {exc} | MT5: {mt5_err}")
                 self._last_order_error = {
                     "reason": f"Beklenmeyen hata: {exc}",
+                    "mt5_error": str(mt5_err),
                 }
                 # Health: başarısız emir kaydı
                 if self._health:
@@ -1135,7 +1137,7 @@ class MT5Bridge:
         Returns:
             Kapanış sonuç sözlüğü veya None.
         """
-        with self._write_lock:
+        with self._order_lock, self._write_lock:
             if not self._ensure_connection():
                 return None
 
@@ -1182,7 +1184,7 @@ class MT5Bridge:
                     "type": close_type,
                     "price": price,
                     "position": ticket,
-                    "type_filling": mt5.ORDER_FILLING_IOC,
+                    "type_filling": mt5.ORDER_FILLING_RETURN,
                     "comment": "USTAT_CLOSE",
                 }
 
@@ -1293,7 +1295,7 @@ class MT5Bridge:
                 "type": close_type,
                 "price": price,
                 "position": ticket,
-                "type_filling": mt5.ORDER_FILLING_IOC,
+                "type_filling": mt5.ORDER_FILLING_RETURN,
                 "comment": "USTAT_PARTIAL_CLOSE",
             }
 
@@ -1348,8 +1350,8 @@ class MT5Bridge:
 
         v5.8/CEO-FAZ2: _write_lock ile thread-safe.
         """
-        # v5.8/CEO-FAZ2: modify de write_lock altına alındı
-        with self._write_lock:
+        # v5.8/CEO-FAZ2: modify de write_lock + order_lock altına alındı
+        with self._order_lock, self._write_lock:
             if not self._ensure_connection():
                 return None
 
@@ -1507,8 +1509,9 @@ class MT5Bridge:
                 return None
 
             except Exception as exc:
-                self._last_modify_error = {"exception": str(exc)}
-                logger.error(f"modify_position istisnası [ticket={ticket}]: {exc}")
+                mt5_err = mt5.last_error() if mt5 else None
+                self._last_modify_error = {"exception": str(exc), "mt5_error": str(mt5_err)}
+                logger.error(f"modify_position istisnası [ticket={ticket}]: {exc} | MT5: {mt5_err}")
                 return None
 
     # ── get_positions ────────────────────────────────────────────────
@@ -1523,11 +1526,17 @@ class MT5Bridge:
             sl, tp, price_current, profit, time.
         """
         if not self._ensure_connection():
-            return []
+            logger.warning("get_positions: MT5 bağlantısı yok — None döndürülüyor")
+            return None
 
         try:
             positions = self._safe_call(mt5.positions_get)
             if positions is None:
+                # MT5 API hatası mı yoksa gerçekten 0 pozisyon mu?
+                err = mt5.last_error()
+                if err and err[0] != 1:  # 1 = RES_S_OK (başarılı, 0 pozisyon)
+                    logger.warning(f"get_positions: MT5 API hatası — {err}")
+                    return None
                 logger.debug("Açık pozisyon yok.")
                 return []
 
@@ -1555,7 +1564,7 @@ class MT5Bridge:
 
         except Exception as exc:
             logger.error(f"get_positions istisnası: {exc}")
-            return []
+            return None
 
     # ── get_history ──────────────────────────────────────────────────
     def get_history(

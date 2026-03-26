@@ -33,8 +33,20 @@ HOLIDAYS_2026 = [
     date(2026, 10, 29), # Cumhuriyet Bayramı
 ]
 
+HOLIDAYS_2027 = [
+    date(2027, 1, 1),   # Yılbaşı
+    date(2027, 3, 9), date(2027, 3, 10), date(2027, 3, 11),  # Ramazan Bayramı (tahmini)
+    date(2027, 4, 23),  # Ulusal Egemenlik ve Çocuk Bayramı
+    date(2027, 5, 1),   # İşçi Bayramı
+    date(2027, 5, 16), date(2027, 5, 17), date(2027, 5, 18), date(2027, 5, 19),  # Kurban Bayramı (tahmini)
+    date(2027, 5, 19),  # Atatürk'ü Anma, Gençlik ve Spor Bayramı
+    date(2027, 7, 15),  # Demokrasi ve Milli Birlik Günü
+    date(2027, 8, 30),  # Zafer Bayramı
+    date(2027, 10, 29), # Cumhuriyet Bayramı
+]
+
 # Tüm tatil günleri birleşik set (hızlı lookup)
-ALL_HOLIDAYS: set[date] = set(HOLIDAYS_2025) | set(HOLIDAYS_2026)
+ALL_HOLIDAYS: set[date] = set(HOLIDAYS_2025) | set(HOLIDAYS_2026) | set(HOLIDAYS_2027)
 
 
 def is_market_open(now: datetime | None = None) -> bool:

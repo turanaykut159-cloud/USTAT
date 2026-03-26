@@ -161,6 +161,11 @@ class Ustat:
         # ── Feedback loop: bugün uygulanmış ayarları izle ────────
         self._applied_today: set[str] = set()
 
+        # ── Aşama 5: Gerçek zamanlı durum bilinci (30 dk mini-analiz) ──
+        self._last_intraday_check: datetime | None = None
+        self._intraday_adjustments: dict[str, Any] = {}  # Geçici parametre ayarları
+        self._intraday_adj_expiry: dict[str, datetime] = {}  # TTL takibi
+
         # ── Persistence: DB'den önceki oturum verilerini yükle ─────
         self._load_persisted_state()
 
@@ -193,6 +198,13 @@ class Ustat:
         # 4. Strateji havuzu güncelleme — 30 dk'da bir
         if self._should_update_strategy_pool(now):
             self._update_strategy_pool(baba, now)
+
+        # 4b. Gerçek zamanlı durum bilinci — 30 dk mini-analiz
+        if self._should_intraday_check(now):
+            self._run_intraday_check(baba, ogul, now)
+
+        # 4c. Süresi dolan geçici ayarları temizle
+        self._expire_intraday_adjustments(now)
 
         # 5. Kontrat tanıtımı güncelleme — günde 1 kez
         if self._should_update_contract_profiles(now):
@@ -961,6 +973,138 @@ class Ustat:
             return abs(entry_price * 0.01)
 
     # ════════════════════════════════════════════════════════════════
+    #  5b. GERÇEK ZAMANLI DURUM BİLİNCİ (30 dk mini-analiz)
+    # ════════════════════════════════════════════════════════════════
+
+    _INTRADAY_INTERVAL_SEC: int = 1800  # 30 dakika
+    _INTRADAY_TTL_HOURS: int = 2        # Geçici ayar ömrü
+
+    def _should_intraday_check(self, now: datetime) -> bool:
+        """30 dakikalık mini-analiz zamanı geldi mi?"""
+        # Sadece piyasa saatlerinde çalış (09:45-17:45)
+        if now.hour < 9 or (now.hour == 9 and now.minute < 45):
+            return False
+        if now.hour > 17 or (now.hour == 17 and now.minute > 45):
+            return False
+        if self._last_intraday_check is None:
+            return True
+        elapsed = (now - self._last_intraday_check).total_seconds()
+        return elapsed >= self._INTRADAY_INTERVAL_SEC
+
+    def _run_intraday_check(self, baba: Any, ogul: Any, now: datetime) -> None:
+        """Son 30 dakikanın işlemlerini analiz et, geçici ayar yap.
+
+        Kurallar:
+          - 3 ardışık zarar + aynı strateji → o strateji signal_threshold +15 (2 saat TTL)
+          - 3 ardışık kâr + aynı rejim → lot_scale ×1.10 (2 saat TTL)
+          - 30 dk'da 0 işlem + 5+ engellenen sinyal → WARNING log
+        """
+        self._last_intraday_check = now
+
+        # Son 30 dakikanın işlemlerini çek
+        since_str = (now - timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
+        recent = self._db.get_trades(closed_only=True, limit=10, exit_since=since_str)
+        if not recent:
+            return
+
+        # ── Pattern 1: 3 ardışık zarar + aynı strateji ──
+        consecutive_losses: list[dict] = []
+        for t in recent:
+            pnl = t.get("pnl", 0) or 0
+            if pnl < 0:
+                consecutive_losses.append(t)
+            else:
+                consecutive_losses = []  # Kârlı işlem seriyi kırar
+
+        if len(consecutive_losses) >= 3:
+            # Aynı strateji mi?
+            strategies = [t.get("strategy", "") for t in consecutive_losses[-3:]]
+            if strategies[0] and len(set(strategies)) == 1:
+                losing_strategy = strategies[0]
+                adj_key = f"signal_threshold_{losing_strategy}"
+
+                if adj_key not in self._intraday_adjustments:
+                    # Geçici eşik artırma
+                    active_key = self.strategy_pool.get("active_profile", "trend")
+                    profile = STRATEGY_PROFILES.get(active_key)
+                    if profile and "parameters" in profile:
+                        params = profile["parameters"]
+                        old_th = params.get("signal_threshold", 50)
+                        new_th = min(80, old_th + 15)
+                        if new_th != old_th:
+                            params["signal_threshold"] = new_th
+                            self._intraday_adjustments[adj_key] = {
+                                "param": "signal_threshold",
+                                "old_value": old_th,
+                                "new_value": new_th,
+                                "profile": active_key,
+                            }
+                            self._intraday_adj_expiry[adj_key] = (
+                                now + timedelta(hours=self._INTRADAY_TTL_HOURS)
+                            )
+                            logger.warning(
+                                f"[ÜSTAT] Gün içi ayar: {losing_strategy} signal_threshold "
+                                f"{old_th} → {new_th} (3 ardışık zarar, TTL=2h)"
+                            )
+
+        # ── Pattern 2: 3 ardışık kâr ──
+        consecutive_wins: list[dict] = []
+        for t in recent:
+            pnl = t.get("pnl", 0) or 0
+            if pnl > 0:
+                consecutive_wins.append(t)
+            else:
+                consecutive_wins = []
+
+        if len(consecutive_wins) >= 3:
+            adj_key = "lot_scale_boost"
+            if adj_key not in self._intraday_adjustments:
+                active_key = self.strategy_pool.get("active_profile", "trend")
+                profile = STRATEGY_PROFILES.get(active_key)
+                if profile and "parameters" in profile:
+                    params = profile["parameters"]
+                    old_scale = params.get("lot_scale", 1.0)
+                    new_scale = round(min(1.5, old_scale * 1.10), 2)
+                    if new_scale != old_scale:
+                        params["lot_scale"] = new_scale
+                        self._intraday_adjustments[adj_key] = {
+                            "param": "lot_scale",
+                            "old_value": old_scale,
+                            "new_value": new_scale,
+                            "profile": active_key,
+                        }
+                        self._intraday_adj_expiry[adj_key] = (
+                            now + timedelta(hours=self._INTRADAY_TTL_HOURS)
+                        )
+                        logger.warning(
+                            f"[ÜSTAT] Gün içi ayar: lot_scale "
+                            f"{old_scale} → {new_scale} (3 ardışık kâr, TTL=2h)"
+                        )
+
+    def _expire_intraday_adjustments(self, now: datetime) -> None:
+        """Süresi dolan geçici ayarları eski değerine döndür."""
+        expired_keys = [
+            k for k, expiry in self._intraday_adj_expiry.items()
+            if now >= expiry
+        ]
+        for key in expired_keys:
+            adj = self._intraday_adjustments.get(key)
+            if adj:
+                profile_key = adj.get("profile", "trend")
+                profile = STRATEGY_PROFILES.get(profile_key)
+                if profile and "parameters" in profile:
+                    param_name = adj["param"]
+                    old_value = adj["old_value"]
+                    current = profile["parameters"].get(param_name)
+                    profile["parameters"][param_name] = old_value
+                    logger.info(
+                        f"[ÜSTAT] Geçici ayar süresi doldu: {param_name} "
+                        f"{current} → {old_value} (geri alındı)"
+                    )
+            del self._intraday_adjustments[key]
+            del self._intraday_adj_expiry[key]
+
+    # ════════════════════════════════════════════════════════════════
     #  6. STRATEJİ HAVUZU
     # ════════════════════════════════════════════════════════════════
 
@@ -1223,16 +1367,15 @@ class Ustat:
     def _apply_regulation_feedback(self) -> None:
         """Regülasyon önerilerini strateji havuzundaki parametrelere uygula.
 
-        Güvenli mikro-ayarlama: parametreleri %10-%20 aralığında değiştirir.
-        Büyük değişiklikler yapmaz — sistemi kademeli optimize eder.
+        Performans verisine dayalı akıllı ayarlama:
+          - SL çok sık yeniyorsa → SL GENİŞLET (daha fazla nefes alanı)
+          - TP'ye hiç ulaşılamıyorsa → TP YAKINLAŞTIR (daha gerçekçi hedef)
+          - Erken çıkış çoksa → trailing GEVŞET
+          - Win-rate > %60 ise → İYİ GİDENİ BOZMA (parametrelere dokunma)
 
-        Kurallar:
-          - BABA hataları çoksa → SL çarpanını sıkılaştır (küçült)
-          - OĞUL hataları çoksa → sinyal eşiğini yükselt
-          - Düşük skorlu işlemler → trailing/breakeven parametrelerini ayarla
-          - Düşük win-rate kontratlar → (Top 5 zaten cezalandırıyor, ek ayar yok)
-
-        Tüm değişiklikler DB'ye config_history olarak kaydedilir.
+        Değişiklik aralığı: tek seferde maks %20.
+        Aynı parametre günde 1 kez ayarlanabilir.
+        Tüm değişiklikler DB'ye kaydedilir.
         """
         if not self.regulation_suggestions:
             return
@@ -1245,43 +1388,97 @@ class Ustat:
         params = profile["parameters"]
         applied: list[str] = []
 
+        # ── İYİ GİDENİ BOZMA kuralı: genel win-rate > %60 ise dokunma ──
+        overall_wr = 50.0
+        if self.trade_categories:
+            summary = self.trade_categories.get("summary", {})
+            overall_wr = summary.get("win_rate", 50.0)
+        if overall_wr > 60.0:
+            logger.info(
+                f"[ÜSTAT] Win-rate %{overall_wr:.1f} > %60 — "
+                f"parametrelere dokunulmuyor (iyi gideni bozma kuralı)"
+            )
+            # BABA feedback'i de atla
+            return
+
+        # ── Son 20 işlemin performans analizi ──
+        recent_trades = self._db.get_trades(closed_only=True, limit=20)
+        sl_hit_count = 0
+        tp_hit_count = 0
+        early_exit_count = 0
+        total_recent = len(recent_trades) if recent_trades else 0
+
+        if recent_trades:
+            for t in recent_trades:
+                exit_reason = t.get("exit_reason", "") or t.get("cancel_reason", "")
+                if "sl" in exit_reason.lower() or "stop" in exit_reason.lower():
+                    sl_hit_count += 1
+                elif "tp" in exit_reason.lower() or "take" in exit_reason.lower():
+                    tp_hit_count += 1
+                # Erken çıkış: 5 dakikadan kısa işlemler
+                duration = t.get("duration_seconds", 0) or 0
+                if 0 < duration < 300:
+                    early_exit_count += 1
+
         for suggestion in self.regulation_suggestions:
             param = suggestion.get("parameter", "")
             priority = suggestion.get("priority", "LOW")
 
-            # ── Günlük tekrar koruması: aynı parametre bugün zaten ayarlandıysa atla
             if param in self._applied_today:
                 continue
 
-            # HIGH öncelik: BABA risk hataları → SL sıkılaştır
+            # HIGH: BABA risk hataları → SL/TP performans bazlı ayarla
             if param == "max_daily_loss" and priority == "HIGH":
                 old_sl = params.get("sl_atr_mult", 1.5)
-                # SL'yi %10 küçült (daha sıkı risk)
-                new_sl = round(max(0.8, old_sl * 0.90), 2)
-                if new_sl != old_sl:
-                    params["sl_atr_mult"] = new_sl
-                    applied.append(f"sl_atr_mult: {old_sl} → {new_sl}")
-                    self._applied_today.add(param)
+                old_tp = params.get("tp_atr_mult", 2.0)
 
-            # MEDIUM öncelik: OĞUL sinyal hataları → eşik yükselt
+                # SL çok sık yeniyor (> %60) → SL GENİŞLET
+                if total_recent >= 5 and sl_hit_count / total_recent > 0.60:
+                    new_sl = round(min(3.0, old_sl * 1.20), 2)
+                    if new_sl != old_sl:
+                        params["sl_atr_mult"] = new_sl
+                        applied.append(f"sl_atr_mult: {old_sl} → {new_sl} (SL çok sık yeniyor)")
+                # SL nadiren yeniyor (< %20) → SL SIKILAŞTIR (risk azalt)
+                elif total_recent >= 5 and sl_hit_count / total_recent < 0.20:
+                    new_sl = round(max(0.8, old_sl * 0.85), 2)
+                    if new_sl != old_sl:
+                        params["sl_atr_mult"] = new_sl
+                        applied.append(f"sl_atr_mult: {old_sl} → {new_sl} (SL nadiren yeniyor)")
+
+                # TP'ye hiç ulaşılamıyor (< %15) → TP YAKINLAŞTIR
+                if total_recent >= 5 and tp_hit_count / total_recent < 0.15:
+                    new_tp = round(max(1.0, old_tp * 0.80), 2)
+                    if new_tp != old_tp:
+                        params["tp_atr_mult"] = new_tp
+                        applied.append(f"tp_atr_mult: {old_tp} → {new_tp} (TP ulaşılamıyor)")
+
+                self._applied_today.add(param)
+
+            # MEDIUM: OĞUL sinyal hataları → eşik yükselt
             elif param == "signal_threshold" and priority in ("MEDIUM", "HIGH"):
                 old_th = params.get("signal_threshold", 50)
-                # Eşiği %10 artır (daha seçici sinyal)
                 new_th = min(80, old_th + 5)
                 if new_th != old_th:
                     params["signal_threshold"] = new_th
                     applied.append(f"signal_threshold: {old_th} → {new_th}")
                     self._applied_today.add(param)
 
-            # MEDIUM öncelik: İşlem yönetimi kötü → trailing iyileştir
+            # MEDIUM: İşlem yönetimi kötü → trailing erken çıkış bazlı ayarla
             elif param == "trade_management" and priority == "MEDIUM":
                 old_trail = params.get("trailing_start_atr", 1.0)
-                # Trailing'i %10 sıkılaştır (daha erken aktif)
-                new_trail = round(max(0.5, old_trail * 0.90), 2)
-                if new_trail != old_trail:
-                    params["trailing_start_atr"] = new_trail
-                    applied.append(f"trailing_start_atr: {old_trail} → {new_trail}")
-                    self._applied_today.add(param)
+                # Erken çıkış çoksa (> %40) → trailing GEVŞET
+                if total_recent >= 5 and early_exit_count / total_recent > 0.40:
+                    new_trail = round(min(2.0, old_trail * 1.15), 2)
+                    if new_trail != old_trail:
+                        params["trailing_start_atr"] = new_trail
+                        applied.append(f"trailing_start_atr: {old_trail} → {new_trail} (erken çıkış fazla)")
+                # Erken çıkış azsa → trailing SIKILAŞTIR
+                elif total_recent >= 5 and early_exit_count / total_recent < 0.10:
+                    new_trail = round(max(0.5, old_trail * 0.90), 2)
+                    if new_trail != old_trail:
+                        params["trailing_start_atr"] = new_trail
+                        applied.append(f"trailing_start_atr: {old_trail} → {new_trail} (erken çıkış az)")
+                self._applied_today.add(param)
 
         if applied:
             # Strateji havuzunu güncelle
@@ -1880,8 +2077,22 @@ class Ustat:
             params = dict(STRATEGY_PROFILES["trend"]["parameters"])
 
         # ── Strateji yönlendirmesi: rejim + geçmiş veriye dayalı tercih ──
-        params["preferred_strategy"] = self._determine_preferred_strategy(active_key)
-        params["strategy_bonus"] = 10  # Tercih edilen stratejiye eklenecek bonus puan
+        pref = self._determine_preferred_strategy(active_key)
+        params["preferred_strategy"] = pref
+        params["strategy_bonus"] = 10  # Eski bonus (geriye uyumluluk)
+
+        # ── Strateji win-rate bilgisi (Aşama 2: ağırlıklı tercih) ──
+        # trade_categories'den her stratejinin win-rate'ini çıkar
+        strategy_win_rates: dict[str, float] = {}
+        strategy_trade_counts: dict[str, int] = {}
+        if self.trade_categories:
+            strat_dist = self.trade_categories.get("strategy_dist", {})
+            for strat_name, strat_data in strat_dist.items():
+                if isinstance(strat_data, dict):
+                    strategy_win_rates[strat_name] = strat_data.get("win_rate", 50.0)
+                    strategy_trade_counts[strat_name] = strat_data.get("count", 0)
+        params["strategy_win_rates"] = strategy_win_rates
+        params["strategy_trade_counts"] = strategy_trade_counts
         return params
 
     def _determine_preferred_strategy(self, active_profile: str) -> str:
