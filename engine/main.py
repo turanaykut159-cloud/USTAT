@@ -93,6 +93,7 @@ class Engine:
         self.config = config or Config()
         self.db = db or Database(self.config)
         self.mt5 = mt5 or MT5Bridge(self.config)
+        self._last_symbol_resolve_date: date | None = None  # Günlük vade geçişi kontrolü
         self.pipeline = pipeline or DataPipeline(self.mt5, self.db, self.config)
         self.ustat = ustat or Ustat(self.config, self.db)
         self.baba = baba or Baba(self.config, self.db, mt5=self.mt5)
@@ -189,6 +190,7 @@ class Engine:
         self._last_backup_cycle: int = 0  # v5.4.1: periyodik yedekleme sayacı
         self._consecutive_slow_cycles: int = 0  # v5.4.1: ardışık yavaş cycle sayacı
         self._last_successful_cycle_time: float = 0.0  # v5.4.1: son başarılı cycle epoch
+        self._last_weekly_maintenance: date | None = None  # Haftalık bakım tarihi
 
     # ═════════════════════════════════════════════════════════════════
     #  BAŞLATMA / DURDURMA
@@ -264,6 +266,94 @@ class Engine:
         # 4. Ana döngü
         self._running = True
         self._main_loop()
+
+    def _run_weekly_maintenance(self, today: date) -> None:
+        """Haftalık bakım: DB integrity, disk, bellek, stale dosya temizliği.
+
+        Her Pazartesi 18:00+ veya ilk çalışmada bir kez çalışır.
+        """
+        import shutil
+        import os
+
+        report: list[str] = []
+
+        # 1. DB bütünlük kontrolü
+        try:
+            result = self.db._execute("PRAGMA integrity_check", fetch=True)
+            if result and result[0][0] == "ok":
+                report.append("DB: OK")
+            else:
+                report.append(f"DB: SORUN — {result}")
+                logger.critical(f"DB BÜTÜNLÜK HATASI: {result}")
+        except Exception as exc:
+            report.append(f"DB: kontrol hatası — {exc}")
+
+        # 2. Disk alanı kontrolü
+        try:
+            ustat_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            usage = shutil.disk_usage(ustat_dir)
+            free_gb = usage.free / (1024 ** 3)
+            report.append(f"Disk: {free_gb:.1f} GB boş")
+            if free_gb < 1.0:
+                logger.warning(f"DİSK UYARISI: {free_gb:.1f} GB kaldı!")
+        except Exception:
+            report.append("Disk: kontrol edilemedi")
+
+        # 3. DB dosya boyutu
+        try:
+            db_path = self.db._path if hasattr(self.db, '_path') else None
+            if db_path and os.path.exists(str(db_path)):
+                db_size_mb = os.path.getsize(str(db_path)) / (1024 * 1024)
+                report.append(f"DB boyut: {db_size_mb:.1f} MB")
+                if db_size_mb > 500:
+                    logger.warning(f"DB BOYUT UYARISI: {db_size_mb:.1f} MB (> 500 MB)")
+        except Exception:
+            report.append("DB boyut: kontrol edilemedi")
+
+        # 4. Log dosyaları toplam boyutu
+        try:
+            log_dir = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs"
+            )
+            if os.path.isdir(log_dir):
+                total_log_mb = sum(
+                    os.path.getsize(os.path.join(log_dir, f))
+                    for f in os.listdir(log_dir)
+                    if os.path.isfile(os.path.join(log_dir, f))
+                ) / (1024 * 1024)
+                report.append(f"Loglar: {total_log_mb:.1f} MB")
+        except Exception:
+            report.append("Loglar: kontrol edilemedi")
+
+        # 5. Stale dosya temizliği (eski heartbeat, pid, signal)
+        try:
+            ustat_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            stale_files = ["engine.heartbeat.bak", "api.pid.bak"]
+            for sf in stale_files:
+                fp = os.path.join(ustat_dir, sf)
+                if os.path.exists(fp):
+                    os.remove(fp)
+                    report.append(f"Stale temizlendi: {sf}")
+        except Exception:
+            pass
+
+        # 6. DB otomatik backup
+        try:
+            self.db.backup()
+            report.append("Backup: OK")
+        except Exception as exc:
+            report.append(f"Backup: HATA — {exc}")
+
+        self._last_weekly_maintenance = today
+        summary = " | ".join(report)
+        logger.info(f"Haftalık bakım tamamlandı: {summary}")
+
+        self._log_event_safe(
+            "WEEKLY_MAINTENANCE",
+            f"Bakım raporu: {summary}",
+            "INFO",
+            action="weekly_maintenance",
+        )
 
     def _write_heartbeat(self) -> None:
         """v5.4.1: Heartbeat dosyasını güncelle — watchdog tarafından izlenir.
@@ -479,6 +569,17 @@ class Engine:
                         except Exception as ret_exc:
                             logger.error(f"Retention hatası: {ret_exc}")
 
+                # Haftalık bakım (Pazartesi 18:00+ veya ilk çalışmada)
+                if self._last_weekly_maintenance is None or (
+                    today.weekday() == 0
+                    and self._last_weekly_maintenance != today
+                    and current_hour >= 18
+                ):
+                    try:
+                        self._run_weekly_maintenance(today)
+                    except Exception as mnt_exc:
+                        logger.error(f"Haftalık bakım hatası: {mnt_exc}")
+
             except _SystemStopError as exc:
                 logger.critical(f"SİSTEM DURDURMA: {exc}")
                 self._log_event_safe(
@@ -601,6 +702,16 @@ class Engine:
                 "MT5 bağlantısı kurtarılamadı — sistem durduruluyor"
             )
         t1 = _pc()
+
+        # ── 1b. Günlük sembol re-resolve (VİOP vade geçişi koruması) ──
+        today = date.today()
+        if self._last_symbol_resolve_date != today:
+            self._last_symbol_resolve_date = today
+            try:
+                self.mt5._resolve_symbols()
+                logger.info(f"Günlük sembol re-resolve tamamlandı: {today}")
+            except Exception as exc:
+                logger.error(f"Sembol re-resolve hatası: {exc}")
 
         # ── 2. Veri Güncelleme ────────────────────────────────────
         self._update_data()
