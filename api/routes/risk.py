@@ -105,7 +105,7 @@ async def get_risk():
         if until is not None:
             resp.cooldown_until = str(until)
 
-        # RiskParams'tan limitler
+        # RiskParams'tan limitler (engine yoksa config'den fallback)
         if engine and hasattr(engine, 'risk_params'):
             rp = engine.risk_params
             resp.max_daily_loss = rp.max_daily_loss
@@ -116,6 +116,21 @@ async def get_risk():
             resp.max_daily_trades = rp.max_daily_trades
             resp.consecutive_loss_limit = rp.consecutive_loss_limit
             resp.max_open_positions = rp.max_open_positions
+        else:
+            # Engine henüz başlamadıysa config'den oku (schema default'larına güvenme)
+            from engine.config import Config
+            try:
+                _cfg = Config()
+                resp.max_daily_loss = _cfg.get("risk.max_daily_loss_pct", 0.018)
+                resp.max_weekly_loss = _cfg.get("risk.max_weekly_loss_pct", 0.04)
+                resp.max_monthly_loss = _cfg.get("risk.max_monthly_loss_pct", 0.07)
+                resp.hard_drawdown = _cfg.get("risk.hard_drawdown_pct", 0.15)
+                resp.max_floating_loss = _cfg.get("risk.max_floating_loss_pct", 0.015)
+                resp.max_daily_trades = _cfg.get("risk.max_daily_trades", 5)
+                resp.consecutive_loss_limit = _cfg.get("risk.consecutive_loss_limit", 3)
+                resp.max_open_positions = _cfg.get("risk.max_open_positions", 5)
+            except Exception:
+                pass  # Schema default'ları kalır
 
         # Risk verdict
         if engine and hasattr(engine, 'risk_params'):

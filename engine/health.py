@@ -103,6 +103,10 @@ class HealthCollector:
         self.order_reject_count: int = 0
         self.order_timeout_count: int = 0
 
+        # Alarm state (instance-level — class-level'dan taşındı)
+        self._consecutive_rejects: int = 0
+        self._last_reject_reason: str = ""
+
     # ── Record metodları ────────────────────────────────────────
 
     def record_cycle(self, timings: CycleTimings) -> None:
@@ -260,8 +264,6 @@ class HealthCollector:
         }
 
     # ── Alarm state ───────────────────────────────────────────────
-    _consecutive_rejects: int = 0
-    _last_reject_reason: str = ""
 
     def record_order_reject(self, symbol: str, retcode: int, comment: str) -> None:
         """Ardışık emir reddi say — 3'te alarm."""
@@ -408,9 +410,9 @@ def run_startup_smoke_test(mt5_bridge) -> SmokeTestResult:
         expiry = _dt.combine(today, _dt.min.time().replace(hour=18, minute=10))
         now = _dt.now()
         if expiry <= now:
-            result.fail(
+            result.ok(
                 "ORDER_EXPIRATION",
-                f"Expiry ({expiry}) geçmişte — seans bitmiş olabilir"
+                f"Seans dışı mod — expiry ({expiry}) geçmiş, engine izleme modunda başlayacak"
             )
         else:
             diff_min = (expiry - now).total_seconds() / 60

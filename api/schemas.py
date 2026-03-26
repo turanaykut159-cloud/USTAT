@@ -787,6 +787,8 @@ class NewsActiveResponse(BaseModel):
     """GET /api/news/active — Aktif haberler listesi."""
     count: int = 0
     events: list[NewsEventItem] = []
+    best_sentiment: float | None = None
+    worst_sentiment: float | None = None
 
 
 class LiveNews(BaseModel):

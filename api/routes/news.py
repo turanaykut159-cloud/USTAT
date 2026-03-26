@@ -79,9 +79,14 @@ async def news_active():
             lot_multiplier=ev.lot_multiplier,
         ))
 
+    best_s = max((it.sentiment_score for it in items), default=None) if items else None
+    worst_s = min((it.sentiment_score for it in items), default=None) if items else None
+
     return NewsActiveResponse(
         count=len(items),
         events=items,
+        best_sentiment=best_s,
+        worst_sentiment=worst_s,
     )
 
 
