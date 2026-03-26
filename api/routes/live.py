@@ -25,6 +25,7 @@ from datetime import datetime
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from api.deps import get_baba, get_db, get_engine, get_ogul, get_pipeline
+from api.routes.positions import _source_for_position, _tur_for_position
 
 logger = logging.getLogger("ustat.api.ws")
 
@@ -190,9 +191,9 @@ async def _send_all_updates(ws: WebSocket):
         })
 
     # ── 3. Pozisyon güncellemesi (cache'den, strateji OĞUL'dan) ───
-    _OTOMATIK_STRATEJILER = frozenset({"trend_follow", "mean_reversion", "breakout"})
     if cache_ok and pipeline.latest_positions is not None:
         ogul = get_ogul()
+        engine = get_engine()
         # Hibrit ticket seti — positions.py ile tutarlı tür sınıflandırması
         from api.deps import get_h_engine as _get_h_engine
         _h_engine = _get_h_engine()
@@ -225,7 +226,17 @@ async def _send_all_updates(ws: WebSocket):
             cost_averaged = False
             peak_profit = 0.0
             voting_score = 0
-            if ogul and getattr(ogul, "active_trades", None):
+
+            # Önce ManuelMotor kontrol (manuel + MT5 pozisyonlar)
+            _mm = engine.manuel_motor if engine else None
+            if _mm and getattr(_mm, "active_trades", None):
+                for _sym, trade in _mm.active_trades.items():
+                    if getattr(trade, "ticket", 0) == ticket and _sym == symbol:
+                        strategy = "manual"
+                        break
+
+            # Sonra OĞUL kontrol (otomatik pozisyonlar)
+            if strategy == "bilinmiyor" and ogul and getattr(ogul, "active_trades", None):
                 for _sym, trade in ogul.active_trades.items():
                     if getattr(trade, "ticket", 0) == ticket and _sym == symbol:
                         strategy = getattr(trade, "strategy", "") or "bilinmiyor"
@@ -236,12 +247,11 @@ async def _send_all_updates(ws: WebSocket):
                         voting_score = getattr(trade, "voting_score", 0)
                         break
 
-            # tur alanı: Hibrit / Otomatik / Manuel (positions.py ile tutarlı)
-            if ticket in _hybrid_tickets:
-                tur = "Hibrit"
-            else:
-                strat_key = strategy.strip().lower()
-                tur = "Otomatik" if strat_key in _OTOMATIK_STRATEJILER else "Manuel"
+            # source: DB-tabanlı çözümleme (positions.py ile AYNI fonksiyon)
+            source = _source_for_position(ticket, symbol, _mm, db)
+
+            # tur: positions.py ile AYNI fonksiyon
+            tur = _tur_for_position(ticket, strategy, _hybrid_tickets, source)
 
             pos_list.append({
                 "ticket": ticket,
