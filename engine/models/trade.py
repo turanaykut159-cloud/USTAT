@@ -43,6 +43,7 @@ class Trade:
     closed_at: datetime | None = None
     ticket: int = 0
     strategy: str = ""           # "trend_follow", "mean_reversion", "breakout"
+    source: str = ""             # "app" (ManuelMotor UI), "mt5_direct" (MT5 terminali), "" (otomatik/eski)
     trailing_sl: float = 0.0     # güncel trailing stop seviyesi
     db_id: int = 0               # DB satır id'si (update için)
     # ── State-machine alanları ──────────────────────────────────

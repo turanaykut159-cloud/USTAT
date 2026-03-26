@@ -4785,10 +4785,27 @@ class Ogul:
                     f"strateji={strategy} rejim={regime_at_entry}"
                 )
             else:
+                # ── v5.8.2: Yetim pozisyon → ManuelMotor'a devret ──────────
+                # DB eşleşmesi olmayan pozisyonlar MT5 terminalinden doğrudan
+                # açılmış işlemlerdir. OĞUL sahiplenmek yerine ManuelMotor'a
+                # devreder — kullanıcının açtığı işlem kullanıcının kontrolünde kalır.
+                if self.manuel_motor:
+                    adopted = self.manuel_motor.adopt_mt5_direct_position(pos)
+                    if adopted:
+                        orphan_count += 1
+                        logger.info(
+                            f"MT5-direct → ManuelMotor [{symbol}]: ticket={ticket} "
+                            f"{direction} {trade.volume} lot — OĞUL sahiplenmedi"
+                        )
+                        # OĞUL active_trades'e EKLEMİYORUZ — ManuelMotor sahiplendi
+                        self.active_trades.pop(symbol, None)
+                        restored_count -= 1
+                        continue
+                # ManuelMotor yoksa veya adopt başarısızsa eski davranış (yetim sahiplenme)
                 orphan_count += 1
                 logger.warning(
                     f"Yetim pozisyon geri yüklendi [{symbol}]: ticket={ticket} "
-                    f"{direction} {trade.volume} lot (DB eşleşmesi yok)"
+                    f"{direction} {trade.volume} lot (DB eşleşmesi yok, ManuelMotor devredilemedi)"
                 )
 
         # ── v5.8: Post-restore manuel pozisyon doğrulama ──────────────

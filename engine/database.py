@@ -242,6 +242,7 @@ class Database:
         )
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA synchronous=FULL")   # v5.8.1: WAL veri kaybı önlemi
         self._conn.execute("PRAGMA foreign_keys=ON")
 
         # Bütünlük kontrolü — bozuk DB erken tespit
@@ -341,6 +342,8 @@ class Database:
             "ALTER TABLE trades ADD COLUMN initial_volume REAL",
             "ALTER TABLE trades ADD COLUMN peak_profit REAL DEFAULT 0",
             "ALTER TABLE trades ADD COLUMN breakeven_hit INTEGER DEFAULT 0",
+            # v5.8.2: İşlem kaynağı — "app" (ManuelMotor UI), "mt5_direct" (MT5 terminali)
+            "ALTER TABLE trades ADD COLUMN source TEXT DEFAULT ''",
         ]
         with self._lock:
             for sql in _MIGRATIONS:
@@ -352,9 +355,22 @@ class Database:
         logger.debug("Pozisyon yönetimi migration tamamlandı.")
 
     def close(self) -> None:
-        """Bağlantıyı kapat."""
+        """Bağlantıyı kapat — WAL önce checkpoint'lenir.
+
+        v5.8.1: WAL checkpoint eklendi. Checkpoint yapılmadan close()
+        çağrılırsa WAL'daki kayıtlar kaybolabilir (id 168-171 vakası).
+        """
         with self._lock:
-            self._conn.close()
+            try:
+                # WAL'ı ana DB'ye yaz — veri kaybını önle
+                self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                logger.info("WAL checkpoint yapıldı (close öncesi)")
+            except Exception as exc:
+                logger.warning(f"WAL checkpoint hatası (close öncesi): {exc}")
+            try:
+                self._conn.close()
+            except Exception as exc:
+                logger.error(f"DB close hatası: {exc}")
         logger.info("Veritabanı bağlantısı kapatıldı.")
 
     # ── genel yardımcılar ────────────────────────────────────────────
@@ -582,8 +598,9 @@ class Database:
             """INSERT INTO trades
                (strategy, symbol, direction, entry_time, exit_time,
                 entry_price, exit_price, lot, pnl, slippage,
-                commission, swap, regime, fake_score, exit_reason)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                commission, swap, regime, fake_score, exit_reason,
+                mt5_position_id, source)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 trade["strategy"], trade["symbol"], trade["direction"],
                 trade.get("entry_time"), trade.get("exit_time"),
@@ -593,6 +610,8 @@ class Database:
                 trade.get("commission"), trade.get("swap"),
                 trade.get("regime"), trade.get("fake_score"),
                 trade.get("exit_reason"),
+                trade.get("mt5_position_id"),
+                trade.get("source", ""),
             ),
         )
         logger.debug(f"Trade insert id={cur.lastrowid}: {trade['symbol']}")

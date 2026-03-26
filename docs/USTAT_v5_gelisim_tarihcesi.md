@@ -2,6 +2,47 @@
 
 ---
 
+## #73 — MT5-Direct Pozisyon Sahiplenme (ManuelMotor Devri) (2026-03-26)
+
+### Bağlam
+Kullanıcı MT5 terminali üzerinden doğrudan pozisyon açtığında, engine restart sonrası bu pozisyonlar hiçbir motorun sahiplenmediği "yetim" olarak OĞUL tarafından alınıyordu. OĞUL kendi çıkış stratejileriyle (pullback_tolerance, weighted_reversal) bu kullanıcı işlemlerini kapatıyordu. 26 Mart 2026'da F_ASTOR (ticket=8050370050) ve F_TKFEN (ticket=8050373207) bu şekilde kapatıldı.
+
+### Kök Neden
+ManuelMotor sadece kendi API'si üzerinden açılan işlemleri tanıyordu (DB kaydı + marker dosyası + memory). MT5 terminalinden doğrudan açılan pozisyonlar bu üç kaynakta da yer almıyordu. Engine restart olduğunda OĞUL'un `restore_active_trades()` fonksiyonu bu pozisyonları yetim olarak sahipleniyordu.
+
+### Düzeltme
+1. **Trade modeli**: `source` alanı eklendi — `"app"` (ManuelMotor UI), `"mt5_direct"` (MT5 terminali), `""` (otomatik/eski)
+2. **Database migration**: `trades` tablosuna `source TEXT DEFAULT ''` kolonu eklendi
+3. **ManuelMotor**: Yeni `adopt_mt5_direct_position()` metodu — OĞUL'dan gelen yetim pozisyonları sahiplenip DB kaydı + marker + memory'ye ekler
+4. **OĞUL restore**: Yetim pozisyonları doğrudan sahiplenmek yerine `ManuelMotor.adopt_mt5_direct_position()` çağrısıyla devreder
+5. **ManuelMotor open_manual_trade**: `source="app"` ile açılan işlemleri işaretler
+6. **Marker dosyası**: `source` alanı eklendi — restart'ta kaynak bilgisi korunur
+
+### Etkilenen Fonksiyonlar
+| Fonksiyon | Değişiklik |
+|-----------|-----------|
+| `ManuelMotor.adopt_mt5_direct_position()` | YENİ — MT5-direct pozisyon sahiplenme |
+| `ManuelMotor.open_manual_trade()` | source="app" eklendi |
+| `ManuelMotor.restore_active_trades()` | source alanı restore'a dahil |
+| `ManuelMotor._save_marker()` | source alanı marker'a dahil |
+| `OĞUL.restore_active_trades()` | Yetim → ManuelMotor devri |
+| `Database._migrate_schema()` | source kolonu migration |
+| `Database.insert_trade()` | mt5_position_id + source alanları SQL'e eklendi |
+
+### Sınıflandırma
+C3 — Kırmızı Bölge değişikliği (ogul.py + database.py) + Yeşil Bölge (manuel_motor.py, trade.py)
+
+### Değişen Dosyalar
+| Dosya | Değişiklik |
+|-------|-----------|
+| `engine/models/trade.py` | `source` alanı eklendi (1 satır) |
+| `engine/database.py` | Migration + insert_trade SQL güncellemesi (~5 satır) |
+| `engine/manuel_motor.py` | `adopt_mt5_direct_position()` + source alanları (~75 satır) |
+| `engine/ogul.py` | Yetim → ManuelMotor devri (~15 satır) |
+| `docs/USTAT_v5_gelisim_tarihcesi.md` | Bu giriş (#73) |
+
+---
+
 ## #72 — Tam Sistem Audit & Beyin Geliştirme (2026-03-26)
 
 | Alan | Detay |

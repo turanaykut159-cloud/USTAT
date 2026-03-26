@@ -406,6 +406,7 @@ class ManuelMotor:
             state=TradeState.SIGNAL,
             opened_at=now,
             strategy="manual",
+            source="app",
             trailing_sl=sl,
             regime_at_entry=regime_str,
             requested_volume=lot,
@@ -502,6 +503,7 @@ class ManuelMotor:
             "entry_price": price,
             "lot": lot,
             "regime": regime_str,
+            "source": "app",
         })
         trade.db_id = db_id
 
@@ -927,6 +929,13 @@ class ManuelMotor:
                 except (ValueError, TypeError):
                     pass
 
+            # source bilgisini DB'den veya marker'dan al
+            restore_source = ""
+            if db_trade:
+                restore_source = db_trade.get("source", "app") or "app"
+            elif marker_match and marker_info:
+                restore_source = marker_info.get("source", "mt5_direct") or "mt5_direct"
+
             trade = Trade(
                 symbol=symbol,
                 direction=direction,
@@ -937,6 +946,7 @@ class ManuelMotor:
                 state=TradeState.FILLED,
                 ticket=ticket,
                 strategy=strategy,
+                source=restore_source,
                 trailing_sl=pos.get("sl", 0.0),
                 db_id=db_trade.get("id", 0) if db_trade else 0,
                 regime_at_entry=regime_at_entry,
@@ -973,6 +983,96 @@ class ManuelMotor:
         logger.info(f"ManuelMotor restore tamamlandı: {restored_count} pozisyon")
 
     # ─────────────────────────────────────────────────────────────────
+    #  MT5-DIRECT POZİSYON SAHİPLENME (v5.8.2)
+    # ─────────────────────────────────────────────────────────────────
+
+    def adopt_mt5_direct_position(self, pos: dict) -> bool:
+        """MT5 terminalinden doğrudan açılmış pozisyonu ManuelMotor'a devret.
+
+        OĞUL restore_active_trades() tarafından çağrılır. Hiçbir motorun
+        sahiplenmediği (yetim) pozisyonlar, kullanıcının MT5'ten açtığı
+        işlemler olarak ManuelMotor'a aktarılır.
+
+        Yapılan işlemler:
+            1. DB'ye strategy='manual', source='mt5_direct' kaydı oluştur
+            2. active_trades dict'e ekle
+            3. Marker dosyasını güncelle
+
+        Args:
+            pos: MT5 pozisyon verisi (symbol, ticket, type, volume, price_open, sl, tp).
+
+        Returns:
+            True: başarılı sahiplenme, False: hata oluştu.
+        """
+        try:
+            symbol = pos.get("symbol", "")
+            ticket = pos.get("ticket", 0)
+            direction = pos.get("type", "")
+            volume = pos.get("volume", 0.0)
+            entry_price = pos.get("price_open", 0.0)
+            sl = pos.get("sl", 0.0)
+            tp = pos.get("tp", 0.0)
+
+            if not symbol or not ticket:
+                logger.error(f"MT5-direct adopt: symbol veya ticket eksik — {pos}")
+                return False
+
+            # Netting kontrolü — aynı sembolde zaten pozisyon varsa alma
+            if symbol in self.active_trades:
+                logger.warning(
+                    f"MT5-direct adopt: {symbol} zaten active_trades'de — atlanıyor"
+                )
+                return False
+
+            # DB'ye kayıt oluştur
+            from datetime import datetime as _dt
+            now = _dt.now()
+            db_id = self.db.insert_trade({
+                "strategy": "manual",
+                "symbol": symbol,
+                "direction": direction,
+                "entry_time": now.isoformat(),
+                "entry_price": entry_price,
+                "lot": volume,
+                "regime": "",
+                "mt5_position_id": ticket,
+                "source": "mt5_direct",
+            })
+
+            # Trade nesnesi oluştur ve active_trades'e ekle
+            trade = Trade(
+                symbol=symbol,
+                direction=direction,
+                volume=volume,
+                entry_price=entry_price,
+                sl=sl,
+                tp=tp,
+                state=TradeState.FILLED,
+                ticket=ticket,
+                strategy="manual",
+                source="mt5_direct",
+                trailing_sl=sl,
+                db_id=db_id,
+                regime_at_entry="",
+                opened_at=now,
+            )
+
+            self.active_trades[symbol] = trade
+            self._save_marker()
+
+            logger.info(
+                f"MT5-direct sahiplenildi [{symbol}]: ticket={ticket} "
+                f"{direction} {volume} lot @ {entry_price} — DB id={db_id}"
+            )
+            return True
+
+        except Exception as exc:
+            logger.error(
+                f"MT5-direct sahiplenme hatası [{pos.get('symbol', '?')}]: {exc}"
+            )
+            return False
+
+    # ─────────────────────────────────────────────────────────────────
     #  YARDIMCI METOTLAR
     # ─────────────────────────────────────────────────────────────────
 
@@ -1006,6 +1106,7 @@ class ManuelMotor:
                     "volume": trade.volume,
                     "entry_price": trade.entry_price,
                     "opened_at": trade.opened_at.isoformat() if trade.opened_at else None,
+                    "source": getattr(trade, "source", ""),
                 }
             # Atomik yaz: önce temp dosyaya, sonra rename
             tmp = self._marker_path.with_suffix(".tmp")
