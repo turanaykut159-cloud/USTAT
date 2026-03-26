@@ -2,6 +2,66 @@
 
 ---
 
+## #75 — Vade Geçişi GCM Paraleli — İşlem Sürekliliği (2026-03-26)
+
+### Bağlam
+OĞUL tüm gün NOTR kaldı, hiç otomatik işlem açmadı. Top 5 seçim algoritması sürekli boş liste döndürüyordu. Kullanıcı araştırma istedi.
+
+### Kök Neden
+`top5_selection.py` vade geçiş parametreleri GCM MT5 modeliyle uyumsuzdu:
+- `EXPIRY_NO_NEW_TRADE_DAYS = 3` → Vade sonuna 3 iş günü kala TÜM eski vade kontratları Top 5'ten dışlanıyordu
+- `EXPIRY_OBSERVATION_DAYS = 2` → Yeni vadeye geçiş sonrası 2 gün "gözlem" bekleniyor, işlem açılmıyordu
+- 31 Mart 2026 VİOP vadesi → 26 Mart'ta 3 iş günü kala filtre devreye girdi → 15 kontratın tamamı elendi → Top 5 boş
+
+GCM MT5 modeli ise farklıdır: sadece son işlem gününde (vade günü) eski vadeden işlem açtırmaz, aynı gün yeni vade kontratını "visible" yapar. Gözlem süresi yoktur.
+
+### Düzeltme
+`engine/top5_selection.py` sabitleri GCM paraleline alındı:
+- `EXPIRY_NO_NEW_TRADE_DAYS: 3 → 1` — Sadece son işlem günü eski vade bloke
+- `EXPIRY_CLOSE_DAYS: 1 → 1` (değişmedi)
+- `EXPIRY_OBSERVATION_DAYS: 2 → 0` — Yeni vadeye anında geçiş, gözlem bekleme yok
+
+Ek olarak: `_refresh_scores()` satır 287'de filtre listesine `"close"` eklendi. `CLOSE_DAYS = 1` ve `NO_NEW_TRADE_DAYS = 1` eşit olduğunda `_get_expiry_status()` "close" döndürüyor ama eski filtre sadece `("observation", "no_new_trade")` kontrol ediyordu → son işlem günü kontratlar hâlâ Top 5'e girebiliyordu.
+
+### Doğrulama
+Değişiklik sonrası Top 5 seçimi 5 kontrat döndürdü: F_TKFEN, F_HALKB, F_EKGYO, F_GUBRF, F_KONTR.
+
+### Sınıflandırma
+C1 — Yeşil Bölge sabit değişikliği + filtre düzeltmesi
+
+### Değişen Dosyalar
+| Dosya | Değişiklik |
+|-------|-----------|
+| `engine/top5_selection.py` | 3 sabit değeri güncellendi + `"close"` filtre listesine eklendi (~8 satır) |
+| `docs/USTAT_v5_gelisim_tarihcesi.md` | Bu giriş (#75) |
+
+---
+
+## #74 — WebSocket TÜR Sütunu Tutarsızlığı Düzeltmesi (2026-03-26)
+
+### Bağlam
+Dashboard pozisyon tablosunda TÜR sütunu "Manuel" ve "MT5" arasında sürekli değişiyordu. REST endpoint (`/positions`) doğru veriyi döndürüyor, WebSocket endpoint (`/ws/live`) farklı bir mantıkla hesaplıyordu.
+
+### Kök Neden
+`api/routes/live.py` WS endpoint'i, ManuelMotor'un in-memory `source` alanını okuyordu. ManuelMotor'un `restore_active_trades()` sırasında yüklediği `source` bilgisi hatalıydı (yanlış DB kaydı yükleniyordu). REST endpoint ise DB sorgusu ile doğru kaydı (`ORDER BY rowid ASC LIMIT 1`) buluyordu.
+
+### Düzeltme
+- `live.py`: ManuelMotor memory okuması kaldırıldı, `positions.py`'den `_source_for_position()` ve `_tur_for_position()` import edildi
+- WS endpoint artık REST endpoint ile AYNI DB-tabanlı source çözümleme fonksiyonlarını kullanıyor
+- `positions.py`: Debug loglama (`_slog`, `_SOURCE_LOG`) temizlendi
+
+### Sınıflandırma
+C2 — API route değişikliği (iki dosya, ortak fonksiyon kullanımı)
+
+### Değişen Dosyalar
+| Dosya | Değişiklik |
+|-------|-----------|
+| `api/routes/live.py` | Import + WS pozisyon döngüsünde DB-tabanlı source çözümleme (~26 satır) |
+| `api/routes/positions.py` | Debug loglama temizliği (~66 satır kaldırıldı) |
+| `docs/USTAT_v5_gelisim_tarihcesi.md` | Bu giriş (#74) |
+
+---
+
 ## #73 — MT5-Direct Pozisyon Sahiplenme (ManuelMotor Devri) (2026-03-26)
 
 ### Bağlam
