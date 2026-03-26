@@ -76,10 +76,13 @@ VOLFIT_TREND_IDEAL: float = 0.012
 VOLFIT_RANGE_IDEAL: float = 0.005
 VOLFIT_TOLERANCE: float = 0.010
 
-# ── Vade geçişi parametreleri ─────────────────────────────────────────
-EXPIRY_NO_NEW_TRADE_DAYS: int = 3
+# ── Vade geçişi parametreleri (GCM paraleli) ────────────────────────
+# Son işlem günü (vade günü) eski vadeden yeni işlem açılmaz.
+# GCM MT5 o gün yeni vade kontratını visible yapar → _resolve_symbols
+# otomatik geçer. Gözlem süresi 0 = yeni vadeye anında geçiş.
+EXPIRY_NO_NEW_TRADE_DAYS: int = 1
 EXPIRY_CLOSE_DAYS: int = 1
-EXPIRY_OBSERVATION_DAYS: int = 2
+EXPIRY_OBSERVATION_DAYS: int = 0
 
 # ── Yardımcı fonksiyonlar ─────────────────────────────────────────────
 from engine.utils.time_utils import ALL_HOLIDAYS
@@ -284,7 +287,7 @@ class Top5Selector:
         top5_final: list[str] = []
         for sym, _sc in top5_above_avg:
             status = expiry_status.get(sym, "normal")
-            if status in ("observation", "no_new_trade"):
+            if status in ("observation", "no_new_trade", "close"):
                 continue
             if self._is_news_blocked(sym, today):
                 continue
