@@ -87,6 +87,7 @@ class HybridPosition:
     trailing_active: bool = False
     transferred_at: str = ""
     db_id: int = 0
+    reference_price: float = 0.0  # PRİMNET: Uzlaşma fiyatı (devir günü)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -144,6 +145,13 @@ class HEngine:
         self._trailing_min_pct: float = hybrid_cfg.get("trailing_min_pct", 0.015)  # %1.5
         self._trailing_max_pct: float = hybrid_cfg.get("trailing_max_pct", 0.080)  # %8.0
 
+        # ── PRİMNET — Prim Bazlı Net Emir Takip Sistemi ─────────
+        primnet_cfg = hybrid_cfg.get("primnet", {})
+        self._primnet_faz1_stop: float = primnet_cfg.get("faz1_stop_prim", 1.5)
+        self._primnet_faz2_activation: float = primnet_cfg.get("faz2_activation_prim", 2.0)
+        self._primnet_faz2_trailing: float = primnet_cfg.get("faz2_trailing_prim", 1.0)
+        self._primnet_target: float = primnet_cfg.get("target_prim", 9.5)
+
         # ── Kademeli Oran Sistemi (3 Fazlı Koruma) ───────────────
         self._trailing_graduated: bool = hybrid_cfg.get("trailing_graduated", False)
         raw_tiers = hybrid_cfg.get("trailing_graduated_tiers", [
@@ -158,7 +166,13 @@ class HEngine:
         )
 
         sltp_mode = "NATIVE (MT5)" if self._native_sltp else "SOFTWARE (H-Oğul)"
-        if self._trailing_mode == "profit" and self._trailing_graduated:
+        if self._trailing_mode == "primnet":
+            trailing_desc = (
+                f"PRİMNET (stop={self._primnet_faz1_stop}, "
+                f"faz2={self._primnet_faz2_activation}→{self._primnet_faz2_trailing}, "
+                f"hedef=±{self._primnet_target})"
+            )
+        elif self._trailing_mode == "profit" and self._trailing_graduated:
             tier_info = ", ".join(
                 f"{t['label']}≥{t['min_profit']}→%{t['lock_ratio']*100:.0f}"
                 for t in sorted(raw_tiers, key=lambda t: t["min_profit"])
@@ -397,6 +411,30 @@ class HEngine:
         result["symbol"] = symbol
         result["entry_atr"] = atr_value
 
+        # ── PRİMNET: Prim bazlı SL/TP hesapla (ATR yerine) ──────
+        ref_price = 0.0
+        if self._trailing_mode == "primnet":
+            ref_price = self._get_reference_price(symbol) or 0.0
+            if ref_price > 0:
+                entry_prim = self._price_to_prim(entry_price, ref_price)
+                if direction == "BUY":
+                    stop_prim = entry_prim - self._primnet_faz1_stop
+                    target_prim = self._primnet_target
+                else:
+                    stop_prim = entry_prim + self._primnet_faz1_stop
+                    target_prim = -self._primnet_target
+                suggested_sl = self._prim_to_price(stop_prim, ref_price)
+                suggested_tp = self._prim_to_price(target_prim, ref_price)
+                logger.info(
+                    f"PRİMNET devir: {symbol} {direction} giriş_prim={entry_prim:.2f} "
+                    f"stop_prim={stop_prim:.2f} hedef_prim={target_prim:.2f} "
+                    f"SL={suggested_sl:.4f} TP={suggested_tp:.4f} ref={ref_price:.4f}"
+                )
+            else:
+                logger.warning(
+                    f"PRİMNET: Referans fiyat alınamadı [{symbol}] — ATR SL/TP kullanılıyor"
+                )
+
         # ── 1. SL/TP ataması ────────────────────────────────────────
         if self._native_sltp:
             # Native mod: MT5'e SL/TP yaz (atomik — başarısızsa devir iptal)
@@ -470,7 +508,11 @@ class HEngine:
             state="ACTIVE",
             transferred_at=datetime.now().isoformat(timespec="seconds"),
             db_id=db_id,
+            reference_price=ref_price,
         )
+        # PRİMNET: breakeven_hit baştan True — Faz 1 trailing hemen başlar
+        if self._trailing_mode == "primnet":
+            hp.breakeven_hit = True
         self.hybrid_positions[ticket] = hp
 
         # ── 3b. ManuelMotor aktif işlemlerden çıkar ──────────────────
@@ -630,6 +672,11 @@ class HEngine:
             if not self._native_sltp:
                 if self._check_software_sltp(hp, current_price, profit, swap):
                     continue  # Pozisyon kapatıldı, sonraki döngüye geç
+
+            # ── PRİMNET hedef kontrolü (tavan/tabana 0.5 kala) ───
+            if self._trailing_mode == "primnet":
+                if self._check_primnet_target(hp, current_price, profit, swap):
+                    continue  # Hedef kapanış, sonraki döngüye geç
 
             # ── Breakeven kontrolü ────────────────────────────────
             self._check_breakeven(hp, current_price, profit, swap)
@@ -825,6 +872,11 @@ class HEngine:
             swap: Birikmiş swap.
         """
         if hp.breakeven_hit:
+            return
+
+        # PRİMNET modunda breakeven atlanır — Faz 1 trailing baştan çalışır
+        if self._trailing_mode == "primnet":
+            hp.breakeven_hit = True  # trailing'in çalışması için
             return
 
         # Fiyat bazlı kâr hesabı (yön dikkate alınır)
@@ -1046,7 +1098,9 @@ class HEngine:
         if not hp.breakeven_hit:
             return
 
-        if self._trailing_mode == "profit":
+        if self._trailing_mode == "primnet":
+            new_sl = self._calc_primnet_trailing_sl(hp, current_price)
+        elif self._trailing_mode == "profit":
             new_sl = self._calc_profit_trailing_sl(hp, current_price, profit, swap)
         else:
             new_sl = self._calc_atr_trailing_sl(hp, current_price)
@@ -1054,36 +1108,35 @@ class HEngine:
         if new_sl is None:
             return
 
-        # Min/Max trailing mesafe sınırı (VİOP Rapor uyumu)
-        if current_price > 0:
-            min_dist = current_price * self._trailing_min_pct
-            max_dist = current_price * self._trailing_max_pct
-            if hp.direction == "BUY":
-                distance = current_price - new_sl
-                clamped = max(min_dist, min(distance, max_dist))
-                new_sl = current_price - clamped
-            else:
-                distance = new_sl - current_price
-                clamped = max(min_dist, min(distance, max_dist))
-                new_sl = current_price + clamped
+        # PRİMNET modunda min/max clamp ve breakeven floor atlanır
+        # (prim bazlı mesafeler zaten doğru hesaplanmış)
+        if self._trailing_mode != "primnet":
+            # Min/Max trailing mesafe sınırı (VİOP Rapor uyumu)
+            if current_price > 0:
+                min_dist = current_price * self._trailing_min_pct
+                max_dist = current_price * self._trailing_max_pct
+                if hp.direction == "BUY":
+                    distance = current_price - new_sl
+                    clamped = max(min_dist, min(distance, max_dist))
+                    new_sl = current_price - clamped
+                else:
+                    distance = new_sl - current_price
+                    clamped = max(min_dist, min(distance, max_dist))
+                    new_sl = current_price + clamped
 
-        # ── Breakeven Floor (v5.8) ─────────────────────────────
-        # Min distance SL'yi entry'den kötüye çekebilir.
-        # Bu floor, SL'nin asla entry'den kötü olmamasını garanti eder.
-        # SELL: SL entry'nin üstüne çıkamaz (yukarı = kötü)
-        # BUY:  SL entry'nin altına inemez  (aşağı = kötü)
-        if hp.direction == "SELL" and new_sl > hp.entry_price:
-            new_sl = hp.entry_price
-            logger.debug(
-                f"Breakeven floor uygulandı [{hp.symbol}] t={hp.ticket}: "
-                f"SL entry'ye çekildi ({hp.entry_price:.2f})"
-            )
-        elif hp.direction == "BUY" and new_sl < hp.entry_price:
-            new_sl = hp.entry_price
-            logger.debug(
-                f"Breakeven floor uygulandı [{hp.symbol}] t={hp.ticket}: "
-                f"SL entry'ye çekildi ({hp.entry_price:.2f})"
-            )
+            # ── Breakeven Floor (v5.8) ─────────────────────────────
+            if hp.direction == "SELL" and new_sl > hp.entry_price:
+                new_sl = hp.entry_price
+                logger.debug(
+                    f"Breakeven floor uygulandı [{hp.symbol}] t={hp.ticket}: "
+                    f"SL entry'ye çekildi ({hp.entry_price:.2f})"
+                )
+            elif hp.direction == "BUY" and new_sl < hp.entry_price:
+                new_sl = hp.entry_price
+                logger.debug(
+                    f"Breakeven floor uygulandı [{hp.symbol}] t={hp.ticket}: "
+                    f"SL entry'ye çekildi ({hp.entry_price:.2f})"
+                )
 
         # SL sadece daha iyi yöne taşınır
         if hp.direction == "BUY":
@@ -1357,6 +1410,190 @@ class HEngine:
         if hp.direction == "BUY":
             return current_price - hp.entry_price
         return hp.entry_price - current_price
+
+    # ═════════════════════════════════════════════════════════════════
+    #  PRİMNET — Prim Bazlı Net Emir Takip Sistemi
+    # ═════════════════════════════════════════════════════════════════
+
+    def _get_reference_price(self, symbol: str) -> float | None:
+        """Sembolün günlük uzlaşma (referans) fiyatını hesapla.
+
+        VİOP'ta: tavan = uzlaşma × 1.10, taban = uzlaşma × 0.90
+        Dolayısıyla: uzlaşma = (tavan + taban) / 2
+
+        Args:
+            symbol: Kontrat sembolü.
+
+        Returns:
+            Uzlaşma fiyatı veya hesaplanamazsa None.
+        """
+        try:
+            sym = self.mt5.get_symbol_info(symbol)
+            if sym is None:
+                return None
+            tavan = getattr(sym, "session_price_limit_max", 0.0)
+            taban = getattr(sym, "session_price_limit_min", 0.0)
+            if tavan <= 0 or taban <= 0:
+                return None
+            return (tavan + taban) / 2.0
+        except Exception as exc:
+            logger.error(f"PRİMNET referans fiyat hatası [{symbol}]: {exc}")
+            return None
+
+    def _price_to_prim(self, price: float, ref_price: float) -> float:
+        """Fiyatı prim seviyesine çevir.
+
+        Prim = (fiyat - referans) / (referans × 0.01)
+
+        Args:
+            price: Güncel veya giriş fiyatı.
+            ref_price: Uzlaşma (referans) fiyatı.
+
+        Returns:
+            Prim seviyesi (ör: +5.3, -2.1).
+        """
+        one_prim = ref_price * 0.01
+        if one_prim <= 0:
+            return 0.0
+        return (price - ref_price) / one_prim
+
+    def _prim_to_price(self, prim: float, ref_price: float) -> float:
+        """Prim seviyesini fiyata çevir.
+
+        Fiyat = referans + prim × (referans × 0.01)
+
+        Args:
+            prim: Prim seviyesi (ör: +9.5, -1.5).
+            ref_price: Uzlaşma (referans) fiyatı.
+
+        Returns:
+            Fiyat değeri.
+        """
+        return ref_price + prim * (ref_price * 0.01)
+
+    def _calc_primnet_trailing_sl(
+        self, hp: HybridPosition, current_price: float,
+    ) -> float | None:
+        """PRİMNET prim bazlı trailing SL hesapla.
+
+        Faz 1 (kâr < faz2_activation): trailing mesafe = faz1_stop (1.5 prim)
+        Faz 2 (kâr ≥ faz2_activation): trailing mesafe = faz2_trailing (1.0 prim)
+
+        Stop sadece kâr yönünde hareket eder, asla geri gelmez.
+
+        Args:
+            hp: Hibrit pozisyon.
+            current_price: Güncel fiyat.
+
+        Returns:
+            Yeni SL fiyatı, hesaplanamazsa None.
+        """
+        ref_price = self._get_reference_price(hp.symbol)
+        if ref_price is None:
+            logger.warning(
+                f"PRİMNET: Referans fiyat alınamadı [{hp.symbol}] — ATR fallback"
+            )
+            return self._calc_atr_trailing_sl(hp, current_price)
+
+        entry_prim = self._price_to_prim(hp.entry_price, ref_price)
+        current_prim = self._price_to_prim(current_price, ref_price)
+
+        # Kâr primi hesapla (yöne göre)
+        if hp.direction == "BUY":
+            profit_prim = current_prim - entry_prim
+        else:
+            profit_prim = entry_prim - current_prim
+
+        # Faz belirle → trailing mesafe
+        if profit_prim >= self._primnet_faz2_activation:
+            trailing_dist = self._primnet_faz2_trailing  # 1.0 prim
+            faz = 2
+        else:
+            trailing_dist = self._primnet_faz1_stop  # 1.5 prim
+            faz = 1
+
+        # Stop prim hesapla
+        if hp.direction == "BUY":
+            stop_prim = current_prim - trailing_dist
+        else:
+            stop_prim = current_prim + trailing_dist
+
+        new_sl = self._prim_to_price(stop_prim, ref_price)
+
+        logger.debug(
+            f"PRİMNET [{hp.symbol}] t={hp.ticket}: "
+            f"giriş_prim={entry_prim:.2f} güncel_prim={current_prim:.2f} "
+            f"kâr_prim={profit_prim:.2f} faz={faz} "
+            f"stop_prim={stop_prim:.2f} → SL={new_sl:.4f}"
+        )
+
+        return new_sl
+
+    def _check_primnet_target(
+        self, hp: HybridPosition, current_price: float,
+        profit: float, swap: float,
+    ) -> bool:
+        """PRİMNET hedef kapanış kontrolü — tavan/tabana 0.5 prim kala kapat.
+
+        BUY: güncel_prim ≥ +target_prim (varsayılan +9.5) → KAPAT
+        SELL: güncel_prim ≤ -target_prim (varsayılan -9.5) → KAPAT
+
+        Args:
+            hp: Hibrit pozisyon.
+            current_price: Güncel fiyat.
+            profit: MT5 profit.
+            swap: Birikmiş swap.
+
+        Returns:
+            True ise pozisyon kapatıldı, False ise devam.
+        """
+        ref_price = self._get_reference_price(hp.symbol)
+        if ref_price is None:
+            return False
+
+        current_prim = self._price_to_prim(current_price, ref_price)
+        target = self._primnet_target
+
+        hit = False
+        if hp.direction == "BUY" and current_prim >= target:
+            hit = True
+        elif hp.direction == "SELL" and current_prim <= -target:
+            hit = True
+
+        if not hit:
+            return False
+
+        # Retry limiti kontrolü
+        retry_key = f"primnet_target_{hp.ticket}"
+        retry_count = self._close_retry_counts.get(retry_key, 0)
+        if retry_count >= self._MAX_CLOSE_RETRIES:
+            return False
+
+        logger.info(
+            f"PRİMNET HEDEF: ticket={hp.ticket} {hp.symbol} {hp.direction} "
+            f"prim={current_prim:.2f} hedef=±{target} — kapatılıyor"
+        )
+
+        close_result = self.mt5.close_position(
+            hp.ticket, expected_volume=hp.volume,
+        )
+        if close_result is None:
+            self._close_retry_counts[retry_key] = retry_count + 1
+            logger.error(
+                f"PRİMNET hedef kapanış başarısız: ticket={hp.ticket} {hp.symbol} "
+                f"(deneme {retry_count + 1}/{self._MAX_CLOSE_RETRIES})"
+            )
+            return False
+
+        self._close_retry_counts.pop(retry_key, None)
+        total_pnl = profit + swap
+        self._finalize_close(hp, "PRIMNET_TARGET", total_pnl, swap)
+
+        logger.info(
+            f"PRİMNET hedef kapanış başarılı: ticket={hp.ticket} {hp.symbol} "
+            f"prim={current_prim:.2f} PnL={total_pnl:.2f}"
+        )
+        return True
 
     def _is_trading_hours(self, now: datetime | None = None) -> bool:
         """İşlem saatleri içinde olup olmadığını kontrol et (09:40-17:50).

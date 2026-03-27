@@ -2,6 +2,81 @@
 
 ---
 
+## #79 — PRİMNET: Prim Bazlı Net Emir Takip Sistemi (2026-03-27)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-27 |
+| **Sınıf** | C2 (Sarı Bölge: h_engine.py) + C3 (Kırmızı Bölge: config/default.json) |
+| **Tetikleyen** | Kullanıcı tasarımı — VİOP prim oranına dayalı pozisyon yönetim sistemi |
+| **Kapsam** | H-Engine trailing stop mekanizması genişletildi |
+
+### Sorun / İhtiyaç
+
+Mevcut trailing stop sistemi (ATR ve TRY bazlı kademeli) VİOP'un gün içi prim dinamiklerini yansıtmıyordu. Kullanıcı, her hissenin kendi referans fiyatına göre **prim yüzdesi** bazında çalışan, tavan/tabana yakın hedef kapanışlı bir sistem tasarladı.
+
+### Çözüm — PRİMNET
+
+Yeni `trailing_mode: "primnet"` eklendi. Mevcut modlar (ATR, profit) korundu.
+
+**Üç Kural:**
+1. **Faz 1** (giriş → +2 prim kâr): Trailing stop 1,5 prim geride, baştan aktif
+2. **Faz 2** (+2 prim kâr sonrası): Trailing mesafe 1,0 prime daralır
+3. **Hedef Kapanış**: Tavan/tabana 0,5 prim kala (±9,5 prim) zorunlu kapanış
+
+**Prim Hesabı:**
+- Referans fiyat = (tavan + taban) / 2 (MT5 session_price_limit)
+- 1 prim = referans × %1
+- Her hisse için oran aynı, TL karşılığı farklı
+
+### Eklenen Fonksiyonlar (h_engine.py)
+
+| Fonksiyon | Görev |
+|-----------|-------|
+| `_get_reference_price()` | MT5'ten tavan/taban alıp uzlaşma hesaplar |
+| `_price_to_prim()` | Fiyat → prim seviyesi dönüşümü |
+| `_prim_to_price()` | Prim → fiyat dönüşümü |
+| `_calc_primnet_trailing_sl()` | Faz 1/2 trailing stop hesabı |
+| `_check_primnet_target()` | ±9,5 prim hedef kapanış kontrolü |
+
+### Değişen Fonksiyonlar
+
+| Fonksiyon | Değişiklik |
+|-----------|-----------|
+| `__init__()` | PRİMNET config parametreleri okunuyor |
+| `run_cycle()` | PRİMNET hedef kapanış kontrolü eklendi |
+| `_check_breakeven()` | PRİMNET modunda atlanır (Faz 1 trailing yerine geçer) |
+| `_check_trailing()` | PRİMNET trailing modu eklendi, min/max clamp atlanır |
+| `transfer_to_hybrid()` | Prim bazlı SL/TP + breakeven_hit=True başlangıç |
+
+### Config Değişikliği (default.json)
+
+| Parametre | Eski | Yeni |
+|-----------|------|------|
+| `trailing_mode` | `"profit"` | `"primnet"` |
+| `primnet.faz1_stop_prim` | — | `1.5` |
+| `primnet.faz2_activation_prim` | — | `2.0` |
+| `primnet.faz2_trailing_prim` | — | `1.0` |
+| `primnet.target_prim` | — | `9.5` |
+
+### Geriye Dönük Uyumluluk
+
+`trailing_mode: "profit"` veya `"atr"` yaparak anında eski sisteme dönüş mümkün. PRİMNET kodu silinmeden devre dışı kalır.
+
+### Test Sonuçları
+
+7 birim test başarılı: fiyat↔prim dönüşüm, Faz 1/2 trailing, SELL yönü, hedef kapanış, stop monotonluk, faz geri dönüş koruması.
+
+### Değişen Dosyalar
+
+| Dosya | Değişiklik |
+|-------|-----------|
+| `engine/h_engine.py` | 5 yeni fonksiyon + 5 mevcut fonksiyonda düzenleme (~180 satır ekleme) |
+| `config/default.json` | `trailing_mode: "primnet"` + `primnet {}` bölümü (~6 satır) |
+| `docs/USTAT_v5_gelisim_tarihcesi.md` | Bu giriş (#79) |
+
+---
+
 ## #78 — Native SL/TP Config Geri Alma (2026-03-27)
 
 | Alan | Detay |

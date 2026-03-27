@@ -940,8 +940,32 @@ class MT5Bridge:
                                     f"TP={tp_rounded:.4f} (min mesafe={min_dist:.4f})"
                                 )
 
-                    # Pozisyon ticket: emir yanıtında 0 dönebilir (netting/gecikme) — sembole göre bul
-                    position_ticket = order_result.get("order", 0)
+                    # Pozisyon ticket: Exchange netting modda order_ticket ≠ position_ticket.
+                    # order_send() döndüğü "order" değeri ORDER ticket'ıdır (geçici).
+                    # SL/TP için POSITION ticket gerekir.
+                    # Strateji: 1) deal.position_id ile al  2) sembolden ara  3) son çare order ticket
+                    order_ticket_raw = order_result.get("order", 0)
+                    position_ticket = 0
+
+                    # Yöntem 1: history_deals_get ile doğru position_id al
+                    DEAL_LOOKUP_RETRIES = 10  # Toplam ~2.8s (exponential backoff)
+                    for deal_attempt in range(1, DEAL_LOOKUP_RETRIES + 1):
+                        _time.sleep(min(0.1 * deal_attempt, 0.5))
+                        deals = self._safe_call(
+                            mt5.history_deals_get, order=order_ticket_raw
+                        )
+                        if deals is not None and len(deals) > 0:
+                            pos_id = getattr(deals[0], "position_id", 0)
+                            if pos_id and pos_id > 0:
+                                position_ticket = pos_id
+                                logger.info(
+                                    f"SL/TP [{symbol}]: position_id deal'den alındı "
+                                    f"(deneme {deal_attempt}): order={order_ticket_raw} "
+                                    f"→ position={position_ticket}"
+                                )
+                                break
+
+                    # Yöntem 2: Sembolden positions_get ile ara (fallback)
                     if position_ticket == 0:
                         TICKET_MAX_RETRIES = 20  # Toplam ~4.2s (exponential backoff)
                         for attempt in range(1, TICKET_MAX_RETRIES + 1):
@@ -955,12 +979,14 @@ class MT5Bridge:
                                     if len(by_symbol) > 1:
                                         logger.warning(
                                             f"SL/TP [{symbol}]: {len(by_symbol)} pozisyon bulundu, "
-                                            f"en yüksek ticket seçildi: {position_ticket}"
+                                            f"en yüksek ticket seçildi: {position_ticket} "
+                                            f"(deal lookup başarısız, sembolden alındı)"
                                         )
                                     else:
-                                        logger.debug(
-                                            f"SL/TP için pozisyon ticket sembolden alındı "
-                                            f"(deneme {attempt}): {position_ticket}"
+                                        logger.info(
+                                            f"SL/TP [{symbol}]: pozisyon ticket sembolden alındı "
+                                            f"(deneme {attempt}): {position_ticket} "
+                                            f"(deal lookup başarısız)"
                                         )
                                     break
                         if position_ticket == 0:
@@ -1358,8 +1384,28 @@ class MT5Bridge:
             try:
                 positions = self._safe_call(mt5.positions_get, ticket=ticket)
                 if positions is None or len(positions) == 0:
-                    logger.error(f"Pozisyon bulunamadı (modify): ticket={ticket}")
-                    return None
+                    # Exchange netting modda ticket, order ticket olabilir.
+                    # deal history'den doğru position_id'yi bulmayı dene.
+                    resolved = False
+                    deals = self._safe_call(mt5.history_deals_get, order=ticket)
+                    if deals is not None and len(deals) > 0:
+                        pos_id = getattr(deals[0], "position_id", 0)
+                        if pos_id and pos_id > 0 and pos_id != ticket:
+                            positions = self._safe_call(mt5.positions_get, ticket=pos_id)
+                            if positions and len(positions) > 0:
+                                logger.info(
+                                    f"Modify: order ticket → position ticket çözümlendi "
+                                    f"[{ticket} → {pos_id}]"
+                                )
+                                ticket = pos_id  # Doğru ticket ile devam et
+                                resolved = True
+                    if not resolved:
+                        logger.error(f"Pozisyon bulunamadı (modify): ticket={ticket}")
+                        self._last_modify_error = {
+                            "retcode": -1,
+                            "comment": f"Position not found for ticket={ticket}",
+                        }
+                        return None
 
                 pos = positions[0]
                 new_sl = sl if sl is not None else pos.sl

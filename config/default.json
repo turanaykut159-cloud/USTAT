@@ -158,7 +158,7 @@
     "breakeven_atr_mult": 0.5,
     "trailing_trigger_atr_mult": 1.0,
     "trailing_distance_atr_mult": 1.0,
-    "trailing_mode": "profit",
+    "trailing_mode": "primnet",
     "trailing_profit_gap": 100.0,
     "trailing_graduated": true,
     "trailing_graduated_tiers": [
@@ -166,6 +166,12 @@
       {"min_profit": 100, "lock_ratio": 0.30,  "label": "erken_trailing"},
       {"min_profit": 250, "lock_ratio": 0.50,  "label": "normal_trailing"},
       {"min_profit": 500, "lock_ratio": 0.70,  "label": "agresif_trailing"}
-    ]
+    ],
+    "primnet": {
+      "faz1_stop_prim": 1.5,
+      "faz2_activation_prim": 2.0,
+      "faz2_trailing_prim": 1.0,
+      "target_prim": 9.5
+    }
   }
 }
