@@ -2,6 +2,40 @@
 
 ---
 
+## #76 — VİOP İlgisizlik Filtresi — Haber OLAY Yanlış Pozitif (2026-03-27)
+
+### Bağlam
+27 Mart sabahı sistem başlar başlamaz L2 Kill-Switch tetiklendi. OĞUL işlem açamadı. Neden: MT5 Economic Calendar'dan gelen "US Baker Hughes ABD Petrol Rig Sayısı" haberi `sentiment=-1.00`, `severity=CRITICAL` olarak analiz edildi ve OLAY rejimini tetikledi. Bu haber ABD enerji sektörüne özgü bir veri olup VİOP hisse vadeli işlemleriyle doğrudan ilgisiz.
+
+### Kök Neden
+`should_trigger_olay()` haberin VİOP ile ilgili olup olmadığına bakmıyordu. En kötü sentiment'li aktif haberi alıp `sentiment <= -0.7` ve `confidence >= 0.6` ise koşulsuz OLAY tetikliyordu. Ek olarak "petrol" kelimesi hem `GLOBAL_KEYWORDS`'te hem `SYMBOL_KEYWORDS[F_TUPRS]`'de olduğu için keyword tabanlı filtre de yetersiz kalıyordu.
+
+### Düzeltme
+`news_bridge.py`'ye currency-bazlı VİOP ilgisizlik filtresi eklendi:
+
+1. **`NewsEvent`'e `currency` alanı** eklendi (MT5 Calendar'dan gelen para birimi bilgisi)
+2. **`_process_raw_event()`** raw dict'teki currency'yi event'e aktarır
+3. **`_is_viop_relevant_for_olay()`** yeni metod — currency + kategori bazlı OLAY tetikleme kararı:
+   - TRY → her zaman ilgili (Türk ekonomisi)
+   - USD/EUR → sadece JEOPOLITIK veya EKONOMIK kategoride (FED faiz = geçer, Baker Hughes = geçmez)
+   - Diğer para birimleri (JPY, GBP, CNY vb.) → VİOP ile ilgisiz
+   - Currency boş (RSS/Benzinga) → mevcut keyword tabanlı mantık
+4. **`should_trigger_olay()`** bu yeni metodu çağırarak ilgisiz haberleri OLAY tetiklemeden önce filtreler
+
+### Doğrulama
+13 senaryo testi: TCMB faiz ✅, FED faiz ✅, Trump yaptırım ✅, ECB ✅, Baker Hughes ❌(doğru blok), Japonya bono ❌, Hindistan Sensex ❌, Hong Kong ❌, Nasdaq ❌, İngiltere ❌, RSS savaş ✅, RSS global ✅ — tümü doğru.
+
+### Sınıflandırma
+C1 — Yeşil Bölge (news_bridge.py Kırmızı/Sarı listede değil)
+
+### Değişen Dosyalar
+| Dosya | Değişiklik |
+|-------|-----------|
+| `engine/news_bridge.py` | `currency` alanı + `_is_viop_relevant_for_olay()` + `should_trigger_olay()` filtre (~58 satır) |
+| `docs/USTAT_v5_gelisim_tarihcesi.md` | Bu giriş (#76) |
+
+---
+
 ## #75 — Vade Geçişi GCM Paraleli — İşlem Sürekliliği (2026-03-26)
 
 ### Bağlam
