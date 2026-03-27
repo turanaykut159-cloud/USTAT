@@ -191,6 +191,7 @@ class NewsEvent:
     raw_text: str = ""             # Tam metin (varsa)
     event_id: str = ""             # Benzersiz tanımlayıcı (duplicate tespiti)
     is_global: bool = False        # Tüm piyasayı etkiler mi
+    currency: str = ""             # Para birimi (MT5 Calendar: TRY, USD, EUR vb.)
 
     @property
     def age_seconds(self) -> float:
@@ -228,6 +229,7 @@ class NewsEvent:
             "age_seconds": round(self.age_seconds, 1),
             "lot_multiplier": self.lot_multiplier,
             "event_id": self.event_id,
+            "currency": self.currency,
         }
 
 
@@ -890,6 +892,7 @@ class NewsBridge:
             raw_text=raw_text,
             event_id=event_id,
             is_global=is_global,
+            currency=raw.get("currency", ""),
         )
 
     def _detect_category(self, text: str) -> str:
@@ -978,6 +981,14 @@ class NewsBridge:
     def should_trigger_olay(self) -> Optional[dict]:
         """BABA _check_olay() için: OLAY rejimine geçmeli mi?
 
+        VİOP ilgisizlik filtresi (currency-bazlı):
+          - TRY  → her zaman OLAY tetikleyebilir (Türk ekonomisi)
+          - USD/EUR → sadece JEOPOLITIK veya EKONOMIK kategoride
+                      (FED faiz = geçer, Baker Hughes = geçmez)
+          - Diğer para birimleri (JPY, GBP, CNY vb.) → OLAY tetiklemez
+          - Currency boş (RSS/Benzinga) → mevcut mantık (is_global,
+            symbols, category)
+
         Returns:
             {"reason": str, "trigger": "news", "sentiment": float, "event": NewsEvent}
             veya None.
@@ -988,6 +999,15 @@ class NewsBridge:
 
         _olay_confidence = self._cfg("news.olay_confidence_min", 0.6)
         if worst.sentiment_score <= self._olay_trigger and worst.confidence >= _olay_confidence:
+            # ── VİOP ilgisizlik filtresi (currency-bazlı) ────────────
+            if not self._is_viop_relevant_for_olay(worst):
+                logger.info(
+                    f"OLAY atlandı — VİOP ilgisiz haber: "
+                    f"{worst.headline[:60]} "
+                    f"(currency={worst.currency}, category={worst.category})"
+                )
+                return None
+            # ─────────────────────────────────────────────────────────
             return {
                 "reason": f"Olumsuz haber: {worst.headline[:60]}",
                 "trigger": "news",
@@ -996,6 +1016,44 @@ class NewsBridge:
                 "event": worst,
             }
         return None
+
+    def _is_viop_relevant_for_olay(self, event: NewsEvent) -> bool:
+        """Haberin VİOP OLAY rejimi tetiklemeye yetecek kadar ilgili olup
+        olmadığını currency + kategori bazlı kontrol et.
+
+        Keyword eşleşmesi (is_global, symbols) yanlış pozitif verebilir
+        (örn: 'petrol' → F_TUPRS eşleşmesi ama haber Baker Hughes ABD
+        rig sayısı). Currency alanı MT5 Calendar'dan gelir ve haberin
+        hangi ülke/ekonomiye ait olduğunu kesin belirler.
+
+        Returns:
+            True  → haber VİOP'u etkileyebilir, OLAY tetiklenebilir
+            False → haber VİOP ile ilgisiz, OLAY atlanmalı
+        """
+        cur = event.currency.upper().strip()
+
+        # Currency bilgisi yoksa (RSS, Benzinga vb.) → keyword tabanlı
+        # mevcut mantığa güven (is_global, category, symbols)
+        if not cur:
+            return (
+                event.is_global
+                or event.category in ("JEOPOLITIK", "EKONOMIK")
+                or len(event.symbols) > 0
+            )
+
+        # TRY → doğrudan Türk ekonomisi, her zaman ilgili
+        if cur == "TRY":
+            return True
+
+        # USD / EUR → sadece makro etki kategorileri (FED/ECB faiz,
+        # jeopolitik kriz). Sektörel veri (Baker Hughes), endeks
+        # açılışları (Nasdaq), genel haberler → ilgisiz.
+        if cur in ("USD", "EUR"):
+            return event.category in ("JEOPOLITIK", "EKONOMIK")
+
+        # Diğer para birimleri (JPY, GBP, CNY, INR, AUD vb.)
+        # → VİOP ile doğrudan ilgisiz
+        return False
 
     def get_news_warnings(self) -> list[dict]:
         """BABA check_early_warnings() için NEWS_ALERT uyarıları.
