@@ -2,6 +2,105 @@
 
 ---
 
+## #78 — Native SL/TP Config Geri Alma (2026-03-27)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-27 |
+| **Sınıf** | C3 — Kırmızı Bölge (config/default.json) |
+| **Tetikleyen** | Hibrite devir sırasında `retcode=10035 Invalid order` hatası tekrarladı |
+| **Kapsam** | `config/default.json` — tek parametre değişikliği |
+
+### Bağlam
+Gelişim tarihçesi #1'de (5 Mart 2026) belgelenen bilinen kısıtlama: GCM VİOP'ta `TRADE_ACTION_SLTP` çalışmıyor (MT5 build 4755, sunucu minimum 5200 istiyor). Bu nedenle `hybrid.native_sltp: false` olarak ayarlanmış ve yazılımsal SL/TP sistemi (`_check_software_sltp()`) devreye alınmıştı.
+
+### Kök Neden
+26 Mart 2026 tarihindeki genel geliştirme oturumunda (tam sistem audit, #72) `config/default.json`'daki `hybrid.native_sltp` parametresi yanlışlıkla `true`'ya döndürülmüş. Bu, h_engine'in `transfer_to_hybrid()` fonksiyonunda `modify_position()` ile MT5'e doğrudan `TRADE_ACTION_SLTP` göndermesine neden oldu ve her seferinde `retcode=10035` hatası aldı.
+
+### Kanıt
+- Dashboard'dan "Hibrite Devret" butonuna tıklandığında: `Devir hatası: MT5 SL/TP ataması başarısız — devir iptal — retcode=10035 Invalid order`
+- `config/default.json` satır 153: `"native_sltp": true` (yanlış)
+- Gelişim tarihçesi #1'de belgelenmiş: "Native SLTP GCM VİOP'ta çalışmıyor"
+- Düzeltme sonrası aynı butonla F_AKSEN pozisyonu başarıyla hibrit yönetime devredildi
+
+### Düzeltme
+`config/default.json` → `hybrid.native_sltp: true` → `false`
+
+| Parametre | Eski (Yanlış) | Yeni (Doğru) |
+|-----------|--------------|-------------|
+| `hybrid.native_sltp` | `true` | `false` |
+
+### Etki Analizi
+- `h_engine.py` → `transfer_to_hybrid()`: `_native_sltp=False` olduğunda MT5 `modify_position()` atlanır, SL/TP yalnızca bellek+DB'de tutulur
+- `h_engine.py` → `_check_breakeven`, `_check_trailing`: Native kapalıyken sadece internal SL/TP güncellenir
+- `h_engine.py` → `_check_software_sltp()`: Her 10sn fiyat kontrolü yaparak SL/TP ihlalinde `close_position` (DEAL) ile kapatır
+- #77'deki position ticket düzeltmesi de korunuyor (gelecekte native SL/TP açıldığında gerekli)
+
+### Doğrulama
+- Config değişikliği sonrası uygulama yeniden başlatıldı
+- F_AKSEN SELL 1.00 lot pozisyon "Hibrite Devret" ile başarıyla hibrit yönetime devredildi ✅
+- Hata modalı yok, YÖNETİM sütunu "Hibrit" olarak güncellendi ✅
+
+### Geçiş Planı
+- MT5 build 5200+ kurulunca → `native_sltp: true` yapılabilir + engine restart
+- O zamana kadar yazılımsal SL/TP aktif kalacak
+
+### Değişen Dosyalar
+| Dosya | Değişiklik |
+|-------|-----------|
+| `config/default.json` | `hybrid.native_sltp: true` → `false` |
+| `docs/USTAT_v5_gelisim_tarihcesi.md` | Bu giriş (#78) |
+
+---
+
+## #77 — Exchange Netting Position Ticket Düzeltmesi (2026-03-27)
+
+### Bağlam
+OĞUL sinyal üretip emir gönderdiğinde, SL/TP ekleme adımı sürekli `retcode=10035 Invalid order` hatası veriyor ve pozisyon korumasız kalarak kapatılıyordu. Aynı sorun hibrit devir (`transfer_to_hybrid`) sırasında `modify_position()` çağrısında da yaşanıyordu.
+
+### Kök Neden
+GCM MT5 VİOP, **exchange execution + netting** modunda çalışır. Bu modda `order_send()` döndüğü `result.order` değeri **ORDER ticket**'ıdır (geçici emir numarası). Deal tamamlandıktan sonra oluşan **POSITION ticket** farklı bir numaradır. `TRADE_ACTION_SLTP` gönderilirken `"position"` alanına position ticket verilmesi gerekir.
+
+`send_order()` satır 944'te `order_result.get("order")` ile order ticket alınıp doğrudan position ticket olarak kullanılıyordu. Order ticket 0 olmadığı için sembolden arama fallback'i hiç tetiklenmiyordu.
+
+**MT5 log kanıtı:**
+```
+order #8050380183 buy 1/1 F_TKFEN0326 at market done
+deal #900285711 buy 1 F_TKFEN0326 at 93.79 done
+failed modify #8050380183 sl: 0.00 -> sl: 91.79, tp: 95.79 [Invalid order]
+```
+
+### Düzeltme
+**`send_order()` — SL/TP ekleme adımı (Siyah Kapı #17):**
+1. Order ticket'ı position ticket olarak kullanmak yerine, önce `history_deals_get(order=order_ticket)` ile `deal.position_id` üzerinden doğru position ticket alınır (10 deneme, exponential backoff)
+2. Başarısız olursa mevcut `positions_get(symbol=...)` fallback'i devreye girer
+3. Her iki yöntem de başarısızsa mevcut davranış korunur (pozisyon kapatılır)
+
+**`modify_position()` — Ticket çözümleme (Siyah Kapı #19):**
+1. `positions_get(ticket=ticket)` pozisyon bulamazsa, gelen ticket'ın order ticket olabileceği varsayılır
+2. `history_deals_get(order=ticket)` ile `deal.position_id` üzerinden doğru position ticket çözümlenir
+3. Çözümleme başarılıysa doğru ticket ile devam eder, değilse mevcut hata davranışı korunur
+
+### Etki Analizi
+- `send_order()` çağrı zinciri değişmiyor (ogul.py → mt5_bridge.send_order())
+- `modify_position()` çağrı zinciri değişmiyor (h_engine.py, ogul.py → mt5_bridge.modify_position())
+- SL/TP ekleme/modify akışı aynı, sadece ticket kaynağı düzeltildi
+- Mevcut koruma katmanları (korumasız pozisyon kapatma) aynen korunuyor
+
+### Doğrulama
+Syntax kontrolü: ✅ PASS. Logdan doğrulama: bir sonraki canlı işlemde `position_id deal'den alındı` log satırı beklenecek.
+
+### Sınıflandırma
+C4 — Siyah Kapı fonksiyonları: `send_order()` (#17) ve `modify_position()` (#19)
+
+### Değişen Dosyalar
+| Dosya | Değişiklik |
+|-------|-----------|
+| `engine/mt5_bridge.py` | `send_order()`: deal-based position ticket lookup eklendi (~24 satır). `modify_position()`: order→position ticket çözümleme eklendi (~18 satır) |
+| `docs/USTAT_v5_gelisim_tarihcesi.md` | Bu giriş (#77) |
+
+---
+
 ## #76 — VİOP İlgisizlik Filtresi — Haber OLAY Yanlış Pozitif (2026-03-27)
 
 ### Bağlam

@@ -150,7 +150,7 @@
   },
   "hybrid": {
     "enabled": true,
-    "native_sltp": true,
+    "native_sltp": false,
     "max_concurrent": 3,
     "daily_loss_limit": 500.0,
     "sl_atr_mult": 2.0,
