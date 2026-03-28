@@ -659,9 +659,9 @@ class Top5Selector:
                     status[symbol] = "observation"
                     continue
 
-            if bdays_to_expiry <= EXPIRY_CLOSE_DAYS:
+            if bdays_to_expiry < EXPIRY_CLOSE_DAYS:
                 status[symbol] = "close"
-            elif bdays_to_expiry <= EXPIRY_NO_NEW_TRADE_DAYS:
+            elif bdays_to_expiry < EXPIRY_NO_NEW_TRADE_DAYS:
                 status[symbol] = "no_new_trade"
             else:
                 status[symbol] = "normal"
