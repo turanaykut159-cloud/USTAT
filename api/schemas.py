@@ -553,6 +553,15 @@ class HybridPositionItem(BaseModel):
     trailing_active: bool = False
     transferred_at: str = ""
     state: str = "ACTIVE"
+    reference_price: float = 0.0
+
+
+class PrimnetConfig(BaseModel):
+    """PRİMNET yapılandırma bilgisi (frontend hesaplama için)."""
+    faz1_stop_prim: float = 1.5
+    faz2_activation_prim: float = 2.0
+    faz2_trailing_prim: float = 1.0
+    target_prim: float = 9.5
 
 
 class HybridStatusResponse(BaseModel):
@@ -563,6 +572,7 @@ class HybridStatusResponse(BaseModel):
     daily_limit: float = 500.0
     native_sltp: bool = False
     positions: list[HybridPositionItem] = []
+    primnet: PrimnetConfig = PrimnetConfig()
 
 
 class HybridEventItem(BaseModel):

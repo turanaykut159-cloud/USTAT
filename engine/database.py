@@ -212,6 +212,17 @@ CREATE TABLE IF NOT EXISTS weekly_top5_summary (
     created_at     TEXT NOT NULL,
     PRIMARY KEY (week, symbol)
 );
+
+CREATE TABLE IF NOT EXISTS notifications (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT    NOT NULL,
+    type      TEXT    NOT NULL DEFAULT 'info',
+    title     TEXT    NOT NULL DEFAULT '',
+    message   TEXT    NOT NULL DEFAULT '',
+    severity  TEXT    NOT NULL DEFAULT 'info',
+    read      INTEGER NOT NULL DEFAULT 0,
+    details   TEXT    DEFAULT '{}'
+);
 """
 
 
@@ -1866,6 +1877,7 @@ class Database:
             "top5_history", "config_history", "manual_interventions",
             "liquidity_classes", "app_state", "hybrid_positions",
             "hybrid_events", "daily_risk_summary", "weekly_top5_summary",
+            "notifications",
         ]
         sizes = {}
         for t in tables:
@@ -1875,4 +1887,105 @@ class Database:
             except Exception:
                 sizes[t] = -1
         return sizes
+
+    # ═════════════════════════════════════════════════════════════════
+    #  BİLDİRİMLER
+    # ═════════════════════════════════════════════════════════════════
+
+    def insert_notification(
+        self,
+        notif_type: str,
+        title: str,
+        message: str,
+        severity: str = "info",
+        details: str = "{}",
+    ) -> int:
+        """Bildirim kaydet.
+
+        Args:
+            notif_type: Bildirim tipi (hybrid_eod, hybrid_daily_reset, vb.).
+            title: Başlık.
+            message: Mesaj.
+            severity: info / warning / error / critical.
+            details: JSON detay.
+
+        Returns:
+            Oluşturulan satırın id'si.
+        """
+        cur = self._execute(
+            """INSERT INTO notifications (timestamp, type, title, message, severity, read, details)
+               VALUES (?,?,?,?,?,0,?)""",
+            (self._now(), notif_type, title, message, severity, details),
+        )
+        return cur.lastrowid
+
+    def get_notifications(self, limit: int = 50, unread_only: bool = False) -> list[dict[str, Any]]:
+        """Bildirimleri getir (yeniden eskiye).
+
+        Args:
+            limit: Maksimum satır.
+            unread_only: True ise sadece okunmamış.
+
+        Returns:
+            Bildirim sözlüklerinin listesi.
+        """
+        where = "WHERE read=0" if unread_only else ""
+        return self._fetch_all(
+            f"SELECT * FROM notifications {where} ORDER BY id DESC LIMIT ?",
+            (limit,),
+        )
+
+    def mark_notification_read(self, notif_id: int) -> None:
+        """Bildirimi okundu olarak işaretle."""
+        self._execute("UPDATE notifications SET read=1 WHERE id=?", (notif_id,))
+
+    def mark_all_notifications_read(self) -> None:
+        """Tüm bildirimleri okundu olarak işaretle."""
+        self._execute("UPDATE notifications SET read=1 WHERE read=0")
+
+    # ═════════════════════════════════════════════════════════════════
+    #  HİBRİT PERFORMANS İSTATİSTİKLERİ
+    # ═════════════════════════════════════════════════════════════════
+
+    def get_hybrid_performance(self) -> dict[str, Any]:
+        """Hibrit pozisyon performans istatistikleri.
+
+        Returns:
+            dict: Toplam, kazanan, kaybeden, ortalama PnL, kapanış nedeni dağılımı.
+        """
+        rows = self._fetch_all(
+            "SELECT close_reason, pnl, swap FROM hybrid_positions WHERE state='CLOSED'",
+        )
+        if not rows:
+            return {
+                "total": 0, "winners": 0, "losers": 0,
+                "total_pnl": 0.0, "avg_pnl": 0.0,
+                "best_pnl": 0.0, "worst_pnl": 0.0,
+                "win_rate": 0.0, "close_reasons": {},
+            }
+
+        total = len(rows)
+        pnls = [r.get("pnl", 0.0) or 0.0 for r in rows]
+        winners = sum(1 for p in pnls if p > 0)
+        losers = sum(1 for p in pnls if p < 0)
+        total_pnl = sum(pnls)
+        avg_pnl = total_pnl / total if total > 0 else 0.0
+
+        # Kapanış nedeni dağılımı
+        reasons: dict[str, int] = {}
+        for r in rows:
+            reason = r.get("close_reason") or "UNKNOWN"
+            reasons[reason] = reasons.get(reason, 0) + 1
+
+        return {
+            "total": total,
+            "winners": winners,
+            "losers": losers,
+            "total_pnl": round(total_pnl, 2),
+            "avg_pnl": round(avg_pnl, 2),
+            "best_pnl": round(max(pnls), 2) if pnls else 0.0,
+            "worst_pnl": round(min(pnls), 2) if pnls else 0.0,
+            "win_rate": round(winners / total * 100, 1) if total > 0 else 0.0,
+            "close_reasons": reasons,
+        }
 

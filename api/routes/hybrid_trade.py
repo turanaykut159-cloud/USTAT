@@ -22,6 +22,7 @@ from api.schemas import (
     HybridRemoveResponse,
     HybridPositionItem,
     HybridStatusResponse,
+    PrimnetConfig,
     HybridEventItem,
     HybridEventsResponse,
 )
@@ -102,7 +103,16 @@ async def get_hybrid_status():
             trailing_active=hp.trailing_active,
             transferred_at=hp.transferred_at,
             state=hp.state,
+            reference_price=hp.reference_price,
         ))
+
+    # PRİMNET config
+    primnet_cfg = PrimnetConfig(
+        faz1_stop_prim=h_engine._primnet_faz1_stop,
+        faz2_activation_prim=h_engine._primnet_faz2_activation,
+        faz2_trailing_prim=h_engine._primnet_faz2_trailing,
+        target_prim=h_engine._primnet_target,
+    )
 
     return HybridStatusResponse(
         active_count=len(items),
@@ -111,6 +121,7 @@ async def get_hybrid_status():
         daily_limit=h_engine._config_daily_limit,
         native_sltp=h_engine._native_sltp,
         positions=items,
+        primnet=primnet_cfg,
     )
 
 
@@ -134,3 +145,12 @@ async def get_hybrid_events(limit: int = 50):
         for r in rows
     ]
     return HybridEventsResponse(count=len(events), events=events)
+
+
+@router.get("/hybrid/performance")
+async def get_hybrid_performance():
+    """Hibrit pozisyon performans istatistikleri."""
+    db = get_db()
+    if not db:
+        return {}
+    return db.get_hybrid_performance()

@@ -21,6 +21,7 @@ import {
   removeFromHybrid,
   getHybridStatus,
   getHybridEvents,
+  getHybridPerformance,
   connectLiveWS,
 } from '../services/api';
 import { formatMoney, formatPrice, pnlClass, elapsed } from '../utils/formatters';
@@ -63,6 +64,7 @@ export default function HybridTrade() {
   const [removingTicket, setRemovingTicket] = useState(null);
   const [tick, setTick] = useState(new Date()); // süre güncelleme
   const [errorModal, setErrorModal] = useState(null); // { title, message }
+  const [perfStats, setPerfStats] = useState(null);
 
   const wsRef = useRef(null);
 
@@ -89,6 +91,7 @@ export default function HybridTrade() {
   useEffect(() => {
     fetchOpenPositions();
     fetchEvents();
+    getHybridPerformance().then(setPerfStats);
     const iv = setInterval(() => {
       fetchOpenPositions();
       fetchEvents();
@@ -236,6 +239,59 @@ export default function HybridTrade() {
           </div>
         </div>
       </div>
+
+      {/* ═══ PERFORMANS İSTATİSTİKLERİ ═══════════════════════════ */}
+      {perfStats && perfStats.total > 0 && (
+        <div className="ht-perf-card">
+          <div className="ht-perf-title">Hibrit Performans</div>
+          <div className="ht-perf-grid">
+            <div className="ht-perf-item">
+              <span className="ht-perf-label">Toplam</span>
+              <span className="ht-perf-value">{perfStats.total}</span>
+            </div>
+            <div className="ht-perf-item">
+              <span className="ht-perf-label">Kazanan</span>
+              <span className="ht-perf-value" style={{ color: 'var(--profit)' }}>{perfStats.winners}</span>
+            </div>
+            <div className="ht-perf-item">
+              <span className="ht-perf-label">Kaybeden</span>
+              <span className="ht-perf-value" style={{ color: 'var(--loss)' }}>{perfStats.losers}</span>
+            </div>
+            <div className="ht-perf-item">
+              <span className="ht-perf-label">Başarı</span>
+              <span className="ht-perf-value" style={{ color: perfStats.win_rate >= 50 ? 'var(--profit)' : 'var(--loss)' }}>
+                %{perfStats.win_rate}
+              </span>
+            </div>
+            <div className="ht-perf-item">
+              <span className="ht-perf-label">Toplam K/Z</span>
+              <span className="ht-perf-value" style={{ color: perfStats.total_pnl >= 0 ? 'var(--profit)' : 'var(--loss)' }}>
+                {formatMoney(perfStats.total_pnl)}
+              </span>
+            </div>
+            <div className="ht-perf-item">
+              <span className="ht-perf-label">Ort. K/Z</span>
+              <span className="ht-perf-value">{formatMoney(perfStats.avg_pnl)}</span>
+            </div>
+            <div className="ht-perf-item">
+              <span className="ht-perf-label">En iyi</span>
+              <span className="ht-perf-value" style={{ color: 'var(--profit)' }}>{formatMoney(perfStats.best_pnl)}</span>
+            </div>
+            <div className="ht-perf-item">
+              <span className="ht-perf-label">En kötü</span>
+              <span className="ht-perf-value" style={{ color: 'var(--loss)' }}>{formatMoney(perfStats.worst_pnl)}</span>
+            </div>
+          </div>
+          {perfStats.close_reasons && Object.keys(perfStats.close_reasons).length > 0 && (
+            <div className="ht-perf-reasons">
+              <span className="ht-perf-reasons-title">Kapanış Nedenleri:</span>
+              {Object.entries(perfStats.close_reasons).map(([reason, count]) => (
+                <span key={reason} className="ht-perf-reason-tag">{reason}: {count}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ═══ DEVİR FORMU + RİSK ÖZETİ ═══════════════════════════ */}
       <div className="mt-layout">

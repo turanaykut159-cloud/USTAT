@@ -2,6 +2,106 @@
 
 ---
 
+## #80 — PRİMNET v2: Hibrit Motor Profesyonel Yeniden Yapılandırma (2026-03-28)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-28 |
+| **Sınıf** | C2 (Sarı: h_engine.py) + C3 (Kırmızı: ogul.py, database.py, config/default.json) |
+| **Tetikleyen** | Hibrit motor kapsamlı inceleme — profesyonel seviye eksiklikleri |
+| **Kapsam** | H-Engine tam yeniden yapılandırma, ATR/profit trailing kaldırma, güvenlik katmanları |
+
+### Yapılan Değişiklikler
+
+**1. PRİMNET Tek Yönetim Modu**
+- ATR trailing (`_calc_atr_trailing_sl`) ve profit trailing (`_calc_profit_trailing_sl`) tamamen kaldırıldı
+- Kademeli oran sistemi kaldırıldı
+- PRİMNET tek pozisyon yönetim modu olarak belirlendi
+- Eski kodlar `engine/archive/h_engine_trailing_legacy/` klasörüne yedeklendi
+- `config/default.json`'dan 7 eski parametre silindi (trailing_mode, trailing_graduated, vb.)
+
+**2. OLAY Rejimi Koruması**
+- H-Engine run_cycle başında BABA rejim kontrolü eklendi
+- OLAY rejiminde tüm hibrit pozisyonlar anında kapatılır (force_close_all)
+- Max 10sn gecikme (cycle süresi)
+
+**3. OĞUL EOD Hibrit Ayrımı**
+- `_check_end_of_day`: Hibrit force_close_all çağrısı kaldırıldı
+- `_verify_eod_closure`: Hibrit ticket'lar EOD doğrulamasından hariç tutuldu
+- Hibrit pozisyonlar gün sonunda açık kalabilir (kullanıcı kararı)
+
+**4. Sabah PRİMNET Yenileme (_primnet_daily_reset)**
+- Overnight pozisyonlar için yeni uzlaşma fiyatıyla SL/TP yenileme
+- Piyasa açılışında (09:40+) çalışır, gece yarısında değil
+- SL monotonluk koruması (eskiden kötüyse eski korunur)
+- DB bildirimi + event bus
+
+**5. Netting Sync PRİMNET Uyumu**
+- Lot ekleme: SL/TP PRİMNET prim bazlı yeniden hesaplanır
+- breakeven_hit = True (PRİMNET trailing durmaz)
+- Referans fiyat alınamazsa ATR fallback
+
+**6. Restore PRİMNET Uyumu**
+- Engine restart sonrası breakeven_hit = True (trailing hemen aktif)
+
+**7. Native SL Güvenlik Ağı**
+- Software modda bile MT5'e native SL yazılır (gap koruması)
+- Trailing SL güncellendikçe MT5 native SL da güncellenir
+- MT5 kopuşunda son trailing SL broker tarafında aktif kalır
+
+**8. Referans Fiyat Doğrulama**
+- Tavan/taban spread kontrolü (%15-%25 beklenti, şüpheli ise uyarı)
+
+**9. Dashboard Bildirim Sistemi**
+- Genel amaçlı bildirim kartı (yanıp sönen buton, okundu takibi)
+- DB persistence (restart sonrası kaybolmaz)
+- 17:45 sonrası hibrit pozisyon açık bildirimi
+- Sabah yenileme bildirimi
+- API: GET /notifications, POST /notifications/read, POST /notifications/read-all
+
+**10. PRİMNET Detay Modalı (PrimnetDetail.jsx)**
+- Dashboard'da hibrit pozisyona tıklayınca prim merdiveni açılır
+- Faz durumu, kilitli kâr, giriş/güncel/stop/hedef prim seviyeleri
+- API'ye reference_price ve PrimnetConfig eklendi
+
+**11. Hibrit Performans İstatistikleri**
+- Kapanış nedeni dağılımı, win rate, ortalama K/Z
+- HybridTrade panelinde performans kartı
+- API: GET /hybrid/performance
+
+**12. EOD Bildirim Mekanizması**
+- 17:45 sonrası açık pozisyon varsa bildirim (günde 1 kez)
+- Pozisyon kapatılmaz — kullanıcı kararına bırakılır
+
+### Etkilenen Dosyalar
+
+| Dosya | Bölge | Değişiklik |
+|-------|-------|-----------|
+| engine/h_engine.py | Sarı | Tam yeniden yapılandırma (1702→1650+ satır) |
+| engine/ogul.py | Kırmızı | EOD hibrit kapatma kaldırıldı |
+| engine/database.py | Kırmızı | notifications tablosu + CRUD + performans sorgusu |
+| config/default.json | Kırmızı | 7 eski parametre silindi |
+| api/schemas.py | Yeşil | HybridPositionItem + PrimnetConfig |
+| api/server.py | Sarı | notifications route eklendi |
+| api/routes/hybrid_trade.py | Yeşil | reference_price + primnet config + performance |
+| api/routes/notifications.py | Yeni | Bildirim CRUD API |
+| desktop/src/components/Dashboard.jsx | Yeşil | Bildirim kartı + PRİMNET modal |
+| desktop/src/components/PrimnetDetail.jsx | Yeni | PRİMNET görselleştirme |
+| desktop/src/components/HybridTrade.jsx | Yeşil | Performans istatistik kartı |
+| desktop/src/services/api.js | Yeşil | Bildirim + performans API |
+| desktop/src/styles/theme.css | Yeşil | Bildirim + PRİMNET + performans CSS |
+
+### Test Sonuçları
+
+100 kombinasyonlu stres testi: **100/100 PASSED** (0.63sn)
+- Devir: 12/12, PRİMNET Hesaplama: 10/10, Faz 1: 10/10, Faz 2: 10/10
+- Hedef: 8/8, Güvenlik: 12/12, Software SL/TP: 8/8, Overnight: 12/12
+- Netting: 6/6, Kullanıcı Kontrolü: 6/6, Restore: 4/4, Bildirim: 2/2
+
+Build: 0 hata
+
+---
+
 ## #79 — PRİMNET: Prim Bazlı Net Emir Takip Sistemi (2026-03-27)
 
 | Alan | Detay |

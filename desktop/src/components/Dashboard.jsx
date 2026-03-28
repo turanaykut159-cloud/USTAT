@@ -19,10 +19,11 @@ import {
   getTradeStats, getPerformance, getTrades, getStatus,
   getAccount, getPositions, closePosition, connectLiveWS,
   getHybridStatus, checkHybridTransfer, transferToHybrid,
-  getNewsActive,
+  getNewsActive, getNotifications, markNotificationRead, markAllNotificationsRead,
 } from '../services/api';
 import { formatMoney, formatPrice, pnlClass, elapsed } from '../utils/formatters';
 import ConfirmModal from './ConfirmModal';
+import PrimnetDetail from './PrimnetDetail';
 import NewsPanel from './NewsPanel';
 import './NewsPanel.css';
 
@@ -95,6 +96,9 @@ export default function Dashboard() {
   const [initialLoading, setInitialLoading] = useState(!_dashLoaded);
   const [closingTicket, setClosingTicket] = useState(null);
   const [hybridTickets, setHybridTickets] = useState(_dashCache?.hybridTickets ?? new Set());
+  const [hybridPositions, setHybridPositions] = useState([]);
+  const [primnetConfig, setPrimnetConfig] = useState(null);
+  const [selectedHybridPos, setSelectedHybridPos] = useState(null);
   const [transferringTicket, setTransferringTicket] = useState(null);
 
   // WebSocket kaynak canlı veri
@@ -109,6 +113,11 @@ export default function Dashboard() {
   // Hata gösterimi (window.alert yerine)
   const [apiError, setApiError] = useState(null);
   const [errorModal, setErrorModal] = useState(null); // { title, message }
+
+  // ── Bildirim sistemi ───────────────────────────────────────────
+  const [notifications, setNotifications] = useState([]);
+  const [showNotifPanel, setShowNotifPanel] = useState(false);
+  const unreadCount = notifications.filter((n) => !n.read).length;
 
   // Süre yenileme tetikleyici (30sn)
   const [, setTick] = useState(new Date());
@@ -145,6 +154,8 @@ export default function Dashboard() {
       setLivePositions(pos.positions || []);
       const tickets = (hybrid.positions || []).map((hp) => hp.ticket).filter(Boolean);
       setHybridTickets(new Set(tickets));
+      setHybridPositions(hybrid.positions || []);
+      if (hybrid.primnet) setPrimnetConfig(hybrid.primnet);
       setApiError(null); // Başarılı fetch → hata banner'ını temizle
 
       // ── v5.7.2: News REST polling (WS Chrome'da çalışmıyorsa fallback) ──
@@ -182,7 +193,22 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchAll();
-    const iv = setInterval(fetchAll, 10000); // 10sn REST polling (WS Chrome'da çalışmıyor)
+    // DB'den bildirimleri yükle (başlangıç)
+    getNotifications({ limit: 50 }).then((resp) => {
+      if (resp.notifications) {
+        setNotifications(resp.notifications.map((n) => ({
+          id: n.id,
+          type: n.type,
+          title: n.title,
+          message: n.message,
+          severity: n.severity,
+          read: n.read,
+          timestamp: n.timestamp,
+          dbId: n.id,
+        })));
+      }
+    });
+    const iv = setInterval(fetchAll, 10000);
     return () => clearInterval(iv);
   }, [fetchAll]);
 
@@ -243,6 +269,12 @@ export default function Dashboard() {
           }
           if (msg.type === 'trade_closed' || msg.type === 'position_closed') {
             fetchTradeData();
+          }
+          if (msg.type === 'notification') {
+            setNotifications((prev) => [
+              { id: Date.now(), read: false, ...msg },
+              ...prev,
+            ].slice(0, 50));
           }
         }
       },
@@ -328,6 +360,65 @@ export default function Dashboard() {
 
   return (
     <div className="dashboard">
+
+      {/* ═══ BİLDİRİM BUTONU ═══════════════════════════════════════ */}
+      <div className="dash-notif-bar">
+        <button
+          className={`dash-notif-btn${unreadCount > 0 ? ' dash-notif-btn--pulse' : ''}`}
+          onClick={() => setShowNotifPanel((v) => !v)}
+          title={unreadCount > 0 ? `${unreadCount} okunmamış bildirim` : 'Bildirimler'}
+        >
+          {unreadCount > 0 ? `Bildirimler (${unreadCount})` : 'Bildirimler'}
+        </button>
+      </div>
+
+      {/* ═══ BİLDİRİM PANELİ ═════════════════════════════════════ */}
+      {showNotifPanel && (
+        <div className="dash-notif-panel">
+          <div className="dash-notif-header">
+            <span>Bildirimler</span>
+            {unreadCount > 0 && (
+              <button
+                className="dash-notif-mark-all"
+                onClick={() => {
+                  markAllNotificationsRead();
+                  setNotifications((prev) =>
+                    prev.map((n) => ({ ...n, read: true }))
+                  );
+                }}
+              >
+                Tümünü okundu yap
+              </button>
+            )}
+          </div>
+          {notifications.length === 0 ? (
+            <div className="dash-notif-empty">Bildirim yok</div>
+          ) : (
+            <div className="dash-notif-list">
+              {notifications.map((n) => (
+                <div
+                  key={n.id}
+                  className={`dash-notif-item${n.read ? '' : ' dash-notif-item--unread'}`}
+                  onClick={() => {
+                    if (n.dbId) markNotificationRead(n.dbId);
+                    setNotifications((prev) =>
+                      prev.map((x) => x.id === n.id ? { ...x, read: true } : x)
+                    );
+                  }}
+                >
+                  <div className="dash-notif-title">
+                    {n.severity === 'warning' ? '!' : ''} {n.title || 'Bildirim'}
+                  </div>
+                  <div className="dash-notif-msg">{n.message || ''}</div>
+                  <div className="dash-notif-time">
+                    {n.timestamp ? shortTime(n.timestamp) : ''}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ═══ ÜST: 4 Stat Kartı ════════════════════════════════════ */}
       <div className="dash-stats-row">
@@ -456,8 +547,8 @@ export default function Dashboard() {
                   const apiTur = (pos.tur || '').trim();
                   let turLabel = apiTur;
                   let turClass = 'manual';
-                  if (apiTur === 'Hibrit' || apiTur === 'Otomatik' || apiTur === 'Manuel') {
-                    turClass = apiTur === 'Hibrit' ? 'hybrid' : apiTur === 'Otomatik' ? 'auto' : 'manual';
+                  if (apiTur === 'Hibrit' || apiTur === 'Otomatik' || apiTur === 'Manuel' || apiTur === 'MT5') {
+                    turClass = apiTur === 'Hibrit' ? 'hybrid' : apiTur === 'Otomatik' ? 'auto' : apiTur === 'MT5' ? 'mt5' : 'manual';
                   } else {
                     const stratLower = (pos.strategy || '').toLowerCase().trim();
                     const isAuto = KNOWN_AUTO_STRATEGIES.includes(stratLower);
@@ -520,10 +611,13 @@ export default function Dashboard() {
                           <button
                             type="button"
                             className="op-hybrid-link-btn"
-                            onClick={() => navigate('/hybrid')}
-                            title="Hibrit panelinde yönetiliyor — tıklayınca Hibrit İşlem Paneline gider"
+                            onClick={() => {
+                              const hp = hybridPositions.find((h) => h.ticket === pos.ticket);
+                              if (hp) setSelectedHybridPos(hp);
+                            }}
+                            title="PRİMNET detayını görüntüle"
                           >
-                            Hibritte
+                            PRİMNET
                           </button>
                         ) : (
                           <button
@@ -617,6 +711,15 @@ export default function Dashboard() {
       <NewsPanel newsData={newsData} />
 
       {/* ═══ HATA MODAL (window.alert yerine) ═════════════════════ */}
+      {/* ═══ PRİMNET DETAY MODALI ══════════════════════════════════ */}
+      {selectedHybridPos && primnetConfig && (
+        <PrimnetDetail
+          position={selectedHybridPos}
+          primnetConfig={primnetConfig}
+          onClose={() => setSelectedHybridPos(null)}
+        />
+      )}
+
       <ConfirmModal
         open={errorModal != null}
         title={errorModal?.title || 'Hata'}

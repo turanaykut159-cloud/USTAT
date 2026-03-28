@@ -1,0 +1,20 @@
+{
+  "_info": "config/default.json hybrid bolumunden silinen parametreler",
+  "_tarih": "2026-03-28",
+  "_neden": "PRiMNET tek trailing modu olarak belirlendi",
+
+  "trailing_mode": "primnet",
+  "trailing_profit_gap": 100.0,
+  "trailing_graduated": true,
+  "trailing_graduated_tiers": [
+    {"min_profit": 0,   "lock_ratio": 0.0,  "label": "breakeven"},
+    {"min_profit": 100, "lock_ratio": 0.30,  "label": "erken_trailing"},
+    {"min_profit": 250, "lock_ratio": 0.50,  "label": "normal_trailing"},
+    {"min_profit": 500, "lock_ratio": 0.70,  "label": "agresif_trailing"}
+  ],
+  "trailing_trigger_atr_mult": 1.0,
+  "trailing_distance_atr_mult": 1.0,
+  "breakeven_atr_mult": 0.5,
+  "trailing_min_pct": 0.015,
+  "trailing_max_pct": 0.080
+}

@@ -368,6 +368,44 @@ export async function getHybridEvents(params = {}) {
   }
 }
 
+export async function getHybridPerformance() {
+  try {
+    const { data } = await client.get('/hybrid/performance');
+    return data;
+  } catch (err) {
+    console.error('[ÜSTAT API] getHybridPerformance:', err?.message ?? err);
+    return {};
+  }
+}
+
+// ── Bildirimler ─────────────────────────────────────────────────
+
+export async function getNotifications(params = {}) {
+  try {
+    const { data } = await client.get('/notifications', { params });
+    return data;
+  } catch (err) {
+    console.error('[ÜSTAT API] getNotifications:', err?.message ?? err);
+    return { count: 0, unread_count: 0, notifications: [] };
+  }
+}
+
+export async function markNotificationRead(id) {
+  try {
+    await client.post('/notifications/read', { id });
+  } catch (err) {
+    console.error('[ÜSTAT API] markNotificationRead:', err?.message ?? err);
+  }
+}
+
+export async function markAllNotificationsRead() {
+  try {
+    await client.post('/notifications/read-all');
+  } catch (err) {
+    console.error('[ÜSTAT API] markAllNotificationsRead:', err?.message ?? err);
+  }
+}
+
 // ── Health (Sistem Sağlığı) ──────────────────────────────────────
 
 export async function getHealth() {

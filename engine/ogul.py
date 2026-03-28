@@ -2867,11 +2867,8 @@ class Ogul:
                         logger.error(f"EOD close_position hatası [{symbol}] ticket={trade.ticket}: {exc}")
                 self._remove_trade(symbol, trade, "end_of_day")
 
-        # Hibrit pozisyonları da kapat (EOD)
-        if self.h_engine:
-            failed = self.h_engine.force_close_all(reason="EOD_17:50")
-            if failed:
-                logger.error(f"EOD hibrit kapatma başarısız: {failed}")
+        # Hibrit pozisyonlar EOD'da kapatılmaz — kullanıcı kararı ile yönetilir.
+        # PRİMNET ertesi sabah yeni uzlaşma fiyatıyla SL/TP yeniler.
 
         # Manuel pozisyonları da kapat (EOD) — v14.1 düzeltme
         # Fix Y6: manuel_motor referansını yerel değişkene al (race condition koruması)
@@ -2930,10 +2927,22 @@ class Ogul:
             f"Zorla kapatma başlatılıyor..."
         )
 
+        # Hibrit pozisyonları EOD doğrulamasından hariç tut
+        hybrid_tickets: set[int] = set()
+        if self.h_engine:
+            hybrid_tickets = {t for t in self.h_engine.hybrid_positions}
+
         still_open: list[int] = []
         for pos in remaining:
             ticket = pos.get("ticket")
             if not ticket:
+                continue
+            # Hibrit pozisyonlar kullanıcı kararıyla yönetilir — atla
+            if ticket in hybrid_tickets:
+                logger.info(
+                    f"EOD doğrulama — ticket={ticket} hibrit pozisyon, "
+                    f"kapatma atlandı (kullanıcı kararı)"
+                )
                 continue
             closed = False
             for attempt in range(1, 6):

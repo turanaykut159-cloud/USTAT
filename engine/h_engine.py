@@ -1,18 +1,19 @@
-"""H-Engine — Hibrit İşlem Motoru (v1.0).
+"""H-Engine — Hibrit İşlem Motoru (v2.0 — PRİMNET).
 
-İnsan işlemi açar, robot yönetir ve kapatır.
+İnsan işlemi açar, robot PRİMNET ile yönetir ve kapatır.
 
 Bileşenler:
     H-Baba  → Devir ön kontrolü (risk/yetkilendirme)
-    H-Oğul  → Pozisyon yönetimi (breakeven, trailing stop)
+    H-Oğul  → PRİMNET pozisyon yönetimi (prim bazlı trailing stop)
 
-Yönetim kuralları:
-    1. Giriş SL  = entry_price ± (entry_atr × sl_atr_mult)
-    2. Giriş TP  = entry_price ± (entry_atr × tp_atr_mult)
-    3. Breakeven = Kâr ≥ breakeven_atr_mult × entry_atr → SL = entry_price
-    4a. Trailing (ATR mod)    = Kâr ≥ trigger × ATR → SL = price ∓ distance × ATR
-    4b. Trailing (profit mod) = Kâr > gap TRY → SL = entry ∓ (kâr-gap)/çarpan
-    5. entry_atr devir anında sabitlerir, değişmez.
+Pozisyon yönetimi — PRİMNET (Prim Bazlı Net Emir Takip):
+    1. Giriş SL  = entry_prim - faz1_stop_prim (BUY) / + faz1_stop_prim (SELL)
+    2. Giriş TP  = target_prim (tavan/tabana 0.5 prim kala)
+    3. Faz 1     = Trailing mesafe: faz1_stop_prim (1.5 prim)
+    4. Faz 2     = Kâr ≥ faz2_activation_prim → mesafe daralır: faz2_trailing_prim (1.0 prim)
+    5. Hedef     = Prim ≥ target_prim → pozisyon kapatılır
+    6. Referans fiyat = (tavan + taban) / 2 — devir anında sabitlenil, değişmez.
+    7. Referans fiyat alınamazsa → ATR bazlı SL/TP fallback (sadece giriş için)
 
 SL/TP modları:
     - native_sltp=True  → MT5 TRADE_ACTION_SLTP ile SL/TP yönetimi
@@ -37,6 +38,7 @@ from typing import Any, TYPE_CHECKING
 import numpy as np
 
 from engine.logger import get_logger
+from engine.models.regime import RegimeType
 from engine.utils.indicators import atr as calc_atr
 
 if TYPE_CHECKING:
@@ -57,6 +59,7 @@ ATR_PERIOD: int = 14          # ATR hesaplama periyodu
 MIN_BARS: int = 30            # ATR hesaplamak için min bar sayısı
 TRADING_OPEN: dtime = dtime(9, 40)
 TRADING_CLOSE: dtime = dtime(17, 50)
+EOD_NOTIFY: dtime = dtime(17, 45)  # Hibrit EOD bildirim saati
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -129,6 +132,12 @@ class HEngine:
         self._close_retry_counts: dict[int, int] = {}  # ticket → retry sayısı
         self._MAX_CLOSE_RETRIES: int = 3  # max kapatma denemesi
 
+        # ── EOD bildirim bayrağı (günde 1 kez) ───────────────
+        self._eod_notified_date: str = ""
+
+        # ── Günlük PRİMNET yenileme bayrağı ──────────────────
+        self._daily_reset_done: str = ""  # hangi gün yapıldı
+
         # ── Config parametreleri ──────────────────────────────────
         hybrid_cfg = config.get("hybrid", {})
         self._enabled: bool = hybrid_cfg.get("enabled", True)
@@ -136,57 +145,25 @@ class HEngine:
         self._config_daily_limit: float = hybrid_cfg.get("daily_loss_limit", 500.0)
         self._sl_atr_mult: float = hybrid_cfg.get("sl_atr_mult", 2.0)
         self._tp_atr_mult: float = hybrid_cfg.get("tp_atr_mult", 2.0)
-        self._breakeven_atr_mult: float = hybrid_cfg.get("breakeven_atr_mult", 1.0)
-        self._trailing_trigger_mult: float = hybrid_cfg.get("trailing_trigger_atr_mult", 1.5)
-        self._trailing_distance_mult: float = hybrid_cfg.get("trailing_distance_atr_mult", 1.0)
-        self._trailing_mode: str = hybrid_cfg.get("trailing_mode", "atr")  # "atr" | "profit"
-        self._trailing_profit_gap: float = hybrid_cfg.get("trailing_profit_gap", 100.0)  # TRY
         self._native_sltp: bool = hybrid_cfg.get("native_sltp", False)
-        self._trailing_min_pct: float = hybrid_cfg.get("trailing_min_pct", 0.015)  # %1.5
-        self._trailing_max_pct: float = hybrid_cfg.get("trailing_max_pct", 0.080)  # %8.0
 
         # ── PRİMNET — Prim Bazlı Net Emir Takip Sistemi ─────────
+        # Tek pozisyon yönetim modu: prim cinsinden SL/TP, trailing, hedef
         primnet_cfg = hybrid_cfg.get("primnet", {})
         self._primnet_faz1_stop: float = primnet_cfg.get("faz1_stop_prim", 1.5)
         self._primnet_faz2_activation: float = primnet_cfg.get("faz2_activation_prim", 2.0)
         self._primnet_faz2_trailing: float = primnet_cfg.get("faz2_trailing_prim", 1.0)
         self._primnet_target: float = primnet_cfg.get("target_prim", 9.5)
 
-        # ── Kademeli Oran Sistemi (3 Fazlı Koruma) ───────────────
-        self._trailing_graduated: bool = hybrid_cfg.get("trailing_graduated", False)
-        raw_tiers = hybrid_cfg.get("trailing_graduated_tiers", [
-            {"min_profit": 0,   "lock_ratio": 0.0,  "label": "breakeven"},
-            {"min_profit": 100, "lock_ratio": 0.30,  "label": "erken_trailing"},
-            {"min_profit": 250, "lock_ratio": 0.50,  "label": "normal_trailing"},
-            {"min_profit": 500, "lock_ratio": 0.70,  "label": "agresif_trailing"},
-        ])
-        # Büyükten küçüğe sırala — en yüksek eşikten başlayarak kontrol edeceğiz
-        self._trailing_tiers: list[dict] = sorted(
-            raw_tiers, key=lambda t: t["min_profit"], reverse=True
-        )
-
         sltp_mode = "NATIVE (MT5)" if self._native_sltp else "SOFTWARE (H-Oğul)"
-        if self._trailing_mode == "primnet":
-            trailing_desc = (
-                f"PRİMNET (stop={self._primnet_faz1_stop}, "
-                f"faz2={self._primnet_faz2_activation}→{self._primnet_faz2_trailing}, "
-                f"hedef=±{self._primnet_target})"
-            )
-        elif self._trailing_mode == "profit" and self._trailing_graduated:
-            tier_info = ", ".join(
-                f"{t['label']}≥{t['min_profit']}→%{t['lock_ratio']*100:.0f}"
-                for t in sorted(raw_tiers, key=lambda t: t["min_profit"])
-            )
-            trailing_desc = f"PROFIT KADEMELİ ({tier_info})"
-        elif self._trailing_mode == "profit":
-            trailing_desc = f"PROFIT (gap={self._trailing_profit_gap} TRY)"
-        else:
-            trailing_desc = f"ATR (trigger={self._trailing_trigger_mult}×, dist={self._trailing_distance_mult}×)"
         logger.info(
             f"H-Engine başlatıldı: max_concurrent={self._max_concurrent}, "
             f"daily_limit={self._config_daily_limit}, "
-            f"SL={self._sl_atr_mult}×ATR, TP={self._tp_atr_mult}×ATR, "
-            f"SL/TP modu={sltp_mode}, trailing={trailing_desc}"
+            f"SL/TP fallback={self._sl_atr_mult}×ATR/{self._tp_atr_mult}×ATR, "
+            f"SL/TP modu={sltp_mode}, "
+            f"PRİMNET (stop={self._primnet_faz1_stop}, "
+            f"faz2={self._primnet_faz2_activation}→{self._primnet_faz2_trailing}, "
+            f"hedef=±{self._primnet_target})"
         )
 
     # ═════════════════════════════════════════════════════════════════
@@ -411,29 +388,27 @@ class HEngine:
         result["symbol"] = symbol
         result["entry_atr"] = atr_value
 
-        # ── PRİMNET: Prim bazlı SL/TP hesapla (ATR yerine) ──────
-        ref_price = 0.0
-        if self._trailing_mode == "primnet":
-            ref_price = self._get_reference_price(symbol) or 0.0
-            if ref_price > 0:
-                entry_prim = self._price_to_prim(entry_price, ref_price)
-                if direction == "BUY":
-                    stop_prim = entry_prim - self._primnet_faz1_stop
-                    target_prim = self._primnet_target
-                else:
-                    stop_prim = entry_prim + self._primnet_faz1_stop
-                    target_prim = -self._primnet_target
-                suggested_sl = self._prim_to_price(stop_prim, ref_price)
-                suggested_tp = self._prim_to_price(target_prim, ref_price)
-                logger.info(
-                    f"PRİMNET devir: {symbol} {direction} giriş_prim={entry_prim:.2f} "
-                    f"stop_prim={stop_prim:.2f} hedef_prim={target_prim:.2f} "
-                    f"SL={suggested_sl:.4f} TP={suggested_tp:.4f} ref={ref_price:.4f}"
-                )
+        # ── PRİMNET: Prim bazlı SL/TP hesapla ──────────────────
+        ref_price = self._get_reference_price(symbol) or 0.0
+        if ref_price > 0:
+            entry_prim = self._price_to_prim(entry_price, ref_price)
+            if direction == "BUY":
+                stop_prim = entry_prim - self._primnet_faz1_stop
+                target_prim = self._primnet_target
             else:
-                logger.warning(
-                    f"PRİMNET: Referans fiyat alınamadı [{symbol}] — ATR SL/TP kullanılıyor"
-                )
+                stop_prim = entry_prim + self._primnet_faz1_stop
+                target_prim = -self._primnet_target
+            suggested_sl = self._prim_to_price(stop_prim, ref_price)
+            suggested_tp = self._prim_to_price(target_prim, ref_price)
+            logger.info(
+                f"PRİMNET devir: {symbol} {direction} giriş_prim={entry_prim:.2f} "
+                f"stop_prim={stop_prim:.2f} hedef_prim={target_prim:.2f} "
+                f"SL={suggested_sl:.4f} TP={suggested_tp:.4f} ref={ref_price:.4f}"
+            )
+        else:
+            logger.warning(
+                f"PRİMNET: Referans fiyat alınamadı [{symbol}] — ATR SL/TP kullanılıyor"
+            )
 
         # ── 1. SL/TP ataması ────────────────────────────────────────
         if self._native_sltp:
@@ -457,12 +432,23 @@ class HEngine:
                 )
                 return result
         else:
-            # Software mod: MT5 native SLTP kullanılmıyor.
-            # SL/TP yalnızca bellekte/DB'de tutulur, H-Oğul run_cycle
-            # her 10sn'de fiyat kontrolü yaparak DEAL ile kapatır.
+            # Software mod: SL/TP bellekte tutulur, H-Oğul fiyat kontrolü ile kapatır.
+            # Güvenlik ağı: MT5'e geniş bir native SL koy (gap koruması).
+            # Normal yönetim yazılımsal, ama piyasa gap atarsa MT5 native SL devreye girer.
+            safety_sl = suggested_sl  # PRİMNET stop = geniş yeterli
+            try:
+                self.mt5.modify_position(ticket, sl=safety_sl)
+                logger.info(
+                    f"Software SL/TP modu + güvenlik ağı SL: ticket={ticket} {symbol} "
+                    f"native_SL={safety_sl:.4f} (gap koruması)"
+                )
+            except Exception as exc:
+                logger.warning(
+                    f"Güvenlik ağı SL atanamadı: ticket={ticket} {symbol} — {exc}"
+                )
             logger.info(
                 f"Software SL/TP modu: ticket={ticket} {symbol} "
-                f"SL={suggested_sl:.4f} TP={suggested_tp:.4f} (MT5 modify atlandı)"
+                f"SL={suggested_sl:.4f} TP={suggested_tp:.4f} (software yönetim aktif)"
             )
 
         # ── 2. DB'ye kaydet ───────────────────────────────────────
@@ -511,8 +497,7 @@ class HEngine:
             reference_price=ref_price,
         )
         # PRİMNET: breakeven_hit baştan True — Faz 1 trailing hemen başlar
-        if self._trailing_mode == "primnet":
-            hp.breakeven_hit = True
+        hp.breakeven_hit = True
         self.hybrid_positions[ticket] = hp
 
         # ── 3b. ManuelMotor aktif işlemlerden çıkar ──────────────────
@@ -599,6 +584,52 @@ class HEngine:
         if not self._enabled or not self.hybrid_positions:
             return
 
+        # ── OLAY rejimi → tüm hibrit pozisyonları anında kapat ─────
+        if (self.baba
+                and hasattr(self.baba, "current_regime")
+                and self.baba.current_regime.regime_type == RegimeType.OLAY):
+            logger.warning(
+                "OLAY rejimi algılandı — tüm hibrit pozisyonlar kapatılıyor"
+            )
+            self.force_close_all("OLAY_REGIME")
+            return
+
+        # ── 17:45 sonrası açık pozisyon bildirimi (günde 1 kez) ──
+        now = datetime.now()
+        today_str = now.date().isoformat()
+        if (now.time() >= EOD_NOTIFY
+                and self._eod_notified_date != today_str):
+            self._eod_notified_date = today_str
+            active = [
+                hp for hp in self.hybrid_positions.values()
+                if hp.state == "ACTIVE"
+            ]
+            if active:
+                symbols = ", ".join(f"{hp.symbol} {hp.direction}" for hp in active)
+                msg = (
+                    f"{len(active)} hibrit pozisyon gün sonunda açık: {symbols}. "
+                    f"Kapatmak veya yarına bırakmak senin kararın."
+                )
+                # DB'ye kaydet (restart sonrası kaybolmaz)
+                self.db.insert_notification(
+                    notif_type="hybrid_eod",
+                    title="Hibrit Pozisyon Açık",
+                    message=msg,
+                    severity="warning",
+                )
+                # WS ile dashboard'a gönder
+                from engine.event_bus import emit as _emit
+                _emit("notification", {
+                    "type": "hybrid_eod",
+                    "title": "Hibrit Pozisyon Açık",
+                    "message": msg,
+                    "severity": "warning",
+                    "timestamp": now.isoformat(timespec="seconds"),
+                })
+                logger.info(
+                    f"EOD bildirim gönderildi: {len(active)} hibrit pozisyon açık"
+                )
+
         # Gün değişimi kontrolü
         self._refresh_daily_pnl()
 
@@ -674,9 +705,8 @@ class HEngine:
                     continue  # Pozisyon kapatıldı, sonraki döngüye geç
 
             # ── PRİMNET hedef kontrolü (tavan/tabana 0.5 kala) ───
-            if self._trailing_mode == "primnet":
-                if self._check_primnet_target(hp, current_price, profit, swap):
-                    continue  # Hedef kapanış, sonraki döngüye geç
+            if self._check_primnet_target(hp, current_price, profit, swap):
+                continue  # Hedef kapanış, sonraki döngüye geç
 
             # ── Breakeven kontrolü ────────────────────────────────
             self._check_breakeven(hp, current_price, profit, swap)
@@ -805,22 +835,40 @@ class HEngine:
         hp.volume = mt5_volume
         hp.entry_price = mt5_entry
 
-        # Lot ekleme — SL/TP yeni giriş fiyatından yeniden hesapla
+        # Lot ekleme — SL/TP yeni giriş fiyatından PRİMNET ile yeniden hesapla
         if mt5_volume > old_volume:
-            if hp.direction == "BUY":
-                hp.current_sl = mt5_entry - (self._sl_atr_mult * hp.entry_atr)
-                hp.current_tp = mt5_entry + (self._tp_atr_mult * hp.entry_atr)
+            ref_price = self._get_reference_price(hp.symbol)
+            if ref_price and ref_price > 0:
+                entry_prim = self._price_to_prim(mt5_entry, ref_price)
+                if hp.direction == "BUY":
+                    stop_prim = entry_prim - self._primnet_faz1_stop
+                    target_prim = self._primnet_target
+                else:
+                    stop_prim = entry_prim + self._primnet_faz1_stop
+                    target_prim = -self._primnet_target
+                hp.current_sl = self._prim_to_price(stop_prim, ref_price)
+                hp.current_tp = self._prim_to_price(target_prim, ref_price)
+                hp.reference_price = ref_price
             else:
-                hp.current_sl = mt5_entry + (self._sl_atr_mult * hp.entry_atr)
-                hp.current_tp = mt5_entry - (self._tp_atr_mult * hp.entry_atr)
-            hp.breakeven_hit = False
+                # Referans fiyat alınamazsa ATR fallback (sadece giriş SL/TP)
+                logger.warning(
+                    f"Netting SYNC: PRİMNET referans fiyat alınamadı [{hp.symbol}] "
+                    f"— ATR SL/TP fallback"
+                )
+                if hp.direction == "BUY":
+                    hp.current_sl = mt5_entry - (self._sl_atr_mult * hp.entry_atr)
+                    hp.current_tp = mt5_entry + (self._tp_atr_mult * hp.entry_atr)
+                else:
+                    hp.current_sl = mt5_entry + (self._sl_atr_mult * hp.entry_atr)
+                    hp.current_tp = mt5_entry - (self._tp_atr_mult * hp.entry_atr)
+            hp.breakeven_hit = True  # PRİMNET: trailing hemen aktif
 
             logger.info(
                 f"Netting SYNC (lot ekleme): ticket={hp.ticket} {hp.symbol} "
                 f"lot {old_volume}→{mt5_volume}, entry {old_entry:.4f}→{mt5_entry:.4f}, "
                 f"SL {old_sl:.4f}→{hp.current_sl:.4f}, "
                 f"TP {old_tp:.4f}→{hp.current_tp:.4f} "
-                f"(breakeven sıfırlandı)"
+                f"(PRİMNET yeniden hesaplandı)"
             )
         else:
             # Lot çıkarma — SL/TP koru, sadece hacim güncelle
@@ -853,17 +901,18 @@ class HEngine:
         )
 
     # ═════════════════════════════════════════════════════════════════
-    #  BREAKEVEN — Kâr ≥ breakeven_mult × entry_atr → SL = entry
+    #  BREAKEVEN — PRİMNET: Faz 1 trailing hemen başlar
     # ═════════════════════════════════════════════════════════════════
 
     def _check_breakeven(
         self, hp: HybridPosition, current_price: float,
         profit: float, swap: float,
     ) -> None:
-        """Breakeven koşulunu kontrol et ve gerekirse SL'yi giriş fiyatına taşı.
+        """PRİMNET breakeven — Faz 1 trailing hemen başlar, ayrı breakeven yok.
 
-        Koşul: Fiyat hareketinden oluşan kâr ≥ breakeven_atr_mult × entry_atr
-        Etki: SL = entry_price (zarar riski sıfırlanır)
+        PRİMNET'te breakeven ayrı bir adım değildir. Devir anında SL zaten
+        prim bazlı hesaplanmıştır (faz1_stop). Bu fonksiyon sadece
+        breakeven_hit bayrağını True yaparak trailing'in çalışmasını sağlar.
 
         Args:
             hp: Hibrit pozisyon.
@@ -874,219 +923,19 @@ class HEngine:
         if hp.breakeven_hit:
             return
 
-        # PRİMNET modunda breakeven atlanır — Faz 1 trailing baştan çalışır
-        if self._trailing_mode == "primnet":
-            hp.breakeven_hit = True  # trailing'in çalışması için
-            return
-
-        # Fiyat bazlı kâr hesabı (yön dikkate alınır)
-        price_diff = self._price_profit(hp, current_price)
-        breakeven_threshold = self._breakeven_atr_mult * hp.entry_atr
-
-        if price_diff < breakeven_threshold:
-            return
-
-        # Breakeven SL: giriş fiyatı
-        new_sl = hp.entry_price
-
-        # Mevcut SL zaten giriş fiyatında veya daha iyiyse güncelleme yapma
-        if hp.direction == "BUY" and hp.current_sl >= new_sl:
-            hp.breakeven_hit = True
-            return
-        if hp.direction == "SELL" and hp.current_sl <= new_sl:
-            hp.breakeven_hit = True
-            return
-
-        # MT5'e yaz (native mod) veya sadece internal güncelle (software mod)
-        if self._native_sltp:
-            modify_result = self.mt5.modify_position(hp.ticket, sl=new_sl)
-            if modify_result is None:
-                # v5.4.1: Modify başarısız — retry sayacı + alarm
-                retry_key = f"be_modify_{hp.ticket}"
-                fail_count = self._close_retry_counts.get(retry_key, 0) + 1
-                self._close_retry_counts[retry_key] = fail_count
-                logger.warning(
-                    f"Breakeven SL modify başarısız: ticket={hp.ticket} {hp.symbol} "
-                    f"(deneme {fail_count}/3)"
-                )
-                if fail_count >= 3:
-                    logger.critical(
-                        f"Breakeven SL 3x modify başarısız: ticket={hp.ticket} {hp.symbol} "
-                        f"— software SL moduna geçiliyor"
-                    )
-                    # Native başarısız, software SL ile korumaya devam et
-                    self._close_retry_counts.pop(retry_key, None)
-                    # Belleği güncelle ama DB'ye native=False olarak kaydet
-                    old_sl = hp.current_sl
-                    hp.current_sl = new_sl
-                    hp.breakeven_hit = True
-                    self.db.update_hybrid_position(hp.ticket, {
-                        "current_sl": new_sl, "breakeven_hit": 1,
-                    })
-                    self.db.insert_hybrid_event(
-                        ticket=hp.ticket, symbol=hp.symbol, event="BREAKEVEN_FALLBACK",
-                        details={
-                            "old_sl": old_sl, "new_sl": new_sl,
-                            "price": current_price,
-                            "message": "Native modify 3x başarısız, software SL aktif",
-                        },
-                    )
-                    logger.warning(
-                        f"Breakeven SL (software fallback): ticket={hp.ticket} {hp.symbol} "
-                        f"SL {old_sl:.4f} → {new_sl:.4f}"
-                    )
-                return
-            else:
-                # v5.4.1: Modify başarılı — MT5 doğrulama
-                self._close_retry_counts.pop(f"be_modify_{hp.ticket}", None)
-                verified_sl = self._verify_mt5_sl(hp.ticket)
-                if verified_sl is not None and abs(verified_sl - new_sl) > 0.01:
-                    logger.error(
-                        f"Breakeven SL DESYNC: ticket={hp.ticket} {hp.symbol} "
-                        f"istenen={new_sl:.4f} MT5={verified_sl:.4f} — MT5 değeri kullanılıyor"
-                    )
-                    new_sl = verified_sl
-
-        old_sl = hp.current_sl
-        hp.current_sl = new_sl
-        hp.breakeven_hit = True
-
-        # DB güncelle
-        self.db.update_hybrid_position(hp.ticket, {
-            "current_sl": new_sl,
-            "breakeven_hit": 1,
-        })
-        self.db.insert_hybrid_event(
-            ticket=hp.ticket, symbol=hp.symbol, event="BREAKEVEN",
-            details={
-                "old_sl": old_sl, "new_sl": new_sl,
-                "price": current_price, "entry_atr": hp.entry_atr,
-                "mode": "native" if self._native_sltp else "software",
-            },
-        )
-
-        logger.info(
-            f"Breakeven SL: ticket={hp.ticket} {hp.symbol} "
-            f"SL {old_sl:.4f} → {new_sl:.4f} (fiyat={current_price:.4f}) "
-            f"[{'native' if self._native_sltp else 'software'}]"
-        )
+        hp.breakeven_hit = True  # trailing'in çalışması için
 
     # ═════════════════════════════════════════════════════════════════
-    #  TRAILING SL HESAPLAMA — ATR ve Profit modları
-    # ═════════════════════════════════════════════════════════════════
-
-    def _calc_atr_trailing_sl(
-        self, hp: HybridPosition, current_price: float,
-    ) -> float | None:
-        """ATR bazlı trailing SL hesapla (klasik mod).
-
-        Koşul: kâr ≥ trailing_trigger × entry_atr
-        Hesap: SL = current_price ∓ distance × entry_atr
-
-        Returns:
-            Yeni SL değeri, koşul sağlanmıyorsa None.
-        """
-        price_diff = self._price_profit(hp, current_price)
-        trailing_threshold = self._trailing_trigger_mult * hp.entry_atr
-
-        if price_diff < trailing_threshold:
-            return None
-
-        distance = self._trailing_distance_mult * hp.entry_atr
-        if hp.direction == "BUY":
-            return current_price - distance
-        return current_price + distance
-
-    def _calc_profit_trailing_sl(
-        self, hp: HybridPosition, current_price: float,
-        profit: float, swap: float,
-    ) -> float | None:
-        """Kâr bazlı trailing SL hesapla (v5.8 — Kademeli Oran Sistemi).
-
-        İki mod:
-        1) Kademeli (trailing_graduated=true):
-           Kâr seviyesine göre artan oranda kilitleme.
-           Faz 1 (breakeven) : kâr>0     → SL=entry (zarar yok)
-           Faz 2 (erken)     : kâr≥100   → kârın %30'u kilitli
-           Faz 3 (normal)    : kâr≥250   → kârın %50'si kilitli
-           Faz 4 (agresif)   : kâr≥500   → kârın %70'i kilitli
-
-        2) Eski mod (trailing_graduated=false):
-           Sabit gap: lock = kâr - gap
-
-        Returns:
-            Yeni SL değeri, koşul sağlanmıyorsa None.
-        """
-        total_pnl = profit + swap
-
-        # ── Kademeli Oran Sistemi ──────────────────────────────
-        if self._trailing_graduated:
-            # Kâr <= 0 ise trailing başlamaz
-            if total_pnl <= 0:
-                return None
-
-            # Tier bul (büyükten küçüğe sıralı, ilk eşleşen kazanır)
-            lock_ratio = 0.0
-            tier_label = "breakeven"
-            for tier in self._trailing_tiers:
-                if total_pnl >= tier["min_profit"]:
-                    lock_ratio = tier["lock_ratio"]
-                    tier_label = tier.get("label", "?")
-                    break
-
-            lock_trl = total_pnl * lock_ratio  # kilitlenecek TRY
-
-            logger.debug(
-                f"Kademeli trailing [{hp.symbol}] t={hp.ticket}: "
-                f"kâr={total_pnl:.0f} TRY, faz={tier_label}, "
-                f"oran=%{lock_ratio*100:.0f}, kilit={lock_trl:.0f} TRY"
-            )
-        else:
-            # ── Eski sabit gap modu ────────────────────────────
-            gap = self._trailing_profit_gap
-            if total_pnl <= gap:
-                return None
-            lock_trl = total_pnl - gap
-
-        # TRY → fiyat mesafesi dönüşümü (symbol_info'dan kontrat çarpanı)
-        sym = self.mt5.get_symbol_info(hp.symbol)
-        if sym is None or sym.trade_contract_size <= 0:
-            logger.warning(
-                f"Profit trailing: symbol_info alınamadı [{hp.symbol}] "
-                f"— ATR moduna fallback"
-            )
-            return self._calc_atr_trailing_sl(hp, current_price)
-
-        # profit = price_diff × volume × contract_size (VİOP basit formül)
-        trl_per_point = hp.volume * sym.trade_contract_size
-        if trl_per_point <= 0:
-            return None
-
-        lock_points = lock_trl / trl_per_point
-
-        # SL = giriş fiyatından lock_points kadar kâr yönünde
-        if hp.direction == "BUY":
-            new_sl = hp.entry_price + lock_points
-        else:
-            new_sl = hp.entry_price - lock_points
-
-        return new_sl
-
-    # ═════════════════════════════════════════════════════════════════
-    #  TRAILING STOP — Ana kontrol
+    #  TRAILING STOP — PRİMNET Ana kontrol
     # ═════════════════════════════════════════════════════════════════
 
     def _check_trailing(
         self, hp: HybridPosition, current_price: float,
         profit: float, swap: float,
     ) -> None:
-        """Trailing stop kontrolü — breakeven sonrası devreye girer.
+        """PRİMNET trailing stop kontrolü — breakeven sonrası devreye girer.
 
-        İki mod destekler (config trailing_mode):
-            "atr"    → Klasik ATR mesafe bazlı trailing (eski davranış)
-            "profit" → Kâr bazlı trailing: (kâr - gap) TRY'yi fiyata çevirip
-                        SL olarak kilitler. Daha sezgisel, para odaklı.
-
+        Prim bazlı mesafe hesabı ile SL günceller.
         Kural: SL sadece daha iyi yöne taşınır (BUY: yukarı, SELL: aşağı)
 
         Args:
@@ -1098,45 +947,10 @@ class HEngine:
         if not hp.breakeven_hit:
             return
 
-        if self._trailing_mode == "primnet":
-            new_sl = self._calc_primnet_trailing_sl(hp, current_price)
-        elif self._trailing_mode == "profit":
-            new_sl = self._calc_profit_trailing_sl(hp, current_price, profit, swap)
-        else:
-            new_sl = self._calc_atr_trailing_sl(hp, current_price)
+        new_sl = self._calc_primnet_trailing_sl(hp, current_price)
 
         if new_sl is None:
             return
-
-        # PRİMNET modunda min/max clamp ve breakeven floor atlanır
-        # (prim bazlı mesafeler zaten doğru hesaplanmış)
-        if self._trailing_mode != "primnet":
-            # Min/Max trailing mesafe sınırı (VİOP Rapor uyumu)
-            if current_price > 0:
-                min_dist = current_price * self._trailing_min_pct
-                max_dist = current_price * self._trailing_max_pct
-                if hp.direction == "BUY":
-                    distance = current_price - new_sl
-                    clamped = max(min_dist, min(distance, max_dist))
-                    new_sl = current_price - clamped
-                else:
-                    distance = new_sl - current_price
-                    clamped = max(min_dist, min(distance, max_dist))
-                    new_sl = current_price + clamped
-
-            # ── Breakeven Floor (v5.8) ─────────────────────────────
-            if hp.direction == "SELL" and new_sl > hp.entry_price:
-                new_sl = hp.entry_price
-                logger.debug(
-                    f"Breakeven floor uygulandı [{hp.symbol}] t={hp.ticket}: "
-                    f"SL entry'ye çekildi ({hp.entry_price:.2f})"
-                )
-            elif hp.direction == "BUY" and new_sl < hp.entry_price:
-                new_sl = hp.entry_price
-                logger.debug(
-                    f"Breakeven floor uygulandı [{hp.symbol}] t={hp.ticket}: "
-                    f"SL entry'ye çekildi ({hp.entry_price:.2f})"
-                )
 
         # SL sadece daha iyi yöne taşınır
         if hp.direction == "BUY":
@@ -1146,53 +960,43 @@ class HEngine:
             if new_sl >= hp.current_sl:
                 return
 
-        # MT5'e yaz (native mod) veya sadece internal güncelle (software mod)
-        if self._native_sltp:
-            modify_result = self.mt5.modify_position(hp.ticket, sl=new_sl)
-            if modify_result is None:
-                # v5.4.1: Modify başarısız — retry sayacı + alarm
-                retry_key = f"tr_modify_{hp.ticket}"
-                fail_count = self._close_retry_counts.get(retry_key, 0) + 1
-                self._close_retry_counts[retry_key] = fail_count
+        # MT5'e native SL yaz — hem native hem software modda.
+        # Software modda da MT5'e yazarak gap koruması sağlanır:
+        # Trailing SL seviyesi broker tarafında korunur, 10sn polling beklenmez.
+        modify_result = self.mt5.modify_position(hp.ticket, sl=new_sl)
+        if modify_result is None:
+            retry_key = f"tr_modify_{hp.ticket}"
+            fail_count = self._close_retry_counts.get(retry_key, 0) + 1
+            self._close_retry_counts[retry_key] = fail_count
+            if fail_count <= 3:
                 logger.warning(
                     f"Trailing SL modify başarısız: ticket={hp.ticket} {hp.symbol} "
-                    f"(deneme {fail_count}/3)"
+                    f"(deneme {fail_count}/3) — bellekte güncelleniyor"
                 )
-                if fail_count >= 3:
-                    logger.critical(
-                        f"Trailing SL 3x modify başarısız: ticket={hp.ticket} {hp.symbol} "
-                        f"— software SL moduna geçiliyor"
-                    )
-                    self._close_retry_counts.pop(retry_key, None)
-                    old_sl = hp.current_sl
-                    hp.current_sl = new_sl
-                    hp.trailing_active = True
-                    self.db.update_hybrid_position(hp.ticket, {
-                        "current_sl": new_sl, "trailing_active": 1,
-                    })
-                    self.db.insert_hybrid_event(
-                        ticket=hp.ticket, symbol=hp.symbol, event="TRAILING_FALLBACK",
-                        details={
-                            "old_sl": old_sl, "new_sl": new_sl,
-                            "price": current_price,
-                            "message": "Native modify 3x başarısız, software SL aktif",
-                        },
-                    )
-                    logger.warning(
-                        f"Trailing SL (software fallback): ticket={hp.ticket} {hp.symbol} "
-                        f"SL {old_sl:.4f} → {new_sl:.4f}"
-                    )
-                return
-            else:
-                # v5.4.1: Modify başarılı — MT5 doğrulama
-                self._close_retry_counts.pop(f"tr_modify_{hp.ticket}", None)
-                verified_sl = self._verify_mt5_sl(hp.ticket)
-                if verified_sl is not None and abs(verified_sl - new_sl) > 0.01:
-                    logger.error(
-                        f"Trailing SL DESYNC: ticket={hp.ticket} {hp.symbol} "
-                        f"istenen={new_sl:.4f} MT5={verified_sl:.4f} — MT5 değeri kullanılıyor"
-                    )
-                    new_sl = verified_sl
+            if fail_count >= 3 and fail_count == 3:
+                logger.critical(
+                    f"Trailing SL 3x modify başarısız: ticket={hp.ticket} {hp.symbol} "
+                    f"— sadece software SL ile devam ediliyor (gap riski!)"
+                )
+                self.db.insert_hybrid_event(
+                    ticket=hp.ticket, symbol=hp.symbol, event="TRAILING_FALLBACK",
+                    details={
+                        "old_sl": hp.current_sl, "new_sl": new_sl,
+                        "price": current_price,
+                        "message": "Native modify 3x başarısız, software-only SL",
+                    },
+                )
+            # Modify başarısız olsa bile bellekte güncelle (software SL devam eder)
+        else:
+            self._close_retry_counts.pop(f"tr_modify_{hp.ticket}", None)
+            # MT5 doğrulama
+            verified_sl = self._verify_mt5_sl(hp.ticket)
+            if verified_sl is not None and abs(verified_sl - new_sl) > 0.01:
+                logger.error(
+                    f"Trailing SL DESYNC: ticket={hp.ticket} {hp.symbol} "
+                    f"istenen={new_sl:.4f} MT5={verified_sl:.4f} — MT5 değeri kullanılıyor"
+                )
+                new_sl = verified_sl
 
         old_sl = hp.current_sl
         hp.current_sl = new_sl
@@ -1210,7 +1014,7 @@ class HEngine:
                 "old_sl": old_sl, "new_sl": new_sl,
                 "price": current_price, "entry_atr": hp.entry_atr,
                 "mode": "native" if self._native_sltp else "software",
-                "trailing_mode": self._trailing_mode,
+                "trailing_mode": "primnet",
                 "pnl": round(total_pnl, 2),
             },
         )
@@ -1218,7 +1022,7 @@ class HEngine:
         logger.info(
             f"Trailing SL: ticket={hp.ticket} {hp.symbol} "
             f"SL {old_sl:.4f} → {new_sl:.4f} (fiyat={current_price:.4f}, "
-            f"kâr={total_pnl:.0f} TRY) [{self._trailing_mode}]"
+            f"kâr={total_pnl:.0f} TRY) [primnet]"
         )
 
     # ═════════════════════════════════════════════════════════════════
@@ -1350,6 +1154,8 @@ class HEngine:
                 transferred_at=row.get("transferred_at", ""),
                 db_id=row["id"],
             )
+            # PRİMNET: trailing her zaman aktif — restart sonrası da
+            hp.breakeven_hit = True
             self.hybrid_positions[hp.ticket] = hp
 
         count = len(self.hybrid_positions)
@@ -1435,7 +1241,20 @@ class HEngine:
             taban = getattr(sym, "session_price_limit_min", 0.0)
             if tavan <= 0 or taban <= 0:
                 return None
-            return (tavan + taban) / 2.0
+
+            ref = (tavan + taban) / 2.0
+
+            # Doğrulama: tavan/taban farkı %20 olmalı (VİOP ±%10 limit)
+            # Tolerans: %15-%25 arası kabul (bazı kontratlar farklı)
+            spread_pct = (tavan - taban) / ref if ref > 0 else 0
+            if spread_pct < 0.10 or spread_pct > 0.30:
+                logger.warning(
+                    f"PRİMNET referans fiyat şüpheli [{symbol}]: "
+                    f"tavan={tavan:.4f} taban={taban:.4f} ref={ref:.4f} "
+                    f"spread=%{spread_pct*100:.1f} (beklenen ~%20) — kullanılıyor ama dikkat"
+                )
+
+            return ref
         except Exception as exc:
             logger.error(f"PRİMNET referans fiyat hatası [{symbol}]: {exc}")
             return None
@@ -1491,9 +1310,10 @@ class HEngine:
         ref_price = self._get_reference_price(hp.symbol)
         if ref_price is None:
             logger.warning(
-                f"PRİMNET: Referans fiyat alınamadı [{hp.symbol}] — ATR fallback"
+                f"PRİMNET: Referans fiyat alınamadı [{hp.symbol}] "
+                f"— bu cycle atlanıyor, sonraki denemede tekrar denenecek"
             )
-            return self._calc_atr_trailing_sl(hp, current_price)
+            return None
 
         entry_prim = self._price_to_prim(hp.entry_price, ref_price)
         current_prim = self._price_to_prim(current_price, ref_price)
@@ -1610,18 +1430,170 @@ class HEngine:
         return TRADING_OPEN <= current_time <= TRADING_CLOSE
 
     def _refresh_daily_pnl(self) -> None:
-        """Günlük PnL'yi kontrol et; gün değişmişse sıfırla, DB'den yeniden oku."""
+        """Günlük PnL'yi kontrol et; gün değişmişse sıfırla, DB'den yeniden oku.
+
+        PRİMNET yenilemesi piyasa açılışında (09:40+) çalışır, gece yarısında değil.
+        MT5'in yeni uzlaşma fiyatlarını yüklemesi için piyasa açık olmalı.
+        """
         today = date.today().isoformat()
         if self._daily_pnl_date != today:
             self._daily_pnl_date = today
             self._daily_hybrid_pnl = 0.0
             logger.info("Hibrit günlük PnL sıfırlandı (yeni gün)")
 
+        # PRİMNET yenileme — piyasa açılışında (uzlaşma fiyatları hazır)
+        now = datetime.now()
+        if (self._daily_reset_done != today
+                and self.hybrid_positions
+                and self._is_trading_hours(now)):
+            self._daily_reset_done = today
+            yesterday = self._daily_pnl_date if self._daily_pnl_date != today else "?"
+            self._primnet_daily_reset(yesterday)
+
         # DB'den güncel toplam
         try:
             self._daily_hybrid_pnl = self.db.get_hybrid_daily_pnl(today)
         except Exception:
             pass  # Hata durumunda mevcut değeri koru
+
+    def _primnet_daily_reset(self, previous_date: str) -> None:
+        """Yeni gün başında overnight pozisyonların PRİMNET SL/TP'sini yenile.
+
+        MT5'in günlük uzlaşma yenilemesi gibi: yeni referans fiyat al,
+        prim hesabını sıfırdan yap, SL/TP'yi yeni güne göre ayarla.
+
+        Args:
+            previous_date: Önceki gün tarihi (log için).
+        """
+        logger.info(
+            f"PRİMNET günlük yenileme başlatıldı: "
+            f"{len(self.hybrid_positions)} overnight pozisyon ({previous_date} → bugün)"
+        )
+
+        for ticket in list(self.hybrid_positions.keys()):
+            hp = self.hybrid_positions.get(ticket)
+            if hp is None or hp.state != "ACTIVE":
+                continue
+
+            old_ref = hp.reference_price
+            old_sl = hp.current_sl
+            old_tp = hp.current_tp
+
+            # Yeni referans fiyat al
+            new_ref = self._get_reference_price(hp.symbol)
+            if new_ref is None or new_ref <= 0:
+                logger.warning(
+                    f"PRİMNET yenileme: {hp.symbol} t={ticket} "
+                    f"referans fiyat alınamadı — eski SL/TP korunuyor, "
+                    f"sonraki cycle'da tekrar denenecek"
+                )
+                continue
+
+            # Yeni primler hesapla
+            entry_prim = self._price_to_prim(hp.entry_price, new_ref)
+
+            # Mevcut faz'ı belirle (trailing_active ise Faz 2 olabilir)
+            # Trailing mesafesini mevcut duruma göre hesapla
+            if hp.trailing_active:
+                # Trailing aktifse, mevcut SL'den faz belirle
+                current_price_approx = self._prim_to_price(entry_prim, new_ref)
+                # Faz 2 mesafesi kullan (pozisyon zaten kârda ve trailing aktif)
+                trailing_dist = self._primnet_faz2_trailing
+                faz = 2
+            else:
+                trailing_dist = self._primnet_faz1_stop
+                faz = 1
+
+            # Yeni SL hesapla
+            if hp.direction == "BUY":
+                stop_prim = entry_prim - trailing_dist
+                target_prim = self._primnet_target
+            else:
+                stop_prim = entry_prim + trailing_dist
+                target_prim = -self._primnet_target
+
+            new_sl = self._prim_to_price(stop_prim, new_ref)
+            new_tp = self._prim_to_price(target_prim, new_ref)
+
+            # SL monotonluk: yeni SL eski SL'den kötüyse eski SL'yi koru
+            sl_worse = False
+            if hp.direction == "BUY" and new_sl < old_sl:
+                sl_worse = True
+            elif hp.direction == "SELL" and new_sl > old_sl:
+                sl_worse = True
+
+            if sl_worse:
+                new_sl = old_sl
+                logger.info(
+                    f"PRİMNET yenileme [{hp.symbol}] t={ticket}: "
+                    f"yeni SL ({new_sl:.4f}) eskiden kötü — eski SL korundu"
+                )
+
+            # Güncelle
+            hp.reference_price = new_ref
+            hp.current_sl = new_sl
+            hp.current_tp = new_tp
+            hp.breakeven_hit = True  # PRİMNET: trailing her zaman aktif
+
+            # MT5'e yaz (native mod)
+            if self._native_sltp:
+                modify_result = self.mt5.modify_position(ticket, sl=new_sl, tp=new_tp)
+                if modify_result is None:
+                    logger.error(
+                        f"PRİMNET yenileme MT5 modify başarısız: "
+                        f"ticket={ticket} {hp.symbol} — software SL aktif"
+                    )
+
+            # DB güncelle
+            self.db.update_hybrid_position(ticket, {
+                "current_sl": new_sl,
+                "current_tp": new_tp,
+                "breakeven_hit": 1,
+            })
+
+            # Olay kaydı
+            self.db.insert_hybrid_event(
+                ticket=ticket, symbol=hp.symbol, event="PRIMNET_DAILY_RESET",
+                details={
+                    "old_ref": old_ref, "new_ref": new_ref,
+                    "old_sl": old_sl, "new_sl": new_sl,
+                    "old_tp": old_tp, "new_tp": new_tp,
+                    "entry_prim": round(entry_prim, 2),
+                    "faz": faz,
+                    "previous_date": previous_date,
+                },
+            )
+
+            # DB + event bus — dashboard bildirimi
+            reset_msg = (
+                f"{hp.symbol} {hp.direction} overnight — "
+                f"ref {old_ref:.2f}→{new_ref:.2f}, "
+                f"SL {old_sl:.4f}→{new_sl:.4f}"
+            )
+            self.db.insert_notification(
+                notif_type="hybrid_daily_reset",
+                title="PRİMNET Günlük Yenileme",
+                message=reset_msg,
+                severity="info",
+            )
+            from engine.event_bus import emit as _emit
+            _emit("notification", {
+                "type": "hybrid_daily_reset",
+                "title": "PRİMNET Günlük Yenileme",
+                "message": reset_msg,
+                "severity": "info",
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+            })
+
+            logger.info(
+                f"PRİMNET yenileme: ticket={ticket} {hp.symbol} {hp.direction} "
+                f"ref={old_ref:.4f}→{new_ref:.4f} "
+                f"SL={old_sl:.4f}→{new_sl:.4f} "
+                f"TP={old_tp:.4f}→{new_tp:.4f} "
+                f"giriş_prim={entry_prim:.2f} faz={faz}"
+            )
+
+        logger.info("PRİMNET günlük yenileme tamamlandı")
 
     def _handle_external_close(self, hp: HybridPosition) -> None:
         """MT5'te kapatılmış (harici kapanış) hibrit pozisyonu işle.

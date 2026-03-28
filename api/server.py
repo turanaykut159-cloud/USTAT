@@ -41,6 +41,7 @@ from api.routes import (
     manual_trade,
     mt5_verify,
     news,
+    notifications,
     ogul_activity,
     performance,
     positions,
@@ -193,6 +194,7 @@ app.include_router(killswitch.router, prefix="/api", tags=["killswitch"])
 app.include_router(events.router, prefix="/api", tags=["events"])
 app.include_router(manual_trade.router, prefix="/api", tags=["manual-trade"])
 app.include_router(hybrid_trade.router, prefix="/api", tags=["hybrid-trade"])
+app.include_router(notifications.router, prefix="/api", tags=["notifications"])
 app.include_router(ustat_brain.router, prefix="/api", tags=["ustat-brain"])
 app.include_router(health.router, prefix="/api", tags=["health"])
 app.include_router(ogul_activity.router, prefix="/api", tags=["ogul"])
