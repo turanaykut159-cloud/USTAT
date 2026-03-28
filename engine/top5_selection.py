@@ -80,8 +80,8 @@ VOLFIT_TOLERANCE: float = 0.010
 # Son işlem günü (vade günü) eski vadeden yeni işlem açılmaz.
 # GCM MT5 o gün yeni vade kontratını visible yapar → _resolve_symbols
 # otomatik geçer. Gözlem süresi 0 = yeni vadeye anında geçiş.
-EXPIRY_NO_NEW_TRADE_DAYS: int = 1
-EXPIRY_CLOSE_DAYS: int = 1
+EXPIRY_NO_NEW_TRADE_DAYS: int = 0   # v5.9: Vade kısıtlaması kaldırıldı (kullanıcı talimatı)
+EXPIRY_CLOSE_DAYS: int = 0          # v5.9: Vade kısıtlaması kaldırıldı (kullanıcı talimatı)
 EXPIRY_OBSERVATION_DAYS: int = 0
 
 # ── Yardımcı fonksiyonlar ─────────────────────────────────────────────

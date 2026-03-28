@@ -64,6 +64,22 @@ from dataclasses import dataclass, field, asdict
 from typing import Optional
 
 # ═══════════════════════════════════════════════════════════════
+# WINDOWS SERVİS ALTYAPISI (v5.9)
+# ═══════════════════════════════════════════════════════════════
+# pywin32 yüklüyse Windows Service olarak çalışabilir.
+# Yüklü değilse normal mod (eski davranış) ile çalışır.
+
+_HAS_WIN32 = False
+try:
+    import win32serviceutil
+    import win32service
+    import win32event
+    import servicemanager
+    _HAS_WIN32 = True
+except ImportError:
+    pass
+
+# ═══════════════════════════════════════════════════════════════
 # YAPILANDIRMA
 # ═══════════════════════════════════════════════════════════════
 
@@ -1667,6 +1683,31 @@ def process_command(cmd_file: Path):
 # WINDOWS BAŞLANGIÇ KAYIT
 # ═══════════════════════════════════════════════════════════════
 
+def _auto_install_startup():
+    """v5.9: Ajan başlatıldığında otomatik olarak Windows başlangıcına kaydet.
+    Zaten kayıtlıysa sessizce geçer. Registry kontrolü yapar."""
+    try:
+        import winreg
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Run",
+            0, winreg.KEY_QUERY_VALUE,
+        )
+        try:
+            winreg.QueryValueEx(key, "USTAT_Agent")
+            winreg.CloseKey(key)
+            # Zaten kayıtlı — sessizce geç
+            return
+        except FileNotFoundError:
+            winreg.CloseKey(key)
+        # Kayıtlı değil — kaydet
+        install_startup()
+        log("Windows başlangıcına otomatik kaydedildi.", "INFO")
+    except Exception:
+        # Windows değilse veya winreg yoksa sessizce geç
+        pass
+
+
 def install_startup():
     """Windows başlangıcına ekle."""
     try:
@@ -1752,6 +1793,9 @@ def main():
 
     ensure_dirs()
 
+    # v5.9: Windows başlangıcına otomatik kayıt (her açılışta çalışsın)
+    _auto_install_startup()
+
     # PID dosyası
     PID_FILE.write_text(str(os.getpid()), encoding="utf-8")
 
@@ -1819,6 +1863,13 @@ def main():
         cleaner.stop()
         heartbeat_svc.stop()
 
+        # v5.9: Temiz kapatma sinyali — VBS watchdog yeniden başlatmasın
+        shutdown_signal = USTAT_DIR / ".agent" / "shutdown.signal"
+        try:
+            shutdown_signal.write_text(str(int(time.time())), encoding="utf-8")
+        except Exception:
+            pass
+
         # Temizlik
         PID_FILE.unlink(missing_ok=True)
 
@@ -1830,5 +1881,229 @@ def main():
         safe_print("  [OK] Ajan kapatıldı.")
 
 
+# ═══════════════════════════════════════════════════════════════
+# WINDOWS SERVİS SINIFI (v5.9)
+# ═══════════════════════════════════════════════════════════════
+
+if _HAS_WIN32:
+    class UstatAgentService(win32serviceutil.ServiceFramework):
+        """ÜSTAT Ajan — Windows Service olarak çalışır.
+
+        Kurulum:  python ustat_agent.py --service install
+        Başlat:   python ustat_agent.py --service start
+        Durdur:   python ustat_agent.py --service stop
+        Kaldır:   python ustat_agent.py --service remove
+
+        Veya:     net start USTATAgent / net stop USTATAgent
+        """
+        _svc_name_ = "USTATAgent"
+        _svc_display_name_ = "ÜSTAT Ajan v2.0"
+        _svc_description_ = (
+            "ÜSTAT Trading Platform — Otonom arka plan ajanı. "
+            "Claude ile Windows arasında köprü görevi görür. "
+            "Komut işleme, sistem izleme, sağlık kontrolü."
+        )
+
+        def __init__(self, args):
+            win32serviceutil.ServiceFramework.__init__(self, args)
+            self.stop_event = win32event.CreateEvent(None, 0, 0, None)
+            self._running = True
+
+        def SvcStop(self):
+            """Windows servis durdurma sinyali."""
+            self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
+            self._running = False
+            win32event.SetEvent(self.stop_event)
+            log("Windows Service durdurma sinyali alındı.", "INFO")
+
+        def SvcDoRun(self):
+            """Windows Service ana döngüsü — main() ile aynı mantık."""
+            servicemanager.LogMsg(
+                servicemanager.EVENTLOG_INFORMATION_TYPE,
+                servicemanager.PYS_SERVICE_STARTED,
+                (self._svc_name_, ""),
+            )
+            log(f"Windows Service başlatıldı: {self._svc_name_}", "INFO")
+            self._run_agent()
+
+        def _run_agent(self):
+            """Ajan mantığını servis olarak çalıştır."""
+            global _commands_processed
+
+            ensure_dirs()
+            PID_FILE.write_text(str(os.getpid()), encoding="utf-8")
+
+            log(f"Ajan v{AGENT_VERSION} başlatıldı (Windows Service) — PID {os.getpid()}")
+
+            # İlk durum taraması
+            _state_mgr.update()
+
+            # Servisleri başlat
+            heartbeat_svc = HeartbeatService()
+            monitor_svc = Monitor(_state_mgr, _alert_mgr)
+            cleaner_svc = Cleaner()
+
+            heartbeat_svc.start()
+            monitor_svc.start()
+            cleaner_svc.start()
+
+            _alert_mgr.fire(
+                Severity.INFO, SystemComponent.AGENT,
+                f"Ajan v{AGENT_VERSION} başlatıldı (Windows Service). {len(HANDLERS)} komut aktif.",
+            )
+
+            try:
+                while self._running:
+                    try:
+                        _state_mgr.state.agent_uptime_s = int(time.time() - _agent_start_time)
+                        _state_mgr.state.commands_processed = _commands_processed
+
+                        if CMD_DIR.exists():
+                            cmd_files = sorted(CMD_DIR.glob("*.json"))
+                            for cmd_file in cmd_files:
+                                if cmd_file.name.startswith("_"):
+                                    continue
+                                process_command(cmd_file)
+
+                    except Exception as e:
+                        log(f"Döngü hatası: {e}", "ERROR")
+
+                    # Windows stop event kontrolü (POLL_INTERVAL kadar bekle)
+                    rc = win32event.WaitForSingleObject(
+                        self.stop_event, int(POLL_INTERVAL * 1000)
+                    )
+                    if rc == win32event.WAIT_OBJECT_0:
+                        break
+
+            finally:
+                monitor_svc.stop()
+                cleaner_svc.stop()
+                heartbeat_svc.stop()
+                PID_FILE.unlink(missing_ok=True)
+
+                _alert_mgr.fire(
+                    Severity.INFO, SystemComponent.AGENT,
+                    f"Ajan kapatıldı (Windows Service). {_commands_processed} komut işlendi.",
+                )
+                log(f"Windows Service durduruldu. {_commands_processed} komut işlendi.")
+
+
+def install_service():
+    """Windows Service olarak kur + crash restart politikası ayarla."""
+    if not _HAS_WIN32:
+        safe_print("  [HATA] pywin32 yüklü değil. Önce kur: pip install pywin32")
+        safe_print("         Sonra: python Scripts/pywin32_postinstall.py -install")
+        return False
+
+    try:
+        # Servisi kur
+        win32serviceutil.InstallService(
+            UstatAgentService._svc_name_,
+            UstatAgentService._svc_name_,
+            UstatAgentService._svc_display_name_,
+            startType=win32service.SERVICE_AUTO_START,
+            description=UstatAgentService._svc_description_,
+            exeName=sys.executable,
+            exeArgs=f'"{os.path.abspath(__file__)}" --service run',
+        )
+        safe_print(f"  [OK] Servis kuruldu: {UstatAgentService._svc_name_}")
+    except Exception as e:
+        # Zaten kurulu olabilir — güncelle
+        try:
+            win32serviceutil.ChangeServiceConfig(
+                UstatAgentService._svc_name_,
+                UstatAgentService._svc_name_,
+                startType=win32service.SERVICE_AUTO_START,
+                displayName=UstatAgentService._svc_display_name_,
+                description=UstatAgentService._svc_description_,
+            )
+            safe_print(f"  [OK] Servis güncellendi: {UstatAgentService._svc_name_}")
+        except Exception as e2:
+            safe_print(f"  [HATA] Servis kurulumu başarısız: {e2}")
+            return False
+
+    # Crash restart politikası — 3 kez restart, 10sn aralıkla
+    try:
+        subprocess.run(
+            [
+                "sc", "failure", UstatAgentService._svc_name_,
+                "actions=", "restart/10000/restart/10000/restart/10000",
+                "reset=", "86400",
+            ],
+            capture_output=True, timeout=10,
+        )
+        safe_print("  [OK] Crash restart politikası ayarlandı (10sn aralıkla 3 deneme)")
+    except Exception:
+        safe_print("  [UYARI] Crash restart politikası ayarlanamadı — manuel ayarla")
+
+    # Servisi başlat
+    try:
+        win32serviceutil.StartService(UstatAgentService._svc_name_)
+        safe_print(f"  [OK] Servis başlatıldı: {UstatAgentService._svc_name_}")
+    except Exception as e:
+        safe_print(f"  [UYARI] Servis başlatılamadı (zaten çalışıyor olabilir): {e}")
+
+    safe_print("")
+    safe_print("  Servis yönetimi:")
+    safe_print("    net start USTATAgent    — Başlat")
+    safe_print("    net stop USTATAgent     — Durdur")
+    safe_print("    sc query USTATAgent     — Durum kontrol")
+    safe_print("    sc delete USTATAgent    — Kaldır")
+    return True
+
+
+def remove_service():
+    """Windows Service'i kaldır."""
+    if not _HAS_WIN32:
+        safe_print("  [HATA] pywin32 yüklü değil.")
+        return
+
+    try:
+        win32serviceutil.StopService(UstatAgentService._svc_name_)
+    except Exception:
+        pass
+
+    try:
+        win32serviceutil.RemoveService(UstatAgentService._svc_name_)
+        safe_print(f"  [OK] Servis kaldırıldı: {UstatAgentService._svc_name_}")
+    except Exception as e:
+        safe_print(f"  [HATA] Servis kaldırılamadı: {e}")
+
+
 if __name__ == "__main__":
-    main()
+    # --service parametresi: Windows Service modu
+    if "--service" in sys.argv:
+        if not _HAS_WIN32:
+            safe_print("  [HATA] pywin32 yüklü değil!")
+            safe_print("  Kur: pip install pywin32")
+            sys.exit(1)
+
+        idx = sys.argv.index("--service")
+        action = sys.argv[idx + 1] if len(sys.argv) > idx + 1 else ""
+
+        if action == "install":
+            install_service()
+        elif action == "remove":
+            remove_service()
+        elif action == "start":
+            try:
+                win32serviceutil.StartService(UstatAgentService._svc_name_)
+                safe_print("  [OK] Servis başlatıldı.")
+            except Exception as e:
+                safe_print(f"  [HATA] {e}")
+        elif action == "stop":
+            try:
+                win32serviceutil.StopService(UstatAgentService._svc_name_)
+                safe_print("  [OK] Servis durduruldu.")
+            except Exception as e:
+                safe_print(f"  [HATA] {e}")
+        elif action == "run":
+            # Windows SCM bu parametreyle çağırır
+            servicemanager.Initialize()
+            servicemanager.PrepareToHostSingle(UstatAgentService)
+            servicemanager.StartServiceCtrlDispatcher()
+        else:
+            safe_print("  Kullanım: python ustat_agent.py --service [install|remove|start|stop]")
+    else:
+        # Normal mod (eski davranış: konsol veya pythonw)
+    
