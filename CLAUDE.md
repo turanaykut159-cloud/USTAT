@@ -1,6 +1,6 @@
-# ÜSTAT v5.8 — ANA REHBER
+# ÜSTAT v5.9 — ANA REHBER
 
-**Versiyon:** 3.1 | **Tarih:** 26 Mart 2026 | **Kaynak:** Kod tabanı doğrulaması
+**Versiyon:** 3.2 | **Tarih:** 28 Mart 2026 | **Kaynak:** Kod tabanı doğrulaması
 **Anayasa Referansı:** USTAT_ANAYASA.md (v2.0) — ayrı belge, kendi versiyonlaması var
 
 > Bu dosya ÜSTAT projesinin TEK rehberidir. Tüm geliştiriciler (insan ve AI) bu kurallara MUTLAK uyum gösterir. Varsayım, olasılık, tahmin YASAKTIR — her karar kanıta dayanır.

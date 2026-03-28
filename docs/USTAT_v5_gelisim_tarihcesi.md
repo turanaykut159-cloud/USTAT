@@ -2,6 +2,112 @@
 
 ---
 
+## #81 — OĞUL Motoru Kapsamlı İnceleme ve Yeniden Yapılandırma (2026-03-28)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-28 |
+| **Sınıf** | C3/C4 (Kırmızı: engine/ogul.py — Siyah Kapı fonksiyonları dahil) |
+| **Tetikleyen** | Satır satır inceleme — 44 bulgu: sessiz hatalar, ölü kod, tasarım sorunları, verim kaybı |
+| **Kapsam** | 5 aşamalı yeniden yapılandırma, 700+ satır kaldırıldı, 480+ satır eklendi |
+
+### Sorun Analizi (44 Bulgu)
+
+**Kritik (C4):**
+- `TRADING_CLOSE=17:50` hardcoded — config 17:45 diyor, 5dk geç kapatma riski
+- `_check_advanced_risk_rules()` ve `_check_time_rules()` çağrılmıyor — 5 risk kontrolü tamamen devre dışı
+- BABA `EXPIRY_DAYS=2` → 2 gün gereksiz işlem durması (GCM uyumsuzluğu)
+
+**Sessiz Hatalar:**
+- SE3'e `symbol` gönderilmiyor → haber kaynağı (10. kaynak) sessizce devre dışı
+- `send_market_order()` MT5 Bridge'de yok → piramitleme sessiz hata
+- `MAX_LOT_PER_CONTRACT`, `MAX_CONCURRENT` config'den okunmuyor
+- Aylık drawdown kontrolü (`_monthly_dd_warn`) hiçbir zaman True olmuyor
+
+**Tasarım Sorunları:**
+- 24 kapılı çarpımsal filtre zinciri → sinyal ölüyor, işlem açılamıyor
+- İki motor (SE3 + eski) çeliştiğinde doğru yöndeki sinyal kaybediliyor
+- Pozisyon yönetimi trend gününü taşıyamıyor (%20 pullback, RSI çıkışı)
+- OĞUL'a BABA/ÜSTAT görevleri yüklenmiş (lot hesaplama, risk kontrolleri)
+
+### Yapılan Değişiklikler — 5 Aşama
+
+**AŞAMA 1: Temizlik (C0)**
+- Modül docstring v5.8 güncelleme (pozisyon yönetimi, SE3, Top5)
+- SE2→SE3 isimlendirme (import alias + 8 kod referansı + yorumlar)
+- 30+ ölü sabit kaldırıldı (Top5, vade, TP2/TP3, WEIGHTED_VOTE_HOLD)
+- 3 ölü fonksiyon kaldırıldı (_business_days_until/since, _is_new_m15_candle)
+- 2 ölü import kaldırıldı (VIOP_EXPIRY_DATES, ALL_HOLIDAYS)
+
+**AŞAMA 2: Config + Güvenlik (C3/C4)**
+- `TRADING_CLOSE` 17:50→config'den oku (17:45)
+- `TRADING_OPEN` 09:40→config'den oku (09:45)
+- `MAX_LOT_PER_CONTRACT` → `self._max_lot` (config'den)
+- `MAX_CONCURRENT` → `self._max_concurrent` (config'den)
+- `_check_advanced_risk_rules()` + `_check_time_rules()` çağrısı eklendi
+- `self.baba.report_unprotected_position()` None kontrolü eklendi
+
+**AŞAMA 3: Emir Mekanizması Basitleştirme (C3)**
+- Limit emir → doğrudan market emir (15sn timeout + retry zinciri kaldırıldı)
+- Lot hesaplama → sabit 1 lot (test süreci — yedek: docs/ogul_calculate_lot_backup.md)
+- State machine: SIGNAL→PENDING→SENT→TIMEOUT→RETRY→FILLED → SIGNAL→PENDING→FILLED
+- Race condition düzeltme: lock içinde active_trades'e ekleme
+- ManuelMotor EOD müdahalesi kaldırıldı (her motor kendi işini yapacak)
+- ManuelMotor adopt kaldırıldı (yetim pozisyon OĞUL sahiplenmez)
+
+**AŞAMA 4: Sinyal Mimarisi (C3)**
+- Yön konsensüsü sistemi: `_determine_direction()` — 3 kaynak (oylama + H1 + SE3), 2/3 çoğunluk
+- SE3'e `symbol` parametresi eklendi → haber kaynağı aktif
+- SE3 +0.15 yapay bonus kaldırıldı → adil yarışma
+- Yön filtresi: sadece konsensüs yönündeki sinyaller kabul
+- 24 kapılı çarpımsal filtre → tek confluence gate (skor > 50)
+- Yedek sinyal fallback: best reddedilirse sonraki aday denenir
+- ÜSTAT müdahalesi kaldırıldı (ÜSTAT'ın işi ÜSTAT'ta)
+
+**AŞAMA 5: Pozisyon Yönetimi (C3)**
+- 4 modlu adaptif sistem: KORUMA → TREND → SAVUNMA → ÇIKIŞ
+- KORUMA: SL yerinde bekle, 2 saat kuralı (SL sıkılaştırma)
+- TREND: swing bazlı geniş trailing (trend gününü taşır)
+- SAVUNMA: EMA20 bazlı sıkı trailing (momentum zayıflıyor)
+- ÇIKIŞ: yapısal bozulma tespiti (LL/HH, EMA kapanış + hacim)
+- Momentum tespiti: RSI divergence + hacim azalması + mum küçülmesi
+- R-Multiple: çıkış kararı değil, sadece loglama (contract_size düzeltildi)
+- Kaldırılan: oylama çıkışı, sabit pullback, TP1, piramitleme, maliyetlendirme, Chandelier
+
+### Test Sonuçları
+
+125 test — **%100 geçti** (0 başarısız, 2 warning):
+- Yön konsensüsü: 15 test ✓
+- Sinyal üretimi: 14 test ✓
+- Emir yürütme: 25 test ✓
+- 4 mod sistemi: 41 test ✓
+- Momentum + yapısal bozulma: 18 test ✓
+- Edge case: 15 test ✓
+
+### Etkilenen Dosyalar
+
+| Dosya | Değişiklik |
+|-------|-----------|
+| `engine/ogul.py` | 5 aşamalı yeniden yapılandırma |
+| `tests/test_ogul_200.py` | 125 test (yeni) |
+| `docs/ogul_calculate_lot_backup.md` | Lot hesaplama yedeği (yeni) |
+| `docs/ogul_pozisyon_yonetimi_tasarim.md` | 4 mod tasarım dokümanı (yeni) |
+
+### Eklenen/Kaldırılan Davranışlar
+
+| Eklenen | Kaldırılan |
+|---------|-----------|
+| Yön konsensüsü (3 kaynak) | 24 kapılı filtre zinciri |
+| 4 modlu pozisyon yönetimi | Oylama bazlı çıkış |
+| Swing bazlı trailing | Sabit %20 pullback |
+| Momentum tespiti | SE3 +0.15 bonus |
+| Yapısal bozulma çıkışı | Limit emir + retry |
+| Yedek sinyal fallback | Piramitleme (sessiz hata) |
+| Config'den parametre okuma | Maliyetlendirme (ölü) |
+| Market emir (doğrudan) | TP1 yarı kapanış (ölü) |
+
+---
+
 ## #80 — PRİMNET v2: Hibrit Motor Profesyonel Yeniden Yapılandırma (2026-03-28)
 
 | Alan | Detay |
