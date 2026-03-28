@@ -2106,4 +2106,4 @@ if __name__ == "__main__":
             safe_print("  Kullanım: python ustat_agent.py --service [install|remove|start|stop]")
     else:
         # Normal mod (eski davranış: konsol veya pythonw)
-    
+        main()

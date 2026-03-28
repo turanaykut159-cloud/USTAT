@@ -70,7 +70,7 @@ export default function ManualTrade() {
   // Aktif manuel pozisyonları çek
   const fetchActivePositions = useCallback(async () => {
     const res = await getPositions();
-    const manual = (res.positions || []).filter((p) => p.tur === 'Manuel');
+    const manual = (res.positions || []).filter((p) => p.tur === 'Manuel' || p.tur === 'MT5');
     setActivePositions(manual);
   }, []);
 
