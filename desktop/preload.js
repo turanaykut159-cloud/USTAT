@@ -25,6 +25,12 @@ window.addEventListener('unhandledrejection', (event) => {
 });
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  // ── Pencere kontrol (v5.9 frameless titlebar) ─────────────────
+  windowMinimize: () => ipcRenderer.invoke('window:minimize'),
+  windowMaximize: () => ipcRenderer.invoke('window:maximize'),
+  windowClose: () => ipcRenderer.invoke('window:close'),
+  windowIsMaximized: () => ipcRenderer.invoke('window:isMaximized'),
+
   // ── Pencere işlemleri ──────────────────────────────────────────
   toggleAlwaysOnTop: () => ipcRenderer.invoke('window:toggleAlwaysOnTop'),
   getAlwaysOnTop: () => ipcRenderer.invoke('window:getAlwaysOnTop'),

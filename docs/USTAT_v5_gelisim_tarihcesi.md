@@ -1,4 +1,72 @@
-# ÜSTAT v5.8 — Gelişim Tarihçesi
+# ÜSTAT v5.9 — Gelişim Tarihçesi
+
+---
+
+## #82 — Watchdog OTP Bekleme + Frameless Titlebar + BABA EXPIRY_DAYS Düzeltmesi (2026-03-29)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-29 |
+| **Sınıf** | C4 (Siyah Kapı: baba.py detect_regime) + C2 (Sarı: start_ustat.py, desktop/main.js) + C1 (Yeşil: TopBar, preload, theme.css, index.html) |
+| **Tetikleyen** | 1) OTP giriş süresi yetersiz — watchdog erken restart, 2) Amatör pencere başlığı, 3) #81'de tespit edilen BABA EXPIRY_DAYS=2 baba.py'ye uygulanmamış |
+| **Kapsam** | 3 bağımsız düzeltme: watchdog ilk bekleme, frameless pencere, vade kısıtlaması kaldırma |
+
+### Sorun Analizi
+
+**1. Watchdog OTP Sorunu (Sarı Bölge)**
+İlk açılışta kullanıcı OTP kodunu girerken watchdog eski `engine.heartbeat` dosyasını stale bulup uygulamayı yeniden başlatıyordu. OTP girişi + onay ~20-25 saniye sürüyor, mevcut WATCHDOG_CHECK_INTERVAL=15sn yetersiz kalıyordu.
+
+**2. Amatör Pencere Başlığı (Yeşil Bölge)**
+Windows varsayılan pencere çerçevesi (beyaz başlık çubuğu) profesyonel görünmüyordu. Kurumsal trading uygulamasına yakışmıyordu.
+
+**3. BABA EXPIRY_DAYS=2 Uygulanmamış (Kırmızı/Siyah Kapı)**
+#81'de kritik C4 bulgu olarak tespit edildi: `BABA EXPIRY_DAYS=2 → 2 gün gereksiz işlem durması`. Ancak düzeltme sadece OĞUL tarafında yapılmış, BABA `detect_regime()` içindeki `EXPIRY_DAYS=2` sabiti değiştirilmemişti. Sonuç: vade sonuna 2 gün kala OLAY rejimi tetikleniyor, L2 kill-switch aktif oluyor, tüm işlemler duruyordu.
+
+### Yapılan Değişiklikler
+
+**1. Watchdog İlk Bekleme Süresi (start_ustat.py — Sarı Bölge)**
+- `WATCHDOG_INITIAL_DELAY = 30` sabiti eklendi (satır 317)
+- `watchdog_loop()` başında eski `engine.heartbeat` dosyası temizleniyor
+- 30 saniye ilk bekleme sonrası normal 15sn döngüye geçiş
+- Mevcut sabitler korundu: WATCHDOG_STALE_SECS=45, WATCHDOG_CHECK_INTERVAL=15
+
+**2. Frameless Pencere + Özel Başlık Çubuğu**
+- `desktop/main.js`: `frame: true` → `frame: false`, 4 IPC handler eklendi (minimize, maximize, close, isMaximized)
+- `desktop/preload.js`: 4 IPC bridge eklendi (windowMinimize, windowMaximize, windowClose, windowIsMaximized)
+- `desktop/src/components/TopBar.jsx`: SVG tabanlı minimize/maximize/restore/close butonları, maximize state takibi
+- `desktop/src/styles/theme.css`: `.window-controls`, `.wc-btn` stilleri, close hover kırmızı (#e81123), `-webkit-app-region: no-drag`
+
+**3. BABA EXPIRY_DAYS Düzeltmesi (engine/baba.py — Kırmızı/Siyah Kapı)**
+- `EXPIRY_DAYS: int = 2` → `EXPIRY_DAYS: int = 0` (satır 93)
+- Vade kısıtlaması tamamen kaldırıldı (#81 bulgusunun BABA tarafı)
+- L2 kill-switch artık vade yakınlığından tetiklenmeyecek
+
+**4. Versiyon Güncelleme**
+- `desktop/index.html`: title "ÜSTAT v5.8" → "ÜSTAT v5.9"
+
+### Etkilenen Dosyalar
+
+| Dosya | Bölge | Değişiklik |
+|-------|-------|-----------|
+| engine/baba.py | Kırmızı/Siyah Kapı | EXPIRY_DAYS=2→0 |
+| start_ustat.py | Sarı | WATCHDOG_INITIAL_DELAY=30 + heartbeat temizleme |
+| desktop/main.js | Sarı | frame:false + 4 IPC handler |
+| desktop/preload.js | Yeşil | 4 IPC bridge |
+| desktop/src/components/TopBar.jsx | Yeşil | Pencere kontrol butonları |
+| desktop/src/styles/theme.css | Yeşil | Pencere kontrol CSS |
+| desktop/index.html | Yeşil | Versiyon v5.8→v5.9 |
+
+### Eklenen/Kaldırılan Davranışlar
+
+| Eklenen | Kaldırılan |
+|---------|-----------|
+| 30sn OTP bekleme süresi | Eski heartbeat ile erken restart |
+| Frameless profesyonel pencere | Windows varsayılan beyaz çerçeve |
+| Özel SVG pencere kontrolleri | — |
+| Vade kısıtlaması devre dışı (BABA) | EXPIRY_DAYS=2 vade bloğu |
+
+### Build Sonucu
+`cd desktop && npm run build`: 0 hata
 
 ---
 

@@ -131,7 +131,7 @@ function createWindow() {
     backgroundColor: BG_COLOR,
     alwaysOnTop: isAlwaysOnTop,
     show: false,                    // İçerik hazır olunca göster
-    frame: true,
+    frame: false,                    // v5.9: Özel başlık çubuğu (profesyonel görünüm)
     autoHideMenuBar: true,          // Menü çubuğunu gizle
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -425,6 +425,23 @@ function updateTrayMenu() {
 
 // ── IPC Handlers ─────────────────────────────────────────────────
 function setupIPC() {
+  // ── v5.9: Pencere kontrol (frameless titlebar) ─────────────────
+  ipcMain.handle('window:minimize', () => {
+    if (mainWindow) mainWindow.minimize();
+  });
+  ipcMain.handle('window:maximize', () => {
+    if (mainWindow) {
+      mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize();
+    }
+    return mainWindow?.isMaximized() ?? false;
+  });
+  ipcMain.handle('window:close', () => {
+    if (mainWindow) mainWindow.close();
+  });
+  ipcMain.handle('window:isMaximized', () => {
+    return mainWindow?.isMaximized() ?? false;
+  });
+
   // ── Pencere ────────────────────────────────────────────────────
   ipcMain.handle('window:toggleAlwaysOnTop', () => {
     isAlwaysOnTop = !isAlwaysOnTop;

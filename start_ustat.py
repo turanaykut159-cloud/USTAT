@@ -314,6 +314,7 @@ HEARTBEAT_FILE = os.path.join(USTAT_DIR, "engine.heartbeat")
 SHUTDOWN_SIGNAL_FILE = os.path.join(USTAT_DIR, "shutdown.signal")  # v5.5: Electron kasıtlı kapanış sinyali
 WATCHDOG_STALE_SECS = 45       # v5.4.1: heartbeat bu kadar saniye eskiyse engine ölmüş kabul et
 WATCHDOG_CHECK_INTERVAL = 15   # v5.4.1: kontrol aralığı (saniye)
+WATCHDOG_INITIAL_DELAY = 30    # v5.9: İlk açılışta OTP girişi için bekleme süresi (saniye)
 MAX_AUTO_RESTARTS = 5          # v5.4.1: maksimum ardışık otomatik yeniden başlatma
 WATCHDOG_PID_FILE = os.path.join(USTAT_DIR, "watchdog.pid")  # v5.7.2: singleton watchdog kilidi
 
@@ -391,6 +392,16 @@ def watchdog_loop():
 
     log("[WATCHDOG] Engine watchdog baslatildi")
     log(f"  Stale esigi: {WATCHDOG_STALE_SECS}sn, kontrol araligi: {WATCHDOG_CHECK_INTERVAL}sn")
+
+    # v5.9: İlk açılışta OTP girişi için bekleme — eski heartbeat dosyasını da temizle
+    if os.path.exists(HEARTBEAT_FILE):
+        try:
+            os.remove(HEARTBEAT_FILE)
+            log(f"[WATCHDOG] Eski heartbeat temizlendi")
+        except Exception:
+            pass
+    log(f"[WATCHDOG] Ilk bekleme: {WATCHDOG_INITIAL_DELAY}sn (OTP + MT5 baglantisi icin)")
+    time.sleep(WATCHDOG_INITIAL_DELAY)
 
     # İlk heartbeat dosyasının oluşmasını bekle (engine başlangıcı)
     for _ in range(60):

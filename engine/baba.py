@@ -90,7 +90,7 @@ VOLATILE_VOTE_PCT:     float = 0.40    # v14: %30→%40 (VOLATILE için daha faz
 
 # ── OLAY eşikleri ───────────────────────────────────────────────────
 USDTRY_SHOCK_PCT:      float = 2.0
-EXPIRY_DAYS:           int   = 2
+EXPIRY_DAYS:           int   = 0     # v5.9: Vade kısıtlaması kaldırıldı (kullanıcı talimatı)
 
 # ── OLAY saatlik pencere (v14: tüm gün yerine zaman bazlı) ────────
 # TCMB PPK kararı genelde 14:00, FED kararı gece (TR saati).

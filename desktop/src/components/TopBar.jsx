@@ -35,6 +35,23 @@ export default function TopBar() {
   const [ksResetting, setKsResetting] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [agentAlive, setAgentAlive] = useState(false);
+  const [isMaximized, setIsMaximized] = useState(false);
+
+  // ── v5.9: Pencere durumu kontrolü ────────────────────────────
+  useEffect(() => {
+    if (window.electronAPI?.windowIsMaximized) {
+      window.electronAPI.windowIsMaximized().then(setIsMaximized);
+    }
+  }, []);
+
+  const handleMinimize = () => window.electronAPI?.windowMinimize?.();
+  const handleMaximize = async () => {
+    if (window.electronAPI?.windowMaximize) {
+      const maximized = await window.electronAPI.windowMaximize();
+      setIsMaximized(maximized);
+    }
+  };
+  const handleClose = () => window.electronAPI?.windowClose?.();
 
   // ── Saat (1sn) ─────────────────────────────────────────────────
   useEffect(() => {
@@ -220,6 +237,30 @@ export default function TopBar() {
             second: '2-digit',
           })}
         </span>
+
+        {/* ── v5.9: Pencere kontrol butonları ──────────────────── */}
+        <div className="window-controls">
+          <button className="wc-btn wc-minimize" onClick={handleMinimize} title="Küçült">
+            <svg width="12" height="12" viewBox="0 0 12 12"><rect y="5" width="12" height="2" fill="currentColor"/></svg>
+          </button>
+          <button className="wc-btn wc-maximize" onClick={handleMaximize} title={isMaximized ? 'Küçült' : 'Büyüt'}>
+            {isMaximized ? (
+              <svg width="12" height="12" viewBox="0 0 12 12">
+                <rect x="2" y="0" width="10" height="10" rx="1" fill="none" stroke="currentColor" strokeWidth="1.5"/>
+                <rect x="0" y="2" width="10" height="10" rx="1" fill="var(--bg-secondary)" stroke="currentColor" strokeWidth="1.5"/>
+              </svg>
+            ) : (
+              <svg width="12" height="12" viewBox="0 0 12 12">
+                <rect x="1" y="1" width="10" height="10" rx="1" fill="none" stroke="currentColor" strokeWidth="1.5"/>
+              </svg>
+            )}
+          </button>
+          <button className="wc-btn wc-close" onClick={handleClose} title="Kapat">
+            <svg width="12" height="12" viewBox="0 0 12 12">
+              <path d="M1 1L11 11M11 1L1 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+          </button>
+        </div>
       </div>
     </div>
   );
