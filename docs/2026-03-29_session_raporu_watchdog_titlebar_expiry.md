@@ -49,12 +49,29 @@ Bu oturumda 3 bağımsız sorun çözüldü:
 - Mevcut: v5.9 (önceki oturumda yükseltilmişti)
 - Değişiklik oranı: %0.23 — versiyon artışı gerekmez
 
-## Commit
-- Hash: da730b1
-- Mesaj: `feat: watchdog OTP bekleme + frameless titlebar + BABA EXPIRY_DAYS düzeltmesi (#82)`
+## Ek Değişiklikler (Oturum Devamı)
+
+### Top5 Vade Kısıtlaması (top5_selection.py)
+- EXPIRY_NO_NEW_TRADE_DAYS: 1→0
+- EXPIRY_CLOSE_DAYS: 1→0
+- #75'te 3→1 indirilmişti, şimdi tamamen kaldırıldı
+
+### Ajan Windows Service (ustat_agent.py + start_agent.vbs)
+- pywin32 ile Windows Service desteği eklendi (USTATAgent)
+- Crash restart politikası: 10sn aralıkla 3 deneme, 24 saatte reset
+- Bilgisayar açılışında otomatik başlama (SERVICE_AUTO_START)
+- _auto_install_startup(): ilk çalıştırmada Registry'ye otomatik kayıt
+- shutdown.signal: temiz kapatmada VBS watchdog'a sinyal
+- start_agent.vbs: VBS watchdog loop (fallback crash recovery)
+- Kurulum: `python ustat_agent.py --service install` (Yönetici CMD)
+
+## Commit'ler
+- `da730b1` — watchdog + titlebar + BABA EXPIRY_DAYS (#82)
+- `aba61dc` — oturum raporu
+- `b56ef71` — ajan Windows Service + top5 EXPIRY düzeltmesi (#82 ek)
 
 ## Build Sonucu
-`cd desktop && npm run build`: 0 hata (önceki oturumda doğrulandı)
+`cd desktop && npm run build`: 0 hata
 
-## Bekleyen
-- Uygulamanın yeniden başlatılması gerekiyor (EXPIRY_DAYS=0 değişikliği runtime'da aktif olsun ve L2 kill-switch temizlensin)
+## Uygulama Restart
+Ajan üzerinden restart_app komutu ile yeniden başlatıldı — EXPIRY_DAYS=0 aktif.
