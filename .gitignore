@@ -63,8 +63,13 @@ check_test.json
 *.spec
 desktop/release/
 
-# Backup dosyaları
+# Backup dosyaları (Knight Capital dersi: ölü kod production'da KALMAZ)
 *.bak
+*.bak.*
+*.bak2
+*.backup
+*.old
+*.orig
 
 # Root package-lock (desktop'ınki hariç)
 /package-lock.json
