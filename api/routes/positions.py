@@ -91,7 +91,7 @@ def _source_for_position(ticket: int, symbol: str, manuel_motor, db=None) -> str
         try:
             row = db._execute(
                 "SELECT source FROM trades WHERE mt5_position_id = ? AND symbol = ? "
-                "AND exit_time IS NULL ORDER BY rowid ASC LIMIT 1",
+                "ORDER BY rowid DESC LIMIT 1",
                 (ticket, symbol),
             ).fetchone()
             if row is not None:
@@ -99,7 +99,7 @@ def _source_for_position(ticket: int, symbol: str, manuel_motor, db=None) -> str
         except Exception:
             pass  # DB kilitli — fallback'e devam
 
-    if db_result is not None:
+    if db_result is not None and db_result != "":
         _source_cache[ticket] = db_result
         return db_result
 
@@ -108,10 +108,16 @@ def _source_for_position(ticket: int, symbol: str, manuel_motor, db=None) -> str
         for _sym, trade in manuel_motor.active_trades.items():
             if getattr(trade, "ticket", 0) == ticket and _sym == symbol:
                 mm_source = getattr(trade, "source", "")
-                _source_cache[ticket] = mm_source
-                return mm_source
+                if mm_source:
+                    _source_cache[ticket] = mm_source
+                    return mm_source
 
-    return ""
+    # 3. DB'de source boş ve ManuelMotor'da da bulunamayan pozisyon
+    #    → MT5 terminalinden doğrudan açılmış.
+    #    ManuelMotor (source="app") ve adopt (source="mt5_direct") pozisyonları
+    #    yukarıda yakalanır; buraya düşen = henüz adopt edilmemiş MT5 direct.
+    _source_cache[ticket] = "mt5_direct"
+    return "mt5_direct"
 
 
 def _tur_for_position(ticket: int, strategy: str, hybrid_tickets: set, source: str = "") -> str:

@@ -878,30 +878,75 @@ def handle_shell(cmd: dict) -> tuple[bool, str, str]:
 
 
 def handle_start_app(cmd: dict) -> tuple[bool, str, str]:
-    """ÜSTAT uygulamasını başlat."""
+    """ÜSTAT uygulamasını başlat.
+
+    Ajan SYSTEM (Session 0) oturumunda çalıştığı için subprocess.Popen
+    ile başlatılan Electron penceresi kullanıcı masaüstünde görünmez.
+    Çözüm: schtasks /IT ile interaktif kullanıcı oturumunda başlatma.
+    """
     try:
         start_script = USTAT_DIR / "start_ustat.py"
         if not start_script.exists():
             return False, "", "start_ustat.py bulunamadı"
 
-        CREATE_NO_WINDOW = 0x08000000
-        DETACHED_PROCESS = 0x00000008
+        python_exe = r"C:\Users\pc\AppData\Local\Programs\Python\Python314\pythonw.exe"
+        task_name = "USTAT_InteractiveLaunch"
 
-        proc = subprocess.Popen(
-            [sys.executable, str(start_script)],
-            cwd=str(USTAT_DIR),
-            creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW,
-            startupinfo=_hidden_si(),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+        # 1. Eski task varsa temizle
+        subprocess.run(
+            ["schtasks", "/delete", "/tn", task_name, "/f"],
+            capture_output=True, timeout=10,
         )
-        time.sleep(3)
 
-        if proc.poll() is None:
-            return True, f"ÜSTAT başlatıldı (PID: {proc.pid})", ""
-        else:
-            stderr = proc.stderr.read().decode("utf-8", errors="replace")
-            return False, "", f"Başlatma başarısız: {stderr}"
+        # 2. Interaktif oturumda çalışacak task oluştur
+        result = subprocess.run(
+            [
+                "schtasks", "/create",
+                "/tn", task_name,
+                "/tr", f'{python_exe} {start_script}',
+                "/sc", "once",
+                "/st", "00:00",
+                "/RU", "pc",        # Kullanıcı oturumu
+                "/IT",              # Interactive Token — kullanıcı masaüstünde çalışır
+                "/f",               # Force overwrite
+            ],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode != 0:
+            return False, "", f"schtasks create başarısız: {result.stderr}"
+
+        # 3. Task'ı hemen çalıştır
+        result = subprocess.run(
+            ["schtasks", "/run", "/tn", task_name],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode != 0:
+            return False, "", f"schtasks run başarısız: {result.stderr}"
+
+        # 4. API'nin ayağa kalkmasını bekle (max 20sn)
+        for i in range(10):
+            time.sleep(2)
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(2)
+                if sock.connect_ex(("127.0.0.1", KNOWN_PORTS["API"])) == 0:
+                    sock.close()
+                    # 5. Temizlik — geçici task'ı sil
+                    subprocess.run(
+                        ["schtasks", "/delete", "/tn", task_name, "/f"],
+                        capture_output=True, timeout=10,
+                    )
+                    return True, f"ÜSTAT başlatıldı (interaktif oturum, API aktif)", ""
+                sock.close()
+            except Exception:
+                pass
+
+        # API henüz yanıt vermese de task çalıştı
+        subprocess.run(
+            ["schtasks", "/delete", "/tn", task_name, "/f"],
+            capture_output=True, timeout=10,
+        )
+        return True, "ÜSTAT başlatıldı ama API henüz yanıt vermiyor. Biraz bekleyin.", ""
     except Exception as e:
         return False, "", str(e)
 

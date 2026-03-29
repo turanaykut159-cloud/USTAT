@@ -11,7 +11,7 @@
 
 ## BÖLÜM 1: ÜSTAT NEDİR?
 
-ÜSTAT v5.8, Borsa İstanbul VİOP (Vadeli İşlem ve Opsiyon Piyasası) üzerinde otomatik alım-satım yapan algoritmik bir trading platformudur. GCM Capital aracılığında MetaTrader 5 terminali üzerinden **canlı piyasada gerçek para ile** işlem yapar.
+ÜSTAT v5.9, Borsa İstanbul VİOP (Vadeli İşlem ve Opsiyon Piyasası) üzerinde otomatik alım-satım yapan algoritmik bir trading platformudur. GCM Capital aracılığında MetaTrader 5 terminali üzerinden **canlı piyasada gerçek para ile** işlem yapar.
 
 **Finansal risk uyarısı:** Bu uygulamadaki her hata, kullanıcıya doğrudan finansal zarar olarak yansır. Bu nedenle tüm kurallar kesindir, istisnası yoktur.
 
@@ -60,7 +60,7 @@ DataPipeline (OHLCV veri) → BABA (rejim + risk kararı)
 ```
 C:\Users\pc\Desktop\USTAT\
 ├── engine/                    # Python Trading Engine (4 motor)
-│   ├── __init__.py            # VERSION = "5.8.0"
+│   ├── __init__.py            # VERSION = "5.9.0"
 │   ├── main.py                # Ana döngü (Engine sınıfı)
 │   ├── baba.py                # Risk yöneticisi (BABA)
 │   ├── ogul.py                # Sinyal üretici (OĞUL)
@@ -98,7 +98,7 @@ C:\Users\pc\Desktop\USTAT\
 │   ├── schemas.py             # Pydantic modelleri
 │   ├── constants.py           # API sabitleri
 │   ├── deps.py                # Bağımlılık enjeksiyonu
-│   └── routes/                # 18 endpoint modülü
+│   └── routes/                # 20 endpoint modülü
 │       ├── account.py         # MT5 hesap bilgisi
 │       ├── error_dashboard.py # Hata izleme paneli
 │       ├── events.py          # Olay takibi
@@ -109,6 +109,7 @@ C:\Users\pc\Desktop\USTAT\
 │       ├── manual_trade.py    # Manuel işlem
 │       ├── mt5_verify.py      # MT5 bağlantı doğrulama
 │       ├── news.py            # Haber ve olaylar
+│       ├── notifications.py   # Bildirim sistemi
 │       ├── ogul_activity.py   # OĞUL sinyal aktivitesi
 │       ├── performance.py     # Performans metrikleri
 │       ├── positions.py       # Açık pozisyonlar
@@ -130,16 +131,17 @@ C:\Users\pc\Desktop\USTAT\
 │   ├── main.js                # Electron ana process
 │   ├── preload.js             # IPC köprüsü
 │   ├── mt5Manager.js          # MT5 terminal yönetimi
-│   ├── package.json           # v5.8.0
+│   ├── package.json           # v5.9.0
 │   ├── index.html             # Giriş HTML
 │   ├── vite.config.js         # Vite yapılandırması
 │   └── src/
 │       ├── App.jsx            # Ana React bileşeni
 │       ├── main.jsx           # React giriş noktası
-│       ├── components/        # 16 React bileşeni
+│       ├── components/        # 20 React bileşeni
 │       │   ├── AutoTrading.jsx
 │       │   ├── ConfirmModal.jsx
 │       │   ├── Dashboard.jsx
+│       │   ├── DraggableGrid.jsx
 │       │   ├── ErrorBoundary.jsx
 │       │   ├── ErrorTracker.jsx
 │       │   ├── HybridTrade.jsx
@@ -148,9 +150,11 @@ C:\Users\pc\Desktop\USTAT\
 │       │   ├── Monitor.jsx
 │       │   ├── NewsPanel.jsx
 │       │   ├── Performance.jsx
+│       │   ├── PrimnetDetail.jsx
 │       │   ├── RiskManagement.jsx
 │       │   ├── Settings.jsx
 │       │   ├── SideNav.jsx
+│       │   ├── SortableCard.jsx
 │       │   ├── TopBar.jsx
 │       │   ├── TradeHistory.jsx
 │       │   └── UstatBrain.jsx
@@ -168,7 +172,11 @@ C:\Users\pc\Desktop\USTAT\
 │
 ├── tests/                     # Test paketi
 │   ├── test_unit_core.py
-│   └── test_news_100_combinations.py
+│   ├── test_news_100_combinations.py
+│   ├── test_1000_combinations.py
+│   ├── test_hybrid_100.py
+│   ├── test_ogul_200.py
+│   └── test_stress_10000.py
 │
 ├── mql5/                      # MQL5 scriptleri
 ├── logs/                      # Log dosyaları
@@ -634,49 +642,63 @@ C:\Users\pc\Desktop\USTAT
 
 ### 11.2 Komut Referansı (25 Komut)
 
-**Sistem Yönetimi:**
+Kaynak: `ustat_agent.py` → `HANDLERS` sözlüğü (satır 1603-1628)
+Kullanım: `python .agent/claude_bridge.py <komut> [parametreler]`
 
-| Komut | Açıklama |
-|-------|----------|
-| `ping` | Ajan canlı mı kontrol et |
-| `start_app` | ÜSTAT uygulamasını başlat |
-| `stop_app` | ÜSTAT uygulamasını kapat |
-| `restart_app` | Yeniden başlat |
-| `build` | Projeyi derle (npm run build) |
-| `shell` | Windows'ta komut çalıştır |
-| `screenshot` | Ekran görüntüsü al |
+**Uygulama Yönetimi:**
 
-**Durum ve İzleme:**
+| Komut | Handler | Açıklama |
+|-------|---------|----------|
+| `start_app` | `handle_start_app` | ÜSTAT'ı başlat (`schtasks /IT` ile kullanıcı oturumunda) |
+| `stop_app` | `handle_stop_app` | Tüm ÜSTAT process'lerini durdur |
+| `restart_app` | `handle_restart_app` | Akıllı restart (durdur + başlat + API bekle) |
+| `build` | `handle_build` | Desktop `npm run build` — production derleme |
+| `shortcut` | `handle_shortcut` | Masaüstü kısayolunu güncelle |
 
-| Komut | Açıklama |
-|-------|----------|
-| `status` | Uygulama durumu |
-| `system_status` | Tüm sistem durumu (CPU, RAM, disk) |
-| `health_check` | Sağlık kontrolü (API, MT5, DB, Engine) |
-| `alerts` | Aktif uyarıları göster |
-| `agent_info` | Ajan versiyon bilgisi |
-| `mt5_check` | MT5 terminal bağlantı durumu |
-| `positions` | Açık pozisyonları listele |
-| `trade_history` | İşlem geçmişi |
-| `processes` | Çalışan süreçleri listele |
+**Sistem Durumu ve İzleme:**
+
+| Komut | Handler | Açıklama |
+|-------|---------|----------|
+| `ping` | `handle_ping` | Ajan canlılık kontrolü |
+| `status` | `handle_system_status` | API, Engine, MT5, DB, disk durumu |
+| `system_status` | `handle_system_status` | Detaylı sistem durumu (CPU, RAM, disk) |
+| `health_check` | `handle_health_check` | Kapsamlı sağlık kontrolü |
+| `mt5_check` | `handle_mt5_check` | MT5 terminal bağlantı durumu |
+| `processes` | `handle_processes` | Çalışan süreçleri listele (filtre destekli) |
+| `agent_info` | `handle_agent_info` | Ajan versiyon, PID, uptime, yetenekler |
+| `alerts` | `handle_alerts` | Aktif uyarılar (unresolved/all/resolve) |
+
+**Trading Bilgisi:**
+
+| Komut | Handler | Açıklama |
+|-------|---------|----------|
+| `positions` | `handle_positions` | Açık pozisyonları listele |
+| `trade_history` | `handle_trade_history` | İşlem geçmişi (symbol/limit filtreli) |
 
 **Veritabanı:**
 
-| Komut | Açıklama |
-|-------|----------|
-| `db_backup` | Veritabanı yedeği al |
-| `db_query` | SQL sorgusu (SADECE SELECT) |
-| `read_config` | Yapılandırma oku |
+| Komut | Handler | Açıklama |
+|-------|---------|----------|
+| `db_backup` | `handle_db_backup` | Veritabanı yedeği al |
+| `db_query` | `handle_db_query` | SQL sorgusu (SADECE SELECT — yazma engelli) |
+| `read_config` | `handle_read_config` | Config dosyasını oku (key filtreli) |
 
-**Dosya ve Log:**
+**Log ve Dosya:**
 
-| Komut | Açıklama |
-|-------|----------|
-| `tail_log` | Log son satırları |
-| `readlog` | Belirli log oku |
-| `file_read` | Dosya oku (SADECE USTAT dizini içinde) |
-| `file_write` | Dosya yaz (SADECE .agent/ altına) |
-| `list_files` | Dosyaları listele |
+| Komut | Handler | Açıklama |
+|-------|---------|----------|
+| `tail_log` | `handle_tail_log` | Birden fazla logdan son satırlar (api/startup/agent/electron) |
+| `readlog` | `handle_readlog` | Belirli log dosyası oku (satır sayısı belirtilebilir) |
+| `file_read` | `handle_file_read` | Dosya oku (SADECE USTAT dizini içinde) |
+| `file_write` | `handle_file_write` | Dosya yaz (SADECE `.agent/` altına) |
+| `list_files` | `handle_list_files` | Dizin listele (path + pattern filtreli) |
+
+**Shell:**
+
+| Komut | Handler | Açıklama |
+|-------|---------|----------|
+| `shell` | `handle_shell` | Windows'ta komut çalıştır (CMD/PowerShell, maks 120sn timeout) |
+| `screenshot` | `handle_screenshot` | Ekran görüntüsü al |
 
 ### 11.3 Güvenlik
 - `db_query` sadece SELECT çalıştırır (INSERT/UPDATE/DELETE engelli)

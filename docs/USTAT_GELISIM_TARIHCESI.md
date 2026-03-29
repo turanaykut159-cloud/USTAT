@@ -55,7 +55,7 @@
 
 ---
 
-## [5.9.0] — 2026-03-28 / 2026-03-29
+## [5.9.0] — 2026-03-28 / 2026-03-30
 
 ### Added
 - #55 — ÜSTAT Beyin Merkezi sayfası: trade kategorileri, kontrat profilleri, rejim analizi, hata atfetme (3d75fe3)
@@ -100,6 +100,8 @@
 - #84 — Event deduplication: aynı uyarı 5dk içinde tekrar DB'ye yazılmaz — EARLY_WARNING 3600+ spam düzeltildi (ddcb053)
 - #84 — Gelişim tarihçesi Keep a Changelog formatına dönüştürüldü (0927520)
 - #84 — Dosya organizasyonu: raporlar RAPORLAR/, oturum raporları docs/ (2b64dc7)
+- #86 — Ajan start_app Session 0 sorunu: subprocess.Popen → schtasks /IT ile kullanıcı oturumunda başlatma
+- #87 — Pozisyon tür ayrımı: _source_for_position() fallback düzeltmesi — DB'de source boş olan pozisyonlar MT5 olarak etiketleniyor
 
 ---
 
