@@ -94,6 +94,9 @@
 - #83 — ManualTrade MT5 pozisyon filtresi: `'Manuel'` → `'Manuel' || 'MT5'` (ebab753)
 - #83 — Settings.jsx VERSION=5.8→5.9, BUILD_DATE=03-26→03-29 (7bba799)
 - #83 — Python 3.10 __pycache__ kalıntıları temizlendi, build yenilendi
+- #84 — Event deduplication: aynı uyarı 5dk içinde tekrar DB'ye yazılmaz — EARLY_WARNING 3600+ spam düzeltildi (ddcb053)
+- #84 — Gelişim tarihçesi Keep a Changelog formatına dönüştürüldü (0927520)
+- #84 — Dosya organizasyonu: raporlar RAPORLAR/, oturum raporları docs/ (2b64dc7)
 
 ---
 

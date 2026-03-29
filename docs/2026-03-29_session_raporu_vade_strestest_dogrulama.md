@@ -1,7 +1,7 @@
-# 29 Mart 2026 — Oturum Raporu #83
+# 29 Mart 2026 — Oturum Raporu #83 / #84
 
 ## Konu
-Vade geçişi düzeltme + 10.000 stres testi + tam sistem doğrulama
+Vade geçişi düzeltme + 10.000 stres testi + tam sistem doğrulama + event dedup + dosya organizasyonu
 
 ## Yapılan İşler
 
@@ -42,8 +42,37 @@ Vade geçişi düzeltme + 10.000 stres testi + tam sistem doğrulama
 | `80468a2` | test: 10.003 test tamamlandı — eksik kombinasyonlar eklendi |
 | `7bba799` | fix: Settings.jsx versiyon ve build tarihi güncellendi |
 
+### 8. Event Deduplication (#84)
+- **Sorun**: `insert_event()` hiçbir dedup yapmıyordu. Aynı EARLY_WARNING (Baker Hughes haberi) 3600+ kez DB'ye yazılmıştı.
+- **Çözüm**: `dedup_seconds` parametresi eklendi (varsayılan=0, mevcut davranış korunur). 300sn dedup: EARLY_WARNING, DRAWDOWN_LIMIT, KILL_SWITCH, DATA_GAP.
+- **Sonuç**: Günlük ~8640 → ~288 kayıt.
+
+### 9. Gelişim Tarihçesi Profesyonel Format (#84)
+- 3182 satır → 243 satır (Keep a Changelog standardı)
+- Çift numaralar ve bozuk sıralama düzeltildi
+- Başlıkta "nasıl tutulur" kılavuzu eklendi
+
+### 10. Dosya Organizasyonu (#84)
+- 6 rapor/doküman kökten → RAPORLAR/
+- 4 oturum raporu RAPORLAR/ → docs/
+- Kök dizin temizlendi
+
+### 11. Simülasyon Testi (500 cycle)
+- Tüm modüller çalıştı: BABA rejim algılama, OĞUL sinyal + işlem, H-Engine, ÜSTAT Brain
+- İşlem açıldı (F_ASTOR SELL, F_AKSEN BUY), SL tetiklendi
+- Rejim geçişleri: TREND → OLAY → RANGE (8 değişiklik)
+- Sonuç: +42.16 TL (+0.35%)
+
+## Commitler (ek)
+| Hash | Mesaj |
+|------|-------|
+| `ddcb053` | fix: event deduplication — aynı uyarı 5dk tekrar yazmaz |
+| `0927520` | docs: gelişim tarihçesi Keep a Changelog formatı |
+| `7a2a749` | refactor: tarihçe yeniden adlandırma USTAT_GELISIM_TARIHCESI.md |
+| `2b64dc7` | refactor: dosya organizasyonu — raporlar RAPORLAR/, raporlar docs/ |
+
 ## Versiyon
 v5.9.0 — versiyon artışı gerekmedi (ana engine kodu değişmedi, çoğu test + fix).
 
 ## Build
-`npm run build` — 0 hata, 2.32s
+`npm run build` — 0 hata, 2.31s
