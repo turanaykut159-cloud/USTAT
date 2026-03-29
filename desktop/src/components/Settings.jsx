@@ -19,8 +19,8 @@ import { getAccount, getStatus, getEvents, getRiskBaseline, updateRiskBaseline, 
 
 // ── Sabitler ──────────────────────────────────────────────────────
 
-const VERSION = '5.8';
-const BUILD_DATE = '2026-03-26';
+const VERSION = '5.9';
+const BUILD_DATE = '2026-03-29';
 
 const DEFAULT_PREFS = {
   soundEnabled: true,
