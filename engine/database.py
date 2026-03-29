@@ -1107,12 +1107,16 @@ class Database:
     # ═════════════════════════════════════════════════════════════════
     #  EVENTS
     # ═════════════════════════════════════════════════════════════════
+    # Deduplication cache: {(event_type, message_prefix): last_insert_time}
+    _event_dedup_cache: dict[tuple[str, str], str] = {}
+
     def insert_event(
         self,
         event_type: str,
         message: str,
         severity: str = "INFO",
         action: str | None = None,
+        dedup_seconds: int = 0,
     ) -> int:
         """Sistem olayı kaydet.
 
@@ -1121,10 +1125,34 @@ class Database:
             message: Olay mesajı.
             severity: Önem derecesi ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL").
             action: Yapılan/önerilen aksiyon.
+            dedup_seconds: >0 ise aynı (type, mesaj ilk 80 karakter) çifti
+                bu süre içinde tekrar yazılmaz. 0 = dedup yok (varsayılan).
 
         Returns:
-            Oluşturulan satırın id'si.
+            Oluşturulan satırın id'si veya dedup nedeniyle atlandıysa 0.
         """
+        if dedup_seconds > 0:
+            from datetime import datetime, timedelta
+            prefix = message[:80]
+            key = (event_type, prefix)
+            now = datetime.now()
+            last = self._event_dedup_cache.get(key)
+            if last:
+                try:
+                    last_dt = datetime.fromisoformat(last)
+                    if (now - last_dt).total_seconds() < dedup_seconds:
+                        return 0  # Dedup — atla
+                except (ValueError, TypeError):
+                    pass
+            self._event_dedup_cache[key] = now.isoformat()
+            # Cache temizliği: 1000+ girişte eski kayıtları sil
+            if len(self._event_dedup_cache) > 1000:
+                cutoff = (now - timedelta(seconds=dedup_seconds * 2)).isoformat()
+                self._event_dedup_cache = {
+                    k: v for k, v in self._event_dedup_cache.items()
+                    if v > cutoff
+                }
+
         cur = self._execute(
             """INSERT INTO events (timestamp, type, severity, message, action)
                VALUES (?,?,?,?,?)""",

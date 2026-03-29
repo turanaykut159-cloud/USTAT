@@ -910,6 +910,7 @@ class Baba:
                     message=w.message,
                     severity=w.severity,
                     action=f"{w.warning_type}:{w.symbol}",
+                    dedup_seconds=300,
                 )
             logger.warning(
                 f"Erken uyarı: {len(warnings)} tetikleyici — "
@@ -1189,6 +1190,7 @@ class Baba:
                 message=f"Günlük kayıp: %{daily_loss_pct*100:.2f}",
                 severity="CRITICAL",
                 action="stop_trading",
+                dedup_seconds=300,
             )
             return False
 
@@ -1202,6 +1204,7 @@ class Baba:
                 message=f"Toplam drawdown: %{drawdown*100:.2f}",
                 severity="CRITICAL",
                 action="stop_trading",
+                dedup_seconds=300,
             )
             return False
 
@@ -2054,6 +2057,7 @@ class Baba:
                 message=message,
                 severity=severity,
                 action=action,
+                dedup_seconds=300,
             )
 
     def _activate_kill_switch(

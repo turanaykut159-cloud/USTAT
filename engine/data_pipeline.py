@@ -451,6 +451,7 @@ class DataPipeline:
                             f"tespit edildi (piyasa saati içi)"
                         ),
                         severity="WARNING",
+                        dedup_seconds=300,
                     )
 
         return len(gaps)
