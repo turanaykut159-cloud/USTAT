@@ -5,6 +5,8 @@
 
 > Bu dosya ÜSTAT projesinin TEK rehberidir. Tüm geliştiriciler (insan ve AI) bu kurallara MUTLAK uyum gösterir. Varsayım, olasılık, tahmin YASAKTIR — her karar kanıta dayanır.
 
+> **ZORUNLU OKUMA:** Çalışmaya başlamadan önce `docs/USTAT_CALISMA_REHBERI.md` dosyası okunmalıdır. Bu rehber; günlük kontrol listeleri, kod değişikliği kuralları, test disiplini, canlı izleme metrikleri, acil durum yönetimi ve deployment sürecini tanımlar. Tüm geliştiriciler (insan ve AI) bu rehbere uyum gösterir.
+
 ---
 
 ## BÖLÜM 1: ÜSTAT NEDİR?
@@ -161,6 +163,7 @@ C:\Users\pc\Desktop\USTAT\
 │
 ├── docs/                      # Oturum raporları ve dokümantasyon
 │   ├── USTAT_GELISIM_TARIHCESI.md
+│   ├── USTAT_CALISMA_REHBERI.md  # Profesyonel çalışma rehberi (ZORUNLU OKUMA)
 │   └── YYYY-MM-DD_session_raporu_*.md
 │
 ├── tests/                     # Test paketi
