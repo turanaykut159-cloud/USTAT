@@ -2,6 +2,56 @@
 
 ---
 
+## #83 — Vade Geçişi Düzeltme + 10.000 Stres Testi + Sistem Doğrulama (2026-03-29)
+
+| Alan | Detay |
+|------|-------|
+| **Tarih** | 2026-03-29 |
+| **Sınıf** | C1 (Yeşil: top5_selection.py, Settings.jsx, ManualTrade.jsx, ustat_agent.py) + C0 (test) |
+| **Tetikleyen** | Kullanıcı: "31 Mart vade günü Top 5 engelleniyor, neden?" |
+| **Kapsam** | Vade geçişi, ajan düzeltme, stres testi, UI doğrulama |
+
+### Sorun Analizi
+1. `top5_selection.py` satır 662-664: `<=` operatörü vade günü (bdays=0) tüm sembolleri engelliyordu (`0 <= 0 = True`). Yeni vade kontratlarıyla işlem açılamıyordu.
+2. `ustat_agent.py`: `ChangeServiceConfig()` parametre çakışması + `main()` çağrısı eksik.
+3. `ManualTrade.jsx`: MT5 pozisyonları Manuel Trade'de görünmüyordu.
+4. `Settings.jsx`: VERSION ve BUILD_DATE eski kalmıştı (5.8 / 2026-03-26).
+5. `__pycache__`: Python 3.10 kalıntıları temizlenmemişti.
+6. Desktop build eski kalmış — PrimnetDetail, bildirim CSS build'e girmemişti.
+
+### Çözümler
+1. **Vade geçişi**: `<=` → `<` operatörü. Kural: vade-1 eski kontrat, vade günü yeni kontrat. 3 aylık tablo ile doğrulandı (Mart/Nisan/Mayıs). GCM/BIST tatil takvimiyle uyumlu.
+2. **Ajan**: `ChangeServiceConfig` parametreleri düzeltildi, `main()` eklendi.
+3. **ManualTrade**: Filtre `'Manuel'` → `'Manuel' || 'MT5'`.
+4. **Settings**: VERSION=5.9, BUILD_DATE=2026-03-29.
+5. **Cache**: Tüm eski `.pyc` (3.10/3.11) temizlendi.
+6. **Build**: `npm run build` yeniden alındı, tüm bileşenler doğrulandı.
+
+### 10.000 Kombinasyonlu Stres Testi
+- **Dosya**: `tests/test_stress_10000.py`
+- **Sonuç**: 10.003 test, %100 PASSED, 7.94 saniye
+- **Kapsam**: BABA (1500), OĞUL (2500), H-Engine (2000), MT5 Bridge (1500), Manuel Motor (500), Top5 (500), Database (500), Entegrasyon (1000)
+
+### Tam Sistem Doğrulama
+- 17 modül, 354 fonksiyon: Hepsi yükleniyor ✅
+- 24 Siyah Kapı fonksiyonu: 24/24 mevcut ✅
+- 26 API endpoint: 26/26 çalışıyor ✅
+- 4 motor cycle: Hepsi aktif, overrun 0 ✅
+- 11 sayfa + TopBar + LockScreen: Tüm kartlar API'ye bağlı, sessiz kart yok ✅
+- WebSocket: Batch mesaj çalışıyor ✅
+- Versiyon tutarlılığı: 8/8 konum v5.9 ✅
+
+### Etkilenen Dosyalar
+| Dosya | Değişiklik |
+|-------|-----------|
+| `engine/top5_selection.py` | `<=` → `<` (satır 662, 664) |
+| `ustat_agent.py` | ChangeServiceConfig fix + main() |
+| `desktop/src/components/ManualTrade.jsx` | MT5 pozisyon filtresi |
+| `desktop/src/components/Settings.jsx` | VERSION=5.9, BUILD_DATE=03-29 |
+| `tests/test_stress_10000.py` | YENİ — 10.003 test |
+
+---
+
 ## #82 — Watchdog OTP Bekleme + Frameless Titlebar + BABA EXPIRY_DAYS Düzeltmesi (2026-03-29)
 
 | Alan | Detay |
