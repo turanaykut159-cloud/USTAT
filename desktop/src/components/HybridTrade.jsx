@@ -15,6 +15,18 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  arrayMove,
+} from '@dnd-kit/sortable';
+import {
   getPositions,
   checkHybridTransfer,
   transferToHybrid,
@@ -26,6 +38,7 @@ import {
 } from '../services/api';
 import { formatMoney, formatPrice, pnlClass, elapsed } from '../utils/formatters';
 import ConfirmModal from './ConfirmModal';
+import SortableCard from './SortableCard';
 
 // ── Yardımcı fonksiyonlar ───────────────────────────────────────
 
@@ -189,6 +202,55 @@ export default function HybridTrade() {
 
   const nativeSltp = hybridStatus.native_sltp ?? false;
 
+  // ── Sürükle-bırak kart sıralaması (@dnd-kit) ────────────────
+  const DEFAULT_CARD_ORDER = ['summary', 'perf', 'form', 'positions', 'events'];
+  const STORAGE_KEY = 'ustat_hybrid_card_order';
+
+  const [cardOrder, setCardOrder] = useState(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length === DEFAULT_CARD_ORDER.length) return parsed;
+      }
+    } catch { /* bozuk veri — varsayılana dön */ }
+    return DEFAULT_CARD_ORDER;
+  });
+
+  // 8px hareket etmeden sürükleme başlamaz (yanlışlıkla tetiklemeyi önler)
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+  );
+
+  const handleDragEnd = useCallback((event) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    setCardOrder((prev) => {
+      const oldIndex = prev.indexOf(active.id);
+      const newIndex = prev.indexOf(over.id);
+      if (oldIndex === -1 || newIndex === -1) return prev;
+
+      const reordered = arrayMove(prev, oldIndex, newIndex);
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(reordered)); } catch {}
+      return reordered;
+    });
+  }, []);
+
+  const handleResetOrder = useCallback(() => {
+    setCardOrder(DEFAULT_CARD_ORDER);
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_CARD_ORDER)); } catch {}
+  }, []);
+
+  // ── Kart render haritası ─────────────────────────────────────
+  const CARD_LABELS = {
+    summary: 'Özet',
+    perf: 'Performans',
+    form: 'Devir & Risk',
+    positions: 'Aktif Pozisyonlar',
+    events: 'Olay Geçmişi',
+  };
+
   return (
     <div className="hybrid-trade">
       <h2>
@@ -202,401 +264,456 @@ export default function HybridTrade() {
         >
           {nativeSltp ? 'MT5 SL/TP' : 'Yazılımsal SL/TP'}
         </span>
+        <button
+          type="button"
+          className="grid-reset-btn"
+          onClick={handleResetOrder}
+          title="Kartları varsayılan sıraya döndür"
+          style={{ marginLeft: '12px' }}
+        >
+          ↺ Sıfırla
+        </button>
       </h2>
 
-      {/* ═══ ÖZET KARTLAR ════════════════════════════════════════ */}
-      <div className="op-summary-row">
-        <div className="op-summary-card">
-          <span className="op-sc-label">Aktif Hibrit</span>
-          <span className="op-sc-value">
-            {hybridStatus.active_count} / {hybridStatus.max_count}
-          </span>
-        </div>
-        <div className="op-summary-card">
-          <span className="op-sc-label">Anlık Floating</span>
-          <span className={`op-sc-value ${pnlClass(totalHybridPnl)}`}>
-            {formatMoney(totalHybridPnl)}
-          </span>
-        </div>
-        <div className="op-summary-card">
-          <span className="op-sc-label">Günlük Hibrit K/Z</span>
-          <span className={`op-sc-value ${pnlClass(hybridStatus.daily_pnl)}`}>
-            {formatMoney(hybridStatus.daily_pnl)}
-          </span>
-        </div>
-        <div className="op-summary-card">
-          <span className="op-sc-label">Günlük Limit</span>
-          <div className="op-margin-wrap">
-            <span className={`op-sc-value ${limitUsedPct > 80 ? 'loss' : limitUsedPct > 50 ? 'warning-text' : ''}`}>
-              %{limitUsedPct.toFixed(0)} / {formatMoney(hybridStatus.daily_limit)}
-            </span>
-            <div className="op-margin-bar">
-              <div
-                className={`op-margin-fill ${limitUsedPct > 80 ? 'danger' : limitUsedPct > 50 ? 'warn' : ''}`}
-                style={{ width: `${Math.min(limitUsedPct, 100)}%` }}
-              />
-            </div>
-          </div>
-        </div>
-      </div>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleDragEnd}
+      >
+        <SortableContext items={cardOrder} strategy={verticalListSortingStrategy}>
 
-      {/* ═══ PERFORMANS İSTATİSTİKLERİ ═══════════════════════════ */}
-      {perfStats && perfStats.total > 0 && (
-        <div className="ht-perf-card">
-          <div className="ht-perf-title">Hibrit Performans</div>
-          <div className="ht-perf-grid">
-            <div className="ht-perf-item">
-              <span className="ht-perf-label">Toplam</span>
-              <span className="ht-perf-value">{perfStats.total}</span>
-            </div>
-            <div className="ht-perf-item">
-              <span className="ht-perf-label">Kazanan</span>
-              <span className="ht-perf-value" style={{ color: 'var(--profit)' }}>{perfStats.winners}</span>
-            </div>
-            <div className="ht-perf-item">
-              <span className="ht-perf-label">Kaybeden</span>
-              <span className="ht-perf-value" style={{ color: 'var(--loss)' }}>{perfStats.losers}</span>
-            </div>
-            <div className="ht-perf-item">
-              <span className="ht-perf-label">Başarı</span>
-              <span className="ht-perf-value" style={{ color: perfStats.win_rate >= 50 ? 'var(--profit)' : 'var(--loss)' }}>
-                %{perfStats.win_rate}
-              </span>
-            </div>
-            <div className="ht-perf-item">
-              <span className="ht-perf-label">Toplam K/Z</span>
-              <span className="ht-perf-value" style={{ color: perfStats.total_pnl >= 0 ? 'var(--profit)' : 'var(--loss)' }}>
-                {formatMoney(perfStats.total_pnl)}
-              </span>
-            </div>
-            <div className="ht-perf-item">
-              <span className="ht-perf-label">Ort. K/Z</span>
-              <span className="ht-perf-value">{formatMoney(perfStats.avg_pnl)}</span>
-            </div>
-            <div className="ht-perf-item">
-              <span className="ht-perf-label">En iyi</span>
-              <span className="ht-perf-value" style={{ color: 'var(--profit)' }}>{formatMoney(perfStats.best_pnl)}</span>
-            </div>
-            <div className="ht-perf-item">
-              <span className="ht-perf-label">En kötü</span>
-              <span className="ht-perf-value" style={{ color: 'var(--loss)' }}>{formatMoney(perfStats.worst_pnl)}</span>
-            </div>
-          </div>
-          {perfStats.close_reasons && Object.keys(perfStats.close_reasons).length > 0 && (
-            <div className="ht-perf-reasons">
-              <span className="ht-perf-reasons-title">Kapanış Nedenleri:</span>
-              {Object.entries(perfStats.close_reasons).map(([reason, count]) => (
-                <span key={reason} className="ht-perf-reason-tag">{reason}: {count}</span>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      {cardOrder.map((cardId) => {
+        switch (cardId) {
 
-      {/* ═══ DEVİR FORMU + RİSK ÖZETİ ═══════════════════════════ */}
-      <div className="mt-layout">
-        {/* ── SOL PANEL: Form ──────────────────────────────────── */}
-        <div className="mt-form">
-          {/* Pozisyon Seçimi */}
-          <div className="mt-form-group">
-            <label>Açık Pozisyon Seç</label>
-            {openPositions.length === 0 ? (
-              <div style={{ color: 'var(--text-dim)', fontSize: '13px', padding: '8px 0' }}>
-                Devir edilebilir açık pozisyon yok
-              </div>
-            ) : (
-              <select
-                className="mt-select"
-                value={selectedTicket}
-                onChange={(e) => { setSelectedTicket(e.target.value); setCheckResult(null); setTransferResult(null); }}
-                disabled={transferring}
-              >
-                <option value="">-- Pozisyon seç --</option>
-                {openPositions.map((p) => (
-                  <option key={p.ticket} value={p.ticket}>
-                    #{p.ticket} — {p.symbol} {p.direction} {p.volume} lot ({formatMoney(p.pnl)} TRY)
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
-
-          {/* Kontrol Et butonu */}
-          {selectedTicket && !checkResult && (
-            <button
-              className="mt-check-btn"
-              onClick={handleCheck}
-              disabled={checking}
-            >
-              {checking ? 'Kontrol ediliyor...' : 'Kontrol Et'}
-            </button>
-          )}
-
-          {/* Kontrol sonucu — SL/TP önerileri */}
-          {checkResult && checkResult.can_transfer && (
-            <div className="mt-form-group">
-              <label>Devir Bilgileri</label>
-              <div className="mt-price-info">
-                Sembol: <b>{checkResult.symbol}</b> {checkResult.direction}
-              </div>
-              <div className="mt-price-info">
-                Giriş Fiyatı: {formatPrice(checkResult.entry_price)}
-              </div>
-              <div className="mt-price-info">
-                Güncel Fiyat: {formatPrice(checkResult.current_price)}
-              </div>
-              <div className="mt-price-info">
-                ATR(14): {formatPrice(checkResult.atr_value)}
-              </div>
-              <div className="mt-price-info">
-                SL: {formatPrice(checkResult.suggested_sl)} ({checkResult.direction === 'BUY' ? '-' : '+'}2×ATR)
-              </div>
-              <div className="mt-price-info">
-                TP: {formatPrice(checkResult.suggested_tp)} ({checkResult.direction === 'BUY' ? '+' : '-'}2×ATR)
-              </div>
-            </div>
-          )}
-
-          {/* Red mesajı */}
-          {checkResult && !checkResult.can_transfer && (
-            <div className="mt-status-fail">{checkResult.reason}</div>
-          )}
-
-          {/* Hibrite Devret butonu */}
-          {checkResult && checkResult.can_transfer && !transferResult && (
-            <button
-              className="mt-execute-btn"
-              onClick={handleTransfer}
-              disabled={transferring}
-            >
-              {transferring
-                ? 'Devrediliyor...'
-                : `${checkResult.symbol} — Hibrite Devret`}
-            </button>
-          )}
-
-          {/* Devir sonucu */}
-          {transferResult && (
-            <div className={`mt-result ${transferResult.success ? 'success' : 'error'}`}>
-              {transferResult.success
-                ? `Hibrite devredildi! SL: ${formatPrice(transferResult.sl)} TP: ${formatPrice(transferResult.tp)}`
-                : `Hata: ${transferResult.message}`}
-            </div>
-          )}
-
-          {/* Sıfırla butonu */}
-          {(checkResult || transferResult) && (
-            <button className="mt-check-btn" onClick={handleReset} style={{ marginTop: '8px' }}>
-              Sıfırla
-            </button>
-          )}
-        </div>
-
-        {/* ── SAĞ PANEL: Risk Özeti ─────────────────────────────── */}
-        <div className="mt-risk-panel">
-          <h3 style={{ margin: '0 0 12px', fontSize: '13px', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-            Hibrit Risk Özeti
-          </h3>
-
-          <div className="mt-risk-row">
-            <span className="mt-risk-label">Aktif Hibrit</span>
-            <span className="mt-risk-value">
-              {hybridStatus.active_count} / {hybridStatus.max_count}
-            </span>
-          </div>
-          <div className="mt-risk-row">
-            <span className="mt-risk-label">Günlük K/Z</span>
-            <span className="mt-risk-value" style={{ color: (hybridStatus.daily_pnl || 0) >= 0 ? '#4CAF50' : '#F44336' }}>
-              {formatMoney(hybridStatus.daily_pnl)} TRY
-            </span>
-          </div>
-          <div className="mt-risk-row">
-            <span className="mt-risk-label">Günlük Limit</span>
-            <span className="mt-risk-value">{formatMoney(hybridStatus.daily_limit)} TRY</span>
-          </div>
-          <div className="mt-risk-row">
-            <span className="mt-risk-label">Anlık Floating</span>
-            <span className="mt-risk-value" style={{ color: totalHybridPnl >= 0 ? '#4CAF50' : '#F44336' }}>
-              {formatMoney(totalHybridPnl)} TRY
-            </span>
-          </div>
-
-          {checkResult && checkResult.can_transfer && (
-            <>
-              <div style={{ borderTop: '1px solid var(--border)', margin: '8px 0' }} />
-              <div className="mt-risk-row">
-                <span className="mt-risk-label">ATR Değeri</span>
-                <span className="mt-risk-value">{formatPrice(checkResult.atr_value)}</span>
-              </div>
-            </>
-          )}
-
-          {hybridStatus.active_count >= hybridStatus.max_count && (
-            <div className="mt-status-fail" style={{ marginTop: '12px' }}>
-              Eşzamanlı limit dolu
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ═══ AKTİF HİBRİT POZİSYONLAR ══════════════════════════ */}
-      <div className="op-table-wrap" style={{ marginTop: '20px' }}>
-        <h3 style={{ margin: '0 0 8px', fontSize: '14px', fontWeight: 600 }}>
-          Aktif Hibrit Pozisyonlar
-        </h3>
-        {hybridPositions.length === 0 ? (
-          <div className="op-empty">
-            <span className="op-empty-icon">🔀</span>
-            <span>Hibrit yönetiminde pozisyon yok</span>
-          </div>
-        ) : (
-          <table className="op-table">
-            <thead>
-              <tr>
-                <th>Sembol</th>
-                <th>Yön</th>
-                <th>Lot</th>
-                <th>Giriş Fiy.</th>
-                <th>Anlık Fiy.</th>
-                <th>SL</th>
-                <th>TP</th>
-                <th>K/Z</th>
-                <th>Durum</th>
-                <th>Süre</th>
-                <th>İşlem</th>
-              </tr>
-            </thead>
-            <tbody>
-              {hybridPositions.map((hp) => {
-                const hpPnl = hp.pnl || 0;
-                const rowCls = hpPnl > 0 ? 'op-row-profit' : hpPnl < 0 ? 'op-row-loss' : '';
-                return (
-                  <tr key={hp.ticket} className={rowCls}>
-                    <td className="mono op-symbol">{hp.symbol}</td>
-                    <td>
-                      <span className={`dir-badge dir-badge--${(hp.direction || '').toLowerCase()}`}>
-                        {hp.direction}
-                      </span>
-                    </td>
-                    <td className="mono">{hp.volume?.toFixed(2) ?? '\u2014'}</td>
-                    <td className="mono">{formatPrice(hp.entry_price)}</td>
-                    <td className="mono">{formatPrice(hp.current_price)}</td>
-                    <td className="mono text-dim">{formatPrice(hp.current_sl, 2, 2)}</td>
-                    <td className="mono text-dim">{formatPrice(hp.current_tp, 2, 2)}</td>
-                    <td className={`mono op-pnl-cell ${pnlClass(hpPnl)}`}>
-                      <b>{formatMoney(hpPnl)}</b>
-                    </td>
-                    <td>
-                      <span className={`op-tur-badge ${stateBadgeClass(hp)}`}>
-                        {stateLabel(hp)}
-                      </span>
-                    </td>
-                    <td className="text-dim">{elapsed(hp.transferred_at)}</td>
-                    <td className="op-action-cell">
-                      <button
-                        type="button"
-                        className="op-close-btn"
-                        onClick={() => handleRemove(hp.ticket)}
-                        disabled={removingTicket === hp.ticket}
-                        title="Hibrit yönetiminden çıkar (pozisyon açık kalır)"
-                      >
-                        {removingTicket === hp.ticket ? 'Çıkarılıyor...' : 'Hibritten Çıkar'}
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-            {hybridPositions.length > 1 && (
-              <tfoot>
-                <tr className="op-footer-row">
-                  <td colSpan={7}><b>TOPLAM</b></td>
-                  <td className={`mono ${pnlClass(totalHybridPnl)}`}>
-                    <b>{formatMoney(totalHybridPnl)}</b>
-                  </td>
-                  <td colSpan={3}></td>
-                </tr>
-              </tfoot>
-            )}
-          </table>
-        )}
-      </div>
-
-      {/* ═══ HİBRİT OLAY GEÇMİŞİ ═══════════════════════════════ */}
-      <div className="mt-history" style={{ marginTop: '20px' }}>
-        <h3>Hibrit Olay Geçmişi</h3>
-        {hybridEvents.length === 0 ? (
-          <div style={{ color: 'var(--text-dim)', fontSize: '12px', textAlign: 'center', padding: '12px 0' }}>
-            Henüz hibrit olay yok
-          </div>
-        ) : (
-          <table style={{ width: '100%', fontSize: '12px', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid var(--border)', color: 'var(--text-dim)' }}>
-                <th style={{ textAlign: 'left', padding: '4px 8px' }}>Zaman</th>
-                <th style={{ textAlign: 'left', padding: '4px 8px' }}>Sembol</th>
-                <th style={{ textAlign: 'center', padding: '4px 8px' }}>Olay</th>
-                <th style={{ textAlign: 'left', padding: '4px 8px' }}>Detay</th>
-              </tr>
-            </thead>
-            <tbody>
-              {hybridEvents.map((evt, i) => (
-                <tr key={evt.id || i} style={{ borderBottom: '1px solid var(--border)' }}>
-                  <td style={{ padding: '6px 8px' }}>
-                    {evt.timestamp ? new Date(evt.timestamp).toLocaleString('tr-TR', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '\u2014'}
-                  </td>
-                  <td style={{ padding: '6px 8px', fontWeight: 600 }}>{evt.symbol}</td>
-                  <td style={{ textAlign: 'center', padding: '6px 8px' }}>
-                    <span className={`ht-event-badge ht-event--${(evt.event || '').toLowerCase()}`}>
-                      {evt.event}
+        /* ═══ ÖZET KARTLAR ════════════════════════════════════════ */
+        case 'summary':
+          return (
+            <SortableCard key="summary" id="summary" label="Özet">
+              <div className="op-summary-row">
+                <div className="op-summary-card">
+                  <span className="op-sc-label">Aktif Hibrit</span>
+                  <span className="op-sc-value">
+                    {hybridStatus.active_count} / {hybridStatus.max_count}
+                  </span>
+                </div>
+                <div className="op-summary-card">
+                  <span className="op-sc-label">Anlık Floating</span>
+                  <span className={`op-sc-value ${pnlClass(totalHybridPnl)}`}>
+                    {formatMoney(totalHybridPnl)}
+                  </span>
+                </div>
+                <div className="op-summary-card">
+                  <span className="op-sc-label">Günlük Hibrit K/Z</span>
+                  <span className={`op-sc-value ${pnlClass(hybridStatus.daily_pnl)}`}>
+                    {formatMoney(hybridStatus.daily_pnl)}
+                  </span>
+                </div>
+                <div className="op-summary-card">
+                  <span className="op-sc-label">Günlük Limit</span>
+                  <div className="op-margin-wrap">
+                    <span className={`op-sc-value ${limitUsedPct > 80 ? 'loss' : limitUsedPct > 50 ? 'warning-text' : ''}`}>
+                      %{limitUsedPct.toFixed(0)} / {formatMoney(hybridStatus.daily_limit)}
                     </span>
-                  </td>
-                  <td style={{ padding: '6px 8px', color: 'var(--text-dim)', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {(() => {
-                      try {
-                        const d = JSON.parse(evt.details || '{}');
-                        const evtType = (evt.event || '').toUpperCase();
+                    <div className="op-margin-bar">
+                      <div
+                        className={`op-margin-fill ${limitUsedPct > 80 ? 'danger' : limitUsedPct > 50 ? 'warn' : ''}`}
+                        style={{ width: `${Math.min(limitUsedPct, 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </SortableCard>
+          );
 
-                        if (evtType === 'TRANSFER') {
-                          const parts = [];
-                          if (d.entry_price) parts.push(`Giriş: ${formatPrice(d.entry_price)}`);
-                          if (d.volume) parts.push(`Lot: ${d.volume}`);
-                          if (d.sl) parts.push(`SL: ${formatPrice(d.sl)}`);
-                          if (d.tp) parts.push(`TP: ${formatPrice(d.tp)}`);
-                          return parts.length > 0 ? parts.join(' | ') : 'Hibrite devredildi';
-                        }
-                        if (evtType === 'BREAKEVEN' && d.new_sl) {
-                          return `Breakeven: SL ${formatPrice(d.old_sl)} → ${formatPrice(d.new_sl)}`;
-                        }
-                        if (evtType === 'TRAILING_UPDATE' && d.new_sl) {
-                          return `Trailing SL: ${formatPrice(d.old_sl)} → ${formatPrice(d.new_sl)}`;
-                        }
-                        if (evtType === 'CLOSE') {
-                          const parts = [];
-                          if (d.reason) parts.push(d.reason);
-                          if (d.pnl != null) parts.push(`K/Z: ${formatMoney(d.pnl)}`);
-                          if (d.swap) parts.push(`Swap: ${formatMoney(d.swap)}`);
-                          return parts.join(' | ') || 'Kapandı';
-                        }
-                        if (evtType === 'REMOVE') {
-                          return d.reason || 'Hibritten çıkarıldı';
-                        }
+        /* ═══ PERFORMANS İSTATİSTİKLERİ ═══════════════════════════ */
+        case 'perf':
+          return (
+            <SortableCard key="perf" id="perf" label="Performans">
+              {perfStats && perfStats.total > 0 ? (
+                <div className="ht-perf-card">
+                  <div className="ht-perf-grid">
+                    <div className="ht-perf-item">
+                      <span className="ht-perf-label">Toplam</span>
+                      <span className="ht-perf-value">{perfStats.total}</span>
+                    </div>
+                    <div className="ht-perf-item">
+                      <span className="ht-perf-label">Kazanan</span>
+                      <span className="ht-perf-value" style={{ color: 'var(--profit)' }}>{perfStats.winners}</span>
+                    </div>
+                    <div className="ht-perf-item">
+                      <span className="ht-perf-label">Kaybeden</span>
+                      <span className="ht-perf-value" style={{ color: 'var(--loss)' }}>{perfStats.losers}</span>
+                    </div>
+                    <div className="ht-perf-item">
+                      <span className="ht-perf-label">Başarı</span>
+                      <span className="ht-perf-value" style={{ color: perfStats.win_rate >= 50 ? 'var(--profit)' : 'var(--loss)' }}>
+                        %{perfStats.win_rate}
+                      </span>
+                    </div>
+                    <div className="ht-perf-item">
+                      <span className="ht-perf-label">Toplam K/Z</span>
+                      <span className="ht-perf-value" style={{ color: perfStats.total_pnl >= 0 ? 'var(--profit)' : 'var(--loss)' }}>
+                        {formatMoney(perfStats.total_pnl)}
+                      </span>
+                    </div>
+                    <div className="ht-perf-item">
+                      <span className="ht-perf-label">Ort. K/Z</span>
+                      <span className="ht-perf-value">{formatMoney(perfStats.avg_pnl)}</span>
+                    </div>
+                    <div className="ht-perf-item">
+                      <span className="ht-perf-label">En iyi</span>
+                      <span className="ht-perf-value" style={{ color: 'var(--profit)' }}>{formatMoney(perfStats.best_pnl)}</span>
+                    </div>
+                    <div className="ht-perf-item">
+                      <span className="ht-perf-label">En kötü</span>
+                      <span className="ht-perf-value" style={{ color: 'var(--loss)' }}>{formatMoney(perfStats.worst_pnl)}</span>
+                    </div>
+                  </div>
+                  {perfStats.close_reasons && Object.keys(perfStats.close_reasons).length > 0 && (
+                    <div className="ht-perf-reasons">
+                      <span className="ht-perf-reasons-title">Kapanış Nedenleri:</span>
+                      {Object.entries(perfStats.close_reasons).map(([reason, count]) => (
+                        <span key={reason} className="ht-perf-reason-tag">{reason}: {count}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{ color: 'var(--text-dim)', fontSize: '12px', padding: '8px' }}>
+                  Henüz performans verisi yok
+                </div>
+              )}
+            </SortableCard>
+          );
 
-                        if (d.new_sl) return `SL: ${formatPrice(d.old_sl)} → ${formatPrice(d.new_sl)}`;
-                        if (d.reason) return d.reason;
-                        if (d.pnl != null) return `K/Z: ${formatMoney(d.pnl)}`;
-                        return evt.details;
-                      } catch {
-                        return evt.details;
-                      }
-                    })()}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+        /* ═══ DEVİR FORMU + RİSK ÖZETİ ═══════════════════════════ */
+        case 'form':
+          return (
+            <SortableCard key="form" id="form" label="Devir & Risk">
+              <div className="mt-layout">
+              {/* ── SOL PANEL: Form ──────────────────────────────────── */}
+              <div className="mt-form">
+                {/* Pozisyon Seçimi */}
+                <div className="mt-form-group">
+                  <label>Açık Pozisyon Seç</label>
+                  {openPositions.length === 0 ? (
+                    <div style={{ color: 'var(--text-dim)', fontSize: '13px', padding: '8px 0' }}>
+                      Devir edilebilir açık pozisyon yok
+                    </div>
+                  ) : (
+                    <select
+                      className="mt-select"
+                      value={selectedTicket}
+                      onChange={(e) => { setSelectedTicket(e.target.value); setCheckResult(null); setTransferResult(null); }}
+                      disabled={transferring}
+                    >
+                      <option value="">-- Pozisyon seç --</option>
+                      {openPositions.map((p) => (
+                        <option key={p.ticket} value={p.ticket}>
+                          #{p.ticket} — {p.symbol} {p.direction} {p.volume} lot ({formatMoney(p.pnl)} TRY)
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+
+                {/* Kontrol Et butonu */}
+                {selectedTicket && !checkResult && (
+                  <button
+                    className="mt-check-btn"
+                    onClick={handleCheck}
+                    disabled={checking}
+                  >
+                    {checking ? 'Kontrol ediliyor...' : 'Kontrol Et'}
+                  </button>
+                )}
+
+                {/* Kontrol sonucu — SL/TP önerileri */}
+                {checkResult && checkResult.can_transfer && (
+                  <div className="mt-form-group">
+                    <label>Devir Bilgileri</label>
+                    <div className="mt-price-info">
+                      Sembol: <b>{checkResult.symbol}</b> {checkResult.direction}
+                    </div>
+                    <div className="mt-price-info">
+                      Giriş Fiyatı: {formatPrice(checkResult.entry_price)}
+                    </div>
+                    <div className="mt-price-info">
+                      Güncel Fiyat: {formatPrice(checkResult.current_price)}
+                    </div>
+                    <div className="mt-price-info">
+                      ATR(14): {formatPrice(checkResult.atr_value)}
+                    </div>
+                    <div className="mt-price-info">
+                      SL: {formatPrice(checkResult.suggested_sl)} ({checkResult.direction === 'BUY' ? '-' : '+'}2×ATR)
+                    </div>
+                    <div className="mt-price-info">
+                      TP: {formatPrice(checkResult.suggested_tp)} ({checkResult.direction === 'BUY' ? '+' : '-'}2×ATR)
+                    </div>
+                  </div>
+                )}
+
+                {/* Red mesajı */}
+                {checkResult && !checkResult.can_transfer && (
+                  <div className="mt-status-fail">{checkResult.reason}</div>
+                )}
+
+                {/* Hibrite Devret butonu */}
+                {checkResult && checkResult.can_transfer && !transferResult && (
+                  <button
+                    className="mt-execute-btn"
+                    onClick={handleTransfer}
+                    disabled={transferring}
+                  >
+                    {transferring
+                      ? 'Devrediliyor...'
+                      : `${checkResult.symbol} — Hibrite Devret`}
+                  </button>
+                )}
+
+                {/* Devir sonucu */}
+                {transferResult && (
+                  <div className={`mt-result ${transferResult.success ? 'success' : 'error'}`}>
+                    {transferResult.success
+                      ? `Hibrite devredildi! SL: ${formatPrice(transferResult.sl)} TP: ${formatPrice(transferResult.tp)}`
+                      : `Hata: ${transferResult.message}`}
+                  </div>
+                )}
+
+                {/* Sıfırla butonu */}
+                {(checkResult || transferResult) && (
+                  <button className="mt-check-btn" onClick={handleReset} style={{ marginTop: '8px' }}>
+                    Sıfırla
+                  </button>
+                )}
+              </div>
+
+              {/* ── SAĞ PANEL: Risk Özeti ─────────────────────────────── */}
+              <div className="mt-risk-panel">
+                <h3 style={{ margin: '0 0 12px', fontSize: '13px', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  Hibrit Risk Özeti
+                </h3>
+
+                <div className="mt-risk-row">
+                  <span className="mt-risk-label">Aktif Hibrit</span>
+                  <span className="mt-risk-value">
+                    {hybridStatus.active_count} / {hybridStatus.max_count}
+                  </span>
+                </div>
+                <div className="mt-risk-row">
+                  <span className="mt-risk-label">Günlük K/Z</span>
+                  <span className="mt-risk-value" style={{ color: (hybridStatus.daily_pnl || 0) >= 0 ? '#4CAF50' : '#F44336' }}>
+                    {formatMoney(hybridStatus.daily_pnl)} TRY
+                  </span>
+                </div>
+                <div className="mt-risk-row">
+                  <span className="mt-risk-label">Günlük Limit</span>
+                  <span className="mt-risk-value">{formatMoney(hybridStatus.daily_limit)} TRY</span>
+                </div>
+                <div className="mt-risk-row">
+                  <span className="mt-risk-label">Anlık Floating</span>
+                  <span className="mt-risk-value" style={{ color: totalHybridPnl >= 0 ? '#4CAF50' : '#F44336' }}>
+                    {formatMoney(totalHybridPnl)} TRY
+                  </span>
+                </div>
+
+                {checkResult && checkResult.can_transfer && (
+                  <>
+                    <div style={{ borderTop: '1px solid var(--border)', margin: '8px 0' }} />
+                    <div className="mt-risk-row">
+                      <span className="mt-risk-label">ATR Değeri</span>
+                      <span className="mt-risk-value">{formatPrice(checkResult.atr_value)}</span>
+                    </div>
+                  </>
+                )}
+
+                {hybridStatus.active_count >= hybridStatus.max_count && (
+                  <div className="mt-status-fail" style={{ marginTop: '12px' }}>
+                    Eşzamanlı limit dolu
+                  </div>
+                )}
+              </div>
+            </div>
+            </SortableCard>
+          );
+
+        /* ═══ AKTİF HİBRİT POZİSYONLAR ══════════════════════════ */
+        case 'positions':
+          return (
+            <SortableCard key="positions" id="positions" label="Aktif Pozisyonlar">
+              <div className="op-table-wrap">
+              <h3 style={{ margin: '0 0 8px', fontSize: '14px', fontWeight: 600 }}>
+                Aktif Hibrit Pozisyonlar
+              </h3>
+              {hybridPositions.length === 0 ? (
+                <div className="op-empty">
+                  <span className="op-empty-icon">🔀</span>
+                  <span>Hibrit yönetiminde pozisyon yok</span>
+                </div>
+              ) : (
+                <table className="op-table">
+                  <thead>
+                    <tr>
+                      <th>Sembol</th>
+                      <th>Yön</th>
+                      <th>Lot</th>
+                      <th>Giriş Fiy.</th>
+                      <th>Anlık Fiy.</th>
+                      <th>SL</th>
+                      <th>TP</th>
+                      <th>K/Z</th>
+                      <th>Durum</th>
+                      <th>Süre</th>
+                      <th>İşlem</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {hybridPositions.map((hp) => {
+                      const hpPnl = hp.pnl || 0;
+                      const rowCls = hpPnl > 0 ? 'op-row-profit' : hpPnl < 0 ? 'op-row-loss' : '';
+                      return (
+                        <tr key={hp.ticket} className={rowCls}>
+                          <td className="mono op-symbol">{hp.symbol}</td>
+                          <td>
+                            <span className={`dir-badge dir-badge--${(hp.direction || '').toLowerCase()}`}>
+                              {hp.direction}
+                            </span>
+                          </td>
+                          <td className="mono">{hp.volume?.toFixed(2) ?? '\u2014'}</td>
+                          <td className="mono">{formatPrice(hp.entry_price)}</td>
+                          <td className="mono">{formatPrice(hp.current_price)}</td>
+                          <td className="mono text-dim">{formatPrice(hp.current_sl, 2, 2)}</td>
+                          <td className="mono text-dim">{formatPrice(hp.current_tp, 2, 2)}</td>
+                          <td className={`mono op-pnl-cell ${pnlClass(hpPnl)}`}>
+                            <b>{formatMoney(hpPnl)}</b>
+                          </td>
+                          <td>
+                            <span className={`op-tur-badge ${stateBadgeClass(hp)}`}>
+                              {stateLabel(hp)}
+                            </span>
+                          </td>
+                          <td className="text-dim">{elapsed(hp.transferred_at)}</td>
+                          <td className="op-action-cell">
+                            <button
+                              type="button"
+                              className="op-close-btn"
+                              onClick={() => handleRemove(hp.ticket)}
+                              disabled={removingTicket === hp.ticket}
+                              title="Hibrit yönetiminden çıkar (pozisyon açık kalır)"
+                            >
+                              {removingTicket === hp.ticket ? 'Çıkarılıyor...' : 'Hibritten Çıkar'}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  {hybridPositions.length > 1 && (
+                    <tfoot>
+                      <tr className="op-footer-row">
+                        <td colSpan={7}><b>TOPLAM</b></td>
+                        <td className={`mono ${pnlClass(totalHybridPnl)}`}>
+                          <b>{formatMoney(totalHybridPnl)}</b>
+                        </td>
+                        <td colSpan={3}></td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              )}
+              </div>
+            </SortableCard>
+          );
+
+        /* ═══ HİBRİT OLAY GEÇMİŞİ ═══════════════════════════════ */
+        case 'events':
+          return (
+            <SortableCard key="events" id="events" label="Olay Geçmişi">
+              <div className="mt-history">
+              <h3>Hibrit Olay Geçmişi</h3>
+              {hybridEvents.length === 0 ? (
+                <div style={{ color: 'var(--text-dim)', fontSize: '12px', textAlign: 'center', padding: '12px 0' }}>
+                  Henüz hibrit olay yok
+                </div>
+              ) : (
+                <table style={{ width: '100%', fontSize: '12px', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid var(--border)', color: 'var(--text-dim)' }}>
+                      <th style={{ textAlign: 'left', padding: '4px 8px' }}>Zaman</th>
+                      <th style={{ textAlign: 'left', padding: '4px 8px' }}>Sembol</th>
+                      <th style={{ textAlign: 'center', padding: '4px 8px' }}>Olay</th>
+                      <th style={{ textAlign: 'left', padding: '4px 8px' }}>Detay</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {hybridEvents.map((evt, i) => (
+                      <tr key={evt.id || i} style={{ borderBottom: '1px solid var(--border)' }}>
+                        <td style={{ padding: '6px 8px' }}>
+                          {evt.timestamp ? new Date(evt.timestamp).toLocaleString('tr-TR', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '\u2014'}
+                        </td>
+                        <td style={{ padding: '6px 8px', fontWeight: 600 }}>{evt.symbol}</td>
+                        <td style={{ textAlign: 'center', padding: '6px 8px' }}>
+                          <span className={`ht-event-badge ht-event--${(evt.event || '').toLowerCase()}`}>
+                            {evt.event}
+                          </span>
+                        </td>
+                        <td style={{ padding: '6px 8px', color: 'var(--text-dim)', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {(() => {
+                            try {
+                              const d = JSON.parse(evt.details || '{}');
+                              const evtType = (evt.event || '').toUpperCase();
+
+                              if (evtType === 'TRANSFER') {
+                                const parts = [];
+                                if (d.entry_price) parts.push(`Giriş: ${formatPrice(d.entry_price)}`);
+                                if (d.volume) parts.push(`Lot: ${d.volume}`);
+                                if (d.sl) parts.push(`SL: ${formatPrice(d.sl)}`);
+                                if (d.tp) parts.push(`TP: ${formatPrice(d.tp)}`);
+                                return parts.length > 0 ? parts.join(' | ') : 'Hibrite devredildi';
+                              }
+                              if (evtType === 'BREAKEVEN' && d.new_sl) {
+                                return `Breakeven: SL ${formatPrice(d.old_sl)} → ${formatPrice(d.new_sl)}`;
+                              }
+                              if (evtType === 'TRAILING_UPDATE' && d.new_sl) {
+                                return `Trailing SL: ${formatPrice(d.old_sl)} → ${formatPrice(d.new_sl)}`;
+                              }
+                              if (evtType === 'CLOSE') {
+                                const parts = [];
+                                if (d.reason) parts.push(d.reason);
+                                if (d.pnl != null) parts.push(`K/Z: ${formatMoney(d.pnl)}`);
+                                if (d.swap) parts.push(`Swap: ${formatMoney(d.swap)}`);
+                                return parts.join(' | ') || 'Kapandı';
+                              }
+                              if (evtType === 'REMOVE') {
+                                return d.reason || 'Hibritten çıkarıldı';
+                              }
+
+                              if (d.new_sl) return `SL: ${formatPrice(d.old_sl)} → ${formatPrice(d.new_sl)}`;
+                              if (d.reason) return d.reason;
+                              if (d.pnl != null) return `K/Z: ${formatMoney(d.pnl)}`;
+                              return evt.details;
+                            } catch {
+                              return evt.details;
+                            }
+                          })()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              </div>
+            </SortableCard>
+          );
+
+        default:
+          return null;
+        }
+      })}
+
+        </SortableContext>
+      </DndContext>
 
       {/* Hata Modalı */}
       <ConfirmModal

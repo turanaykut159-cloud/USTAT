@@ -6023,3 +6023,95 @@ h2 {
   background: var(--bg-tertiary);
 }
 
+
+/* ═══════════════════════════════════════════════════════════════════
+   SÜRÜKLE-BIRAK KARTLAR (@dnd-kit)
+   v5.9 — Hibrit İşlem Paneli kart sıralama
+   ═══════════════════════════════════════════════════════════════════ */
+
+.grid-reset-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.grid-reset-btn:hover {
+  background: var(--bg-tertiary);
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+
+/* Sürüklenebilir kartlar */
+.grid-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 12px;
+}
+
+/* Sürükleme tutamağı */
+.drag-handle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border);
+  cursor: grab;
+  user-select: none;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  touch-action: none;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+  background: var(--accent);
+  color: #fff;
+}
+
+/* Kart içerik alanı */
+.grid-card > *:not(.drag-handle) {
+  flex: 1;
+  overflow: auto;
+}
+
+/* Özet kartlar grid içinde yatay düzen korunsun */
+.grid-card .op-summary-row {
+  margin: 0;
+  padding: 8px;
+}
+
+/* Form ve risk paneli grid içinde */
+.grid-card .mt-layout {
+  margin: 0;
+}
+
+/* Tablo ve geçmiş grid içinde */
+.grid-card .op-table-wrap {
+  margin: 0;
+  padding: 8px;
+}
+
+.grid-card .mt-history {
+  margin: 0;
+  padding: 8px;
+}
+
+.grid-card .ht-perf-card {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+}
+

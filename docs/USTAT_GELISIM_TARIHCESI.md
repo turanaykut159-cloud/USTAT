@@ -83,6 +83,9 @@
 - #81 — 700+ satır ölü kod kaldırıldı, SE2→SE3 isimlendirme (e57b008)
 - #82 — BABA EXPIRY_DAYS=2→0: vade kısıtlaması kaldırıldı (da730b1)
 
+### Changed
+- #85 — Hibrit İşlem Paneli sürükle-bırak: react-grid-layout → @dnd-kit — 5 kart sürüklenebilir sıralama, localStorage kalıcılık, sıfırla butonu
+
 ### Fixed
 - #76 — VİOP ilgisizlik filtresi: USD haberlerinin Türk hisselerinde yanlış OLAY rejimi tetiklemesi (2026-03-27)
 - #77 — Exchange netting position ticket: VİOP netting modunda ticket çözümleme hatası (2026-03-27)
