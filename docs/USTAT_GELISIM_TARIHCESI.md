@@ -48,7 +48,7 @@
 ║  ✗ "Sorun Analizi / Çözüm / Etkilenen Dosyalar" bölümleri ekleme  ║
 ║                                                                      ║
 ║  ESKİ DETAYLI VERSİYON:                                              ║
-║  docs/USTAT_v5_gelisim_tarihcesi_YEDEK.md (arşiv, referans için)   ║
+║  docs/USTAT_GELISIM_TARIHCESI_YEDEK.md (arşiv, referans için)   ║
 ║                                                                      ║
 ╚══════════════════════════════════════════════════════════════════════╝
 -->
@@ -240,4 +240,4 @@
 > **Not:** Detaylı sorun analizleri, çözüm açıklamaları ve etkilenen dosya listeleri
 > oturum raporlarında bulunur: `docs/YYYY-MM-DD_session_raporu_*.md`
 >
-> Eski detaylı tarihçe arşivi: `docs/USTAT_v5_gelisim_tarihcesi_YEDEK.md`
+> Eski detaylı tarihçe arşivi: `docs/USTAT_GELISIM_TARIHCESI_YEDEK.md`

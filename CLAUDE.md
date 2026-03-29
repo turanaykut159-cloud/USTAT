@@ -160,7 +160,7 @@ C:\Users\pc\Desktop\USTAT\
 │           └── formatters.js
 │
 ├── docs/                      # Oturum raporları ve dokümantasyon
-│   ├── USTAT_v5_gelisim_tarihcesi.md
+│   ├── USTAT_GELISIM_TARIHCESI.md
 │   └── YYYY-MM-DD_session_raporu_*.md
 │
 ├── tests/                     # Test paketi
@@ -495,10 +495,10 @@ Backend/engine değişiklikleri UI'ya yansıması gerekiyorsa:
 - Production build: `cd desktop && npm run build` (0 HATA olmalı)
 
 ### ADIM 2: Gelişim Tarihçesine Yaz
-`docs/USTAT_v5_gelisim_tarihcesi.md` dosyasına DETAYLI giriş ekle:
-- Tarih, sınıf (C0-C4), neden, tetikleyen, kapsam
-- Sorun analizi, çözüm, etkilenen fonksiyonlar
-- Test sonuçları, eklenen/kaldırılan davranışlar
+`docs/USTAT_GELISIM_TARIHCESI.md` dosyasına giriş ekle (Keep a Changelog formatı):
+- İlgili versiyon bloğuna (#N numaralı, 1-2 satır madde)
+- Kategori: Added / Changed / Fixed / Removed / Security
+- Detaylı analiz oturum raporuna yazılır, tarihçeye DEĞİL
 
 ### ADIM 3: Versiyon Kontrolü Hesapla
 Son versiyon commit'ini bul. Sonra:
