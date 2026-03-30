@@ -1315,6 +1315,16 @@ class HEngine:
             )
             return None
 
+        # Referans fiyat başarıyla alındı — hp'yi güncelle (frontend + overnight için)
+        if hp.reference_price != ref_price:
+            old_ref = hp.reference_price
+            hp.reference_price = ref_price
+            if old_ref == 0.0:
+                logger.info(
+                    f"PRİMNET: Referans fiyat ilk kez alındı [{hp.symbol}] "
+                    f"ref={ref_price:.4f}"
+                )
+
         entry_prim = self._price_to_prim(hp.entry_price, ref_price)
         current_prim = self._price_to_prim(current_price, ref_price)
 

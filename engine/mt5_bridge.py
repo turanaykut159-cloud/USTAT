@@ -76,6 +76,8 @@ class SymbolInfo:
     bid: float
     ask: float
     spread: int
+    session_price_limit_max: float = 0.0  # günlük tavan fiyat
+    session_price_limit_min: float = 0.0  # günlük taban fiyat
 
 
 @dataclass
@@ -598,6 +600,8 @@ class MT5Bridge:
                 bid=info.bid,
                 ask=info.ask,
                 spread=info.spread,
+                session_price_limit_max=getattr(info, "session_price_limit_max", 0.0),
+                session_price_limit_min=getattr(info, "session_price_limit_min", 0.0),
             )
             logger.debug(
                 f"Sembol [{symbol}]: point={sym.point}, "

@@ -21,6 +21,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+import pytest
+
 # Proje kökünü sys.path'e ekle
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -178,6 +180,12 @@ class TestHarness:
             )
         self.results.append(result)
         return result
+
+
+@pytest.fixture
+def h():
+    """Her test için temiz bir TestHarness instance'ı sağlar."""
+    return TestHarness()
 
 
 # ══════════════════════════════════════════════════════════════════════
