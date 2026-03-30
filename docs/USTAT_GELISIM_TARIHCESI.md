@@ -87,6 +87,7 @@
 - #85 — Hibrit İşlem Paneli sürükle-bırak: react-grid-layout → @dnd-kit — 5 kart sürüklenebilir sıralama, localStorage kalıcılık, sıfırla butonu
 
 ### Fixed
+- #88 — Confluence strateji-bazlı skorlama: trend_follow/breakout sinyallerinde RSI>70 ve direnç yakınlığı cezaları kaldırıldı — 184 sinyal/0 işlem sorununu çözer
 - #76 — VİOP ilgisizlik filtresi: USD haberlerinin Türk hisselerinde yanlış OLAY rejimi tetiklemesi (2026-03-27)
 - #77 — Exchange netting position ticket: VİOP netting modunda ticket çözümleme hatası (2026-03-27)
 - #78 — Native SL/TP config geri alma: yanlış config override düzeltmesi (2026-03-27)

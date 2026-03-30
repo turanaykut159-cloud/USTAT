@@ -536,6 +536,8 @@ def calculate_confluence(
     volume_ratio: float = 1.0,  # current_vol / avg_vol
     # v2: Rejim bilgisi (eşik seçimi için)
     regime_type: str = "",  # "TREND", "RANGE", "VOLATILE", "OLAY"
+    # v3: Strateji bilgisi (skorlama mantığı için)
+    strategy_type: str = "",  # "trend_follow", "mean_reversion", "breakout"
 ) -> ConfluenceResult:
     """Giriş kararı için confluence skor hesapla.
 
@@ -575,11 +577,21 @@ def calculate_confluence(
                 proximity = 1.0 - abs(price - lv.price) / (atr_val * 1.5)
                 level_score = proximity * 15 + min(lv.strength * 2.5, 10)
                 details["support_level"] = lv.price
-            # BUY: Dirence yakınlık = kötü (ceza)
+            # BUY: Dirence yakınlık — strateji-bazlı değerlendirme (v3)
             near_r, lv_r = price_near_level(price, [l for l in levels if l.level_type == "resistance"], atr_val, 1.0)
             if near_r and lv_r:
-                level_score = max(level_score - 10, 0)
-                details["resistance_warning"] = lv_r.price
+                if strategy_type == "breakout":
+                    # Breakout: Dirence yakınlık = fırsat (kırılım bekleniyor)
+                    level_score += 5
+                    details["resistance_breakout_opportunity"] = lv_r.price
+                elif strategy_type == "trend_follow":
+                    # Trend follow: Hafif ceza (güçlü trend direnci aşabilir)
+                    level_score = max(level_score - 5, 0)
+                    details["resistance_warning"] = lv_r.price
+                else:
+                    # Mean reversion / diğer: Tam ceza (direnç geri dönüş noktası)
+                    level_score = max(level_score - 10, 0)
+                    details["resistance_warning"] = lv_r.price
         else:
             # SELL: Dirence yakınlık = iyi
             near, lv = price_near_level(price, [l for l in levels if l.level_type == "resistance"], atr_val, 1.5)
@@ -587,11 +599,21 @@ def calculate_confluence(
                 proximity = 1.0 - abs(price - lv.price) / (atr_val * 1.5)
                 level_score = proximity * 15 + min(lv.strength * 2.5, 10)
                 details["resistance_level"] = lv.price
-            # SELL: Desteğe yakınlık = kötü (ceza)
+            # SELL: Desteğe yakınlık — strateji-bazlı değerlendirme (v3)
             near_s, lv_s = price_near_level(price, [l for l in levels if l.level_type == "support"], atr_val, 1.0)
             if near_s and lv_s:
-                level_score = max(level_score - 10, 0)
-                details["support_warning"] = lv_s.price
+                if strategy_type == "breakout":
+                    # Breakout: Desteğe yakınlık = fırsat (kırılım bekleniyor)
+                    level_score += 5
+                    details["support_breakout_opportunity"] = lv_s.price
+                elif strategy_type == "trend_follow":
+                    # Trend follow: Hafif ceza
+                    level_score = max(level_score - 5, 0)
+                    details["support_warning"] = lv_s.price
+                else:
+                    # Mean reversion / diğer: Tam ceza
+                    level_score = max(level_score - 10, 0)
+                    details["support_warning"] = lv_s.price
 
     level_score = min(level_score, 25.0)
 
@@ -616,21 +638,32 @@ def calculate_confluence(
     if adx_val > 20:
         indicator_score += min((adx_val - 20) / 20.0 * 12, 12)
 
-    # RSI uyumu (0-9) — ESKİ: 0-7
+    # RSI uyumu (0-9) — v3: strateji-bazlı değerlendirme
+    _is_momentum = strategy_type in ("trend_follow", "breakout")
     if direction == "BUY":
-        if 30 < rsi_val < 60:  # Aşırı almayı geçmemiş, geri çekilme bölgesi
+        if 30 < rsi_val < 60:  # Geri çekilme bölgesi
             indicator_score += 7.0
         elif rsi_val <= 30:     # Aşırı satış = MR fırsatı
             indicator_score += 9.0
-        elif rsi_val > 70:      # Aşırı alım = risk
-            indicator_score -= 3.0
+        elif rsi_val > 70:      # Aşırı alım
+            if _is_momentum:
+                # Trend/Breakout: Güçlü momentum = olumlu
+                indicator_score += 5.0
+            else:
+                # Mean reversion: Aşırı alım = risk
+                indicator_score -= 3.0
     else:
         if 40 < rsi_val < 70:
             indicator_score += 7.0
         elif rsi_val >= 70:
             indicator_score += 9.0
-        elif rsi_val < 30:
-            indicator_score -= 3.0
+        elif rsi_val < 30:      # Aşırı satış
+            if _is_momentum:
+                # Trend/Breakout: Güçlü satış momentumu = olumlu
+                indicator_score += 5.0
+            else:
+                # Mean reversion: Aşırı satış = risk
+                indicator_score -= 3.0
 
     # MACD uyumu (0-7) — ESKİ: 0-5
     if direction == "BUY" and macd_hist > 0:

@@ -1153,6 +1153,7 @@ class Ogul:
                         atr_val=atr_val, adx_val=_adx, rsi_val=_rsi,
                         macd_hist=_hist, ema_fast=_ema_f, ema_slow=_ema_s,
                         volume_ratio=vol_ratio, regime_type=_regime_str,
+                        strategy_type=candidate.strategy.value,
                     )
                     conf_score = confluence.total_score
 
