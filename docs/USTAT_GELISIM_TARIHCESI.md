@@ -58,6 +58,7 @@
 ## [5.9.0] — 2026-03-28 / 2026-03-30
 
 ### Added
+- #90 — Log Yönetim Sistemi v3.0: FUSE cache bypass — 5 yeni ajan komutu (fresh_engine_log, search_all_logs, log_digest, log_stats, log_export), Claude Bridge v4.0, log_reader.py yardımcı scripti
 - #55 — ÜSTAT Beyin Merkezi sayfası: trade kategorileri, kontrat profilleri, rejim analizi, hata atfetme (3d75fe3)
 - #56 — Haber entegrasyonu: MT5 Calendar → NewsBridge → BABA/OĞUL erken uyarı sistemi (2026-03-23)
 - #69 — Kademeli trailing stop + breakeven floor: ATR bazlı 3 fazlı sistem (2026-03-25)

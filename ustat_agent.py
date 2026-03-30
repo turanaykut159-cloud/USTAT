@@ -1572,6 +1572,12 @@ def handle_agent_info(cmd: dict) -> tuple[bool, str, str]:
             "trade_history": "İşlem geçmişi",
             "mt5_check": "MT5 detaylı durum kontrolü",
             "agent_info": "Ajan bilgi ve yetenekleri",
+            # v3.0 Log Yonetim Sistemi
+            "fresh_engine_log": "Engine log oku (FUSE bypass, regex, context)",
+            "search_all_logs": "Tum loglarda eszamanli arama",
+            "log_digest": "Engine log ozeti (kategorize edilmis olaylar)",
+            "log_stats": "Tum log dosyalarinin gercek boyut/tarih bilgisi",
+            "log_export": "Log parcasini .agent/results/'a export et",
         },
         "services": {
             "monitor": "Proaktif sistem izleme (30s aralık)",
@@ -1592,6 +1598,836 @@ def handle_agent_info(cmd: dict) -> tuple[bool, str, str]:
         ],
     }
     return True, json.dumps(info, indent=2, ensure_ascii=False), ""
+
+
+# ═══════════════════════════════════════════════════════════════
+# LOG YÖNETİM SİSTEMİ v3.0 — FUSE Önbellek Bypass
+# ═══════════════════════════════════════════════════════════════
+# Bu handler'lar FUSE/virtiofs mount cache sorununu tamamen çözer.
+# Windows'taki gerçek dosyayı doğrudan okur, FUSE önbelleği atlanır.
+# Claude (Linux VM) bu komutları kullanarak her zaman güncel veri alır.
+
+import re as _re
+import glob as _glob
+
+
+def _get_engine_log_path(date_str: str = "") -> Optional[Path]:
+    """Engine log dosyasının yolunu bul.
+    date_str: 'YYYY-MM-DD' veya bos (bugun).
+    """
+    log_dir = USTAT_DIR / "logs"
+    if date_str:
+        target = log_dir / f"ustat_{date_str}.log"
+        if target.exists():
+            return target
+        return None
+    # Bugun
+    today = datetime.now().strftime("%Y-%m-%d")
+    target = log_dir / f"ustat_{today}.log"
+    if target.exists():
+        return target
+    # En son log
+    logs = sorted(log_dir.glob("ustat_*.log"))
+    return logs[-1] if logs else None
+
+
+def _get_all_log_paths() -> dict:
+    """Tum log dosyalarinin yollarini dondur."""
+    paths = {
+        "api": USTAT_DIR / "api.log",
+        "startup": USTAT_DIR / "startup.log",
+        "agent": LOG_FILE,
+        "electron": DESKTOP_DIR / "electron.log",
+    }
+    # Engine log (bugun)
+    eng = _get_engine_log_path()
+    if eng:
+        paths["engine"] = eng
+    return paths
+
+
+def _tail_file_binary(filepath: Path, max_bytes: int = 5 * 1024 * 1024) -> str:
+    """Dosyanin son max_bytes kadarini binary okur (buyuk log icin hizli).
+    FUSE cache bypass: dosya boyutunu binary seek ile alir.
+    """
+    size = filepath.stat().st_size
+    chunk = min(size, max_bytes)
+    with open(filepath, "rb") as f:
+        if chunk < size:
+            f.seek(size - chunk)
+            # Baslangici tam satira hizala
+            f.readline()
+        data = f.read()
+    return data.decode("utf-8", errors="replace")
+
+
+def handle_fresh_engine_log(cmd: dict) -> tuple:
+    """Engine log oku — FUSE cache bypass, regex destekli, context satirlari.
+
+    Parametreler:
+        lines (int): Son N satir (varsayilan 200)
+        search (str): Arama metni veya regex deseni
+        regex (bool): True ise regex, False ise duz metin arama (varsayilan False)
+        context (int): Eslesen satirlarin etrafinda +/- N context satiri (varsayilan 0)
+        date (str): Tarih 'YYYY-MM-DD' (varsayilan bugun)
+        head (bool): True ise bastan oku (varsayilan False = sondan)
+        max_bytes (int): Maks byte okuma (varsayilan 5MB)
+
+    Cikti:
+        Eslesen satirlar, dosya bilgisi (boyut, tarih)
+    """
+    lines_count = cmd.get("lines", 200)
+    search = cmd.get("search", "")
+    use_regex = cmd.get("regex", False)
+    context_n = cmd.get("context", 0)
+    date_str = cmd.get("date", "")
+    from_head = cmd.get("head", False)
+    max_bytes = cmd.get("max_bytes", 5 * 1024 * 1024)
+
+    log_path = _get_engine_log_path(date_str)
+    if not log_path or not log_path.exists():
+        return False, "", f"Engine log bulunamadi (tarih: {date_str or 'bugun'})"
+
+    try:
+        real_size = log_path.stat().st_size
+        mtime = datetime.fromtimestamp(log_path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+
+        # Binary tail okuma (buyuk dosyalar icin hizli)
+        raw_text = _tail_file_binary(log_path, max_bytes)
+        all_lines = raw_text.splitlines()
+
+        header = f"[{log_path.name} | {real_size / (1024*1024):.1f}MB | son guncelleme: {mtime} | toplam: {len(all_lines)} satir]"
+
+        if search:
+            # Arama modu
+            if use_regex:
+                try:
+                    pattern = _re.compile(search, _re.IGNORECASE)
+                except _re.error as e:
+                    return False, "", f"Regex hatasi: {e}"
+                match_indices = [i for i, line in enumerate(all_lines) if pattern.search(line)]
+            else:
+                search_lower = search.lower()
+                match_indices = [i for i, line in enumerate(all_lines) if search_lower in line.lower()]
+
+            if not match_indices:
+                return True, f"{header}\nArama: '{search}' -- 0 sonuc", ""
+
+            # Context satirlari ile birlikte topla
+            result_lines = []
+            seen = set()
+            for idx in match_indices[-lines_count:]:  # Son N eslesen
+                start = max(0, idx - context_n)
+                end = min(len(all_lines), idx + context_n + 1)
+                for i in range(start, end):
+                    if i not in seen:
+                        seen.add(i)
+                        marker = ">>>" if i == idx else "   "
+                        result_lines.append((i, f"{marker} {all_lines[i]}"))
+
+            result_lines.sort(key=lambda x: x[0])
+            output_text = "\n".join(line for _, line in result_lines)
+            return True, f"{header}\nArama: '{search}' -- {len(match_indices)} sonuc (son {min(lines_count, len(match_indices))} gosteriliyor)\n\n{output_text}", ""
+
+        else:
+            # Duz tail/head modu
+            if from_head:
+                selected = all_lines[:lines_count]
+            else:
+                selected = all_lines[-lines_count:]
+            return True, f"{header}\n\n" + "\n".join(selected), ""
+
+    except Exception as e:
+        return False, "", f"Engine log okuma hatasi: {e}"
+
+
+def handle_search_all_logs(cmd: dict) -> tuple:
+    """TUM log dosyalarinda eszamanli arama.
+
+    Parametreler:
+        pattern (str): Arama deseni (zorunlu)
+        regex (bool): Regex modu (varsayilan False)
+        context (int): Context satir sayisi (varsayilan 1)
+        max_results (int): Log basi maks sonuc (varsayilan 20)
+        logs (list): Aranacak loglar (varsayilan hepsi)
+
+    Cikti:
+        Her log icin eslesen satirlar
+    """
+    pattern = cmd.get("pattern", "")
+    if not pattern:
+        return False, "", "Arama deseni (pattern) zorunlu"
+
+    use_regex = cmd.get("regex", False)
+    context_n = cmd.get("context", 1)
+    max_results = cmd.get("max_results", 20)
+    target_logs = cmd.get("logs", None)  # None = hepsi
+
+    all_paths = _get_all_log_paths()
+    if target_logs:
+        all_paths = {k: v for k, v in all_paths.items() if k in target_logs}
+
+    if use_regex:
+        try:
+            compiled = _re.compile(pattern, _re.IGNORECASE)
+        except _re.error as e:
+            return False, "", f"Regex hatasi: {e}"
+    else:
+        compiled = None
+
+    output_parts = []
+    total_matches = 0
+
+    for name, path in all_paths.items():
+        if not path.exists():
+            continue
+
+        try:
+            # Son 5MB oku (buyuk loglar icin)
+            raw = _tail_file_binary(path, 5 * 1024 * 1024)
+            lines = raw.splitlines()
+            real_size = path.stat().st_size
+
+            if compiled:
+                matches = [(i, line) for i, line in enumerate(lines) if compiled.search(line)]
+            else:
+                pattern_lower = pattern.lower()
+                matches = [(i, line) for i, line in enumerate(lines) if pattern_lower in line.lower()]
+
+            if not matches:
+                continue
+
+            total_matches += len(matches)
+            section = [f"=== {name.upper()} ({real_size / (1024*1024):.1f}MB) — {len(matches)} eslesti ==="]
+
+            for idx, match_line in matches[-max_results:]:
+                # Context satirlari
+                start = max(0, idx - context_n)
+                end = min(len(lines), idx + context_n + 1)
+                for i in range(start, end):
+                    marker = ">>>" if i == idx else "   "
+                    section.append(f"{marker} [{i+1}] {lines[i]}")
+                if context_n > 0:
+                    section.append("---")
+
+            output_parts.append("\n".join(section))
+
+        except Exception as e:
+            output_parts.append(f"=== {name.upper()} === HATA: {e}")
+
+    if not output_parts:
+        return True, f"'{pattern}' icin hicbir log dosyasinda sonuc bulunamadi.", ""
+
+    summary = f"ARAMA: '{pattern}' — toplam {total_matches} sonuc, {len(output_parts)} log dosyasinda\n\n"
+    return True, summary + "\n\n".join(output_parts), ""
+
+
+def handle_log_digest(cmd: dict) -> tuple:
+    """Engine log ozeti — anahtar olaylari kategorize et.
+
+    Parametreler:
+        minutes (int): Son N dakika (varsayilan 60)
+        categories (list): Filtre ['error','warning','trade','kill','signal','regime','confluence']
+                           (varsayilan hepsi)
+
+    Cikti:
+        Kategorize edilmis olay ozeti
+    """
+    minutes = cmd.get("minutes", 60)
+    categories = cmd.get("categories", None)  # None = hepsi
+
+    log_path = _get_engine_log_path()
+    if not log_path or not log_path.exists():
+        return False, "", "Engine log bulunamadi"
+
+    # Kategori desenleri
+    CATEGORY_PATTERNS = {
+        "error": _re.compile(r"ERROR|HATA|Exception|Traceback|CRITICAL", _re.IGNORECASE),
+        "warning": _re.compile(r"WARNING|UYARI|DIKKAT", _re.IGNORECASE),
+        "trade": _re.compile(r"EMIR|ORDER|TRADE|POZISYON|FILLED|CLOSED|SEND_ORDER|close_position", _re.IGNORECASE),
+        "kill": _re.compile(r"KILL.?SWITCH|KS_|L1|L2|L3|kill_switch|ACIL", _re.IGNORECASE),
+        "signal": _re.compile(r"SINYAL|SIGNAL|confluence|PASS|REJECT|candidate", _re.IGNORECASE),
+        "regime": _re.compile(r"REJIM|REGIME|TREND|RANGE|VOLATILE|OLAY|regime_type", _re.IGNORECASE),
+        "confluence": _re.compile(r"confluence|CONFLUENCE|conf_score|conf_pass", _re.IGNORECASE),
+        "risk": _re.compile(r"DRAWDOWN|RISK|can_trade|MARGIN|floating_loss|daily_loss", _re.IGNORECASE),
+    }
+
+    if categories:
+        active_patterns = {k: v for k, v in CATEGORY_PATTERNS.items() if k in categories}
+    else:
+        active_patterns = CATEGORY_PATTERNS
+
+    try:
+        raw = _tail_file_binary(log_path, 10 * 1024 * 1024)
+        all_lines = raw.splitlines()
+
+        # Zaman filtresi: son N dakika
+        cutoff = datetime.now() - timedelta(minutes=minutes)
+        cutoff_str = cutoff.strftime("%Y-%m-%d %H:%M")
+
+        # Satirlari filtrele (zaman + kategori)
+        categorized = {cat: [] for cat in active_patterns}
+        for line in all_lines:
+            # Zaman kontrolu (satir basindaki timestamp)
+            if len(line) >= 16:
+                line_time = line[:16]  # "2026-03-30 19:23" formatinda
+                if line_time < cutoff_str:
+                    continue
+
+            for cat, pattern in active_patterns.items():
+                if pattern.search(line):
+                    categorized[cat].append(line)
+                    break  # Bir kategori yeterli
+
+        # Ozet olustur
+        real_size = log_path.stat().st_size
+        mtime = datetime.fromtimestamp(log_path.stat().st_mtime).strftime("%H:%M:%S")
+        header = f"LOG OZETI — Son {minutes} dakika | {log_path.name} ({real_size/(1024*1024):.1f}MB) | guncelleme: {mtime}"
+
+        parts = [header, "=" * 60]
+        total_events = 0
+        for cat in ["error", "kill", "risk", "trade", "signal", "confluence", "regime", "warning"]:
+            if cat not in categorized:
+                continue
+            events = categorized[cat]
+            total_events += len(events)
+            if events:
+                parts.append(f"\n[{cat.upper()}] — {len(events)} olay")
+                # Son 10 goster
+                for ev in events[-10:]:
+                    parts.append(f"  {ev[:200]}")
+                if len(events) > 10:
+                    parts.append(f"  ... ve {len(events) - 10} daha")
+
+        if total_events == 0:
+            parts.append(f"\nSon {minutes} dakikada hicbir kategori olayi bulunamadi.")
+
+        parts.append(f"\nTOPLAM: {total_events} olay")
+        return True, "\n".join(parts), ""
+
+    except Exception as e:
+        return False, "", f"Log digest hatasi: {e}"
+
+
+def handle_log_stats(cmd: dict) -> tuple:
+    """Tum log dosyalarinin GERCEK boyut ve metadata bilgileri.
+    FUSE cache bypass: Windows'taki gercek dosya istatistiklerini dondurur.
+
+    Cikti:
+        Her log icin: isim, boyut, son guncelleme, satir sayisi (yaklasik)
+    """
+    try:
+        log_dir = USTAT_DIR / "logs"
+        results = []
+
+        # Ana loglar
+        main_logs = {
+            "api.log": USTAT_DIR / "api.log",
+            "startup.log": USTAT_DIR / "startup.log",
+            "electron.log": DESKTOP_DIR / "electron.log",
+            "agent.log": LOG_FILE,
+        }
+
+        for name, path in main_logs.items():
+            if path.exists():
+                stat = path.stat()
+                size_mb = stat.st_size / (1024 * 1024)
+                mtime = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+                results.append(f"  {name:30s} {size_mb:8.1f} MB  {mtime}")
+            else:
+                results.append(f"  {name:30s} --- YOK ---")
+
+        # Engine loglar (son 7 gun)
+        if log_dir.exists():
+            engine_logs = sorted(log_dir.glob("ustat_*.log"), reverse=True)[:7]
+            if engine_logs:
+                results.append("\nEngine Loglar (son 7 gun):")
+                for elog in engine_logs:
+                    stat = elog.stat()
+                    size_mb = stat.st_size / (1024 * 1024)
+                    mtime = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+                    results.append(f"  {elog.name:30s} {size_mb:8.1f} MB  {mtime}")
+
+        # Disk kullanimi
+        total_log_size = 0
+        if log_dir.exists():
+            for f in log_dir.glob("*.log"):
+                total_log_size += f.stat().st_size
+        for _, path in main_logs.items():
+            if path.exists():
+                total_log_size += path.stat().st_size
+
+        results.append(f"\nToplam log boyutu: {total_log_size / (1024*1024):.1f} MB")
+
+        return True, "LOG ISTATISTIKLERI (Windows gercek degerler)\n" + "=" * 60 + "\nAna Loglar:\n" + "\n".join(results), ""
+
+    except Exception as e:
+        return False, "", f"Log stats hatasi: {e}"
+
+
+def handle_log_export(cmd: dict) -> tuple:
+    """Log parcasini .agent/results/'a export et — Claude okuyabilsin.
+
+    Parametreler:
+        log (str): Log adi ('engine', 'api', 'startup', 'electron', 'agent')
+        lines (int): Son N satir (varsayilan 500)
+        search (str): Opsiyonel arama filtresi
+        output_file (str): Cikti dosya adi (varsayilan 'log_export.txt')
+        max_bytes (int): Maks okuma boyutu (varsayilan 10MB)
+
+    Cikti:
+        Export edilen dosyanin yolu ve boyutu
+    """
+    log_name = cmd.get("log", "engine")
+    lines_count = cmd.get("lines", 500)
+    search = cmd.get("search", "")
+    output_name = cmd.get("output_file", "log_export.txt")
+    max_bytes = cmd.get("max_bytes", 10 * 1024 * 1024)
+
+    all_paths = _get_all_log_paths()
+    if log_name not in all_paths:
+        available = ", ".join(all_paths.keys())
+        return False, "", f"Log bulunamadi: '{log_name}'. Mevcut: {available}"
+
+    log_path = all_paths[log_name]
+    if not log_path.exists():
+        return False, "", f"Log dosyasi mevcut degil: {log_path.name}"
+
+    try:
+        raw = _tail_file_binary(log_path, max_bytes)
+        all_lines = raw.splitlines()
+
+        real_size = log_path.stat().st_size
+        mtime = datetime.fromtimestamp(log_path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+
+        if search:
+            search_lower = search.lower()
+            filtered = [l for l in all_lines if search_lower in l.lower()]
+            selected = filtered[-lines_count:]
+            header = f"# Log Export: {log_path.name} | Arama: '{search}'\n# Boyut: {real_size/(1024*1024):.1f}MB | Guncelleme: {mtime}\n# Eslesen: {len(filtered)} satir, gosterilen: {len(selected)}\n"
+        else:
+            selected = all_lines[-lines_count:]
+            header = f"# Log Export: {log_path.name}\n# Boyut: {real_size/(1024*1024):.1f}MB | Guncelleme: {mtime}\n# Toplam: {len(all_lines)} satir, gosterilen: son {len(selected)}\n"
+
+        content = header + "\n".join(selected)
+
+        # .agent/results/ altina yaz
+        out_path = RESULT_DIR / output_name
+        RESULT_DIR.mkdir(parents=True, exist_ok=True)
+
+        # Atomic yazim
+        tmp_path = out_path.with_suffix(".tmp")
+        tmp_path.write_text(content, encoding="utf-8")
+        if out_path.exists():
+            out_path.unlink()
+        tmp_path.rename(out_path)
+
+        return True, f"Export basarili: {output_name} ({len(content)} byte, {len(selected)} satir)\nYol: .agent/results/{output_name}", ""
+
+    except Exception as e:
+        return False, "", f"Log export hatasi: {e}"
+
+
+# ═══════════════════════════════════════════════════════════════
+# FUSE BYPASS SİSTEMİ v1.0 — Tam Dosya Erişim Katmanı
+# ═══════════════════════════════════════════════════════════════
+# Log'lar dahil HER dosya için FUSE cache'i tamamen atlayan
+# dosya okuma/metadata sistemi. Claude (Linux VM) bu komutları
+# kullanarak Windows'taki gerçek dosyaya doğrudan erişir.
+#
+# Mimari:
+#   Claude (Linux VM) → ajan komutu → Windows dosya sistemi
+#                                          ↓
+#                                    gerçek dosya oku
+#                                          ↓
+#                           .agent/results/fresh_<hash>.txt
+#                                          ↓
+#                        Claude Read tool (yeni dosya = cache yok)
+
+import hashlib as _hashlib
+
+
+def _unique_result_name(prefix: str, path: str) -> str:
+    """Benzersiz sonuc dosyasi adi olustur.
+    Her seferinde yeni dosya = FUSE cache'te karsiligi yok = taze veri.
+    """
+    ts = int(time.time() * 1000)
+    h = _hashlib.md5(f"{path}{ts}".encode()).hexdigest()[:8]
+    return f"{prefix}_{h}.txt"
+
+
+def handle_fresh_file_read(cmd: dict) -> tuple:
+    """HERHANGİ bir dosyayi oku — FUSE cache bypass.
+    Dosyayi Windows'ta okur, benzersiz isimli yeni dosyaya yazar.
+    Claude Read tool ile bu yeni dosyayi okudugunda FUSE cache sorunu olmaz.
+
+    Parametreler:
+        path (str): USTAT dizini icinde dosya yolu (zorunlu)
+        lines (int): Son N satir (0 = tum dosya, varsayilan 0)
+        head_lines (int): Bastan N satir (tail ile birlikte kullanilamaz)
+        offset_bytes (int): Baslangic byte offset
+        max_bytes (int): Maks okuma boyutu (varsayilan 10MB)
+        encoding (str): Karakter kodlamasi (varsayilan utf-8)
+        output_file (str): Cikti dosya adi (opsiyonel, otomatik olusturulur)
+
+    Cikti:
+        Dosya icerigi + metadata + .agent/results/ yolu
+    """
+    filepath = cmd.get("path", "")
+    if not filepath:
+        return False, "", "Dosya yolu (path) zorunlu"
+
+    # Guvenlik: sadece USTAT_DIR altinda
+    target = (USTAT_DIR / filepath).resolve()
+    if not str(target).startswith(str(USTAT_DIR.resolve())):
+        return False, "", "Guvenlik: Sadece USTAT dizini icindeki dosyalar okunabilir."
+
+    if not target.exists():
+        return False, "", f"Dosya bulunamadi: {filepath}"
+
+    if target.is_dir():
+        return False, "", f"Bu bir dizin, dosya degil: {filepath}"
+
+    tail_lines = cmd.get("lines", 0)
+    head_lines = cmd.get("head_lines", 0)
+    offset_bytes = cmd.get("offset_bytes", 0)
+    max_bytes = cmd.get("max_bytes", 10 * 1024 * 1024)
+    encoding = cmd.get("encoding", "utf-8")
+    output_name = cmd.get("output_file", "")
+
+    try:
+        stat = target.stat()
+        real_size = stat.st_size
+        mtime = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+
+        # Dosya oku
+        if real_size > max_bytes and tail_lines == 0 and head_lines == 0:
+            # Buyuk dosya — son max_bytes oku
+            content = _tail_file_binary(target, max_bytes)
+        else:
+            with open(target, "r", encoding=encoding, errors="replace") as f:
+                if offset_bytes > 0:
+                    f.seek(offset_bytes)
+                content = f.read(max_bytes)
+
+        # Satir filtreleme
+        if tail_lines > 0:
+            lines_list = content.splitlines()
+            content = "\n".join(lines_list[-tail_lines:])
+        elif head_lines > 0:
+            lines_list = content.splitlines()
+            content = "\n".join(lines_list[:head_lines])
+
+        # Header bilgisi
+        header = f"# FRESH_FILE_READ: {target.name}\n# Boyut: {real_size} byte ({real_size/(1024*1024):.2f} MB)\n# Guncelleme: {mtime}\n# Yol: {filepath}\n"
+
+        full_content = header + "\n" + content
+
+        # Benzersiz dosyaya yaz
+        if not output_name:
+            output_name = _unique_result_name("file", filepath)
+
+        out_path = RESULT_DIR / output_name
+        RESULT_DIR.mkdir(parents=True, exist_ok=True)
+        tmp_path = out_path.with_suffix(".tmp")
+        tmp_path.write_text(full_content, encoding="utf-8")
+        if out_path.exists():
+            out_path.unlink()
+        tmp_path.rename(out_path)
+
+        return True, (
+            f"OK | {target.name} | {real_size} byte | {mtime}\n"
+            f"Dosya: .agent/results/{output_name} ({len(full_content)} byte)\n"
+            f"Claude icin: Read tool ile .agent/results/{output_name} dosyasini oku"
+        ), ""
+
+    except Exception as e:
+        return False, "", f"fresh_file_read hatasi: {e}"
+
+
+def handle_fresh_file_stat(cmd: dict) -> tuple:
+    """Bir dosyanin GERCEK metadata'sini dondur — FUSE cache bypass.
+
+    Parametreler:
+        path (str): Dosya yolu (zorunlu)
+
+    Cikti:
+        Gercek boyut, mtime, atime, ctime, izinler
+    """
+    filepath = cmd.get("path", "")
+    if not filepath:
+        return False, "", "Dosya yolu (path) zorunlu"
+
+    target = (USTAT_DIR / filepath).resolve()
+    if not str(target).startswith(str(USTAT_DIR.resolve())):
+        return False, "", "Guvenlik: Sadece USTAT dizini icinde."
+
+    if not target.exists():
+        return False, "", f"Dosya bulunamadi: {filepath}"
+
+    try:
+        stat = target.stat()
+        info = {
+            "path": filepath,
+            "name": target.name,
+            "size_bytes": stat.st_size,
+            "size_mb": round(stat.st_size / (1024 * 1024), 2),
+            "mtime": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+            "atime": datetime.fromtimestamp(stat.st_atime).strftime("%Y-%m-%d %H:%M:%S"),
+            "ctime": datetime.fromtimestamp(stat.st_ctime).strftime("%Y-%m-%d %H:%M:%S"),
+            "is_file": target.is_file(),
+            "is_dir": target.is_dir(),
+            "exists": True,
+        }
+        if target.is_file():
+            # Satir sayisi tahmini (son 1MB'dan)
+            try:
+                chunk = _tail_file_binary(target, 1024 * 1024)
+                lines_in_chunk = chunk.count("\n")
+                chunk_size = len(chunk.encode("utf-8"))
+                if chunk_size > 0 and stat.st_size > 0:
+                    estimated_lines = int(lines_in_chunk * (stat.st_size / chunk_size))
+                    info["estimated_lines"] = estimated_lines
+            except Exception:
+                pass
+
+        return True, json.dumps(info, indent=2, ensure_ascii=False), ""
+
+    except Exception as e:
+        return False, "", f"fresh_file_stat hatasi: {e}"
+
+
+def handle_fresh_dir_stat(cmd: dict) -> tuple:
+    """Bir dizindeki TUM dosyalarin GERCEK metadata'sini dondur.
+
+    Parametreler:
+        path (str): Dizin yolu (varsayilan kok dizin)
+        pattern (str): Glob deseni (varsayilan '*')
+        recursive (bool): Alt dizinleri de tara (varsayilan False)
+        sort_by (str): Siralama: 'name', 'size', 'mtime' (varsayilan 'name')
+
+    Cikti:
+        Her dosya icin: isim, boyut, mtime
+    """
+    dirpath = cmd.get("path", "")
+    pattern = cmd.get("pattern", "*")
+    recursive = cmd.get("recursive", False)
+    sort_by = cmd.get("sort_by", "name")
+
+    target = (USTAT_DIR / dirpath).resolve() if dirpath else USTAT_DIR
+    if not str(target).startswith(str(USTAT_DIR.resolve())):
+        return False, "", "Guvenlik: Sadece USTAT dizini icinde."
+
+    if not target.is_dir():
+        return False, "", f"Dizin bulunamadi: {dirpath}"
+
+    try:
+        if recursive:
+            items = list(target.rglob(pattern))
+        else:
+            items = list(target.glob(pattern))
+
+        entries = []
+        total_size = 0
+        for item in items[:500]:  # Maks 500 girdih
+            try:
+                stat = item.stat()
+                rel = item.relative_to(USTAT_DIR)
+                entry = {
+                    "path": str(rel),
+                    "name": item.name,
+                    "type": "dir" if item.is_dir() else "file",
+                    "size": stat.st_size,
+                    "mtime": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                }
+                entries.append(entry)
+                if item.is_file():
+                    total_size += stat.st_size
+            except Exception:
+                continue
+
+        # Siralama
+        if sort_by == "size":
+            entries.sort(key=lambda e: e["size"], reverse=True)
+        elif sort_by == "mtime":
+            entries.sort(key=lambda e: e["mtime"], reverse=True)
+        else:
+            entries.sort(key=lambda e: e["name"])
+
+        # Tablo formatinda cikti
+        lines = [f"DIZIN: {dirpath or '.'} | {len(entries)} girdi | Toplam: {total_size/(1024*1024):.1f} MB"]
+        lines.append("=" * 80)
+        lines.append(f"{'Tip':4s} {'Boyut':>12s}  {'Guncelleme':19s}  Yol")
+        lines.append("-" * 80)
+
+        for e in entries:
+            typ = "DIR" if e["type"] == "dir" else "FILE"
+            if e["size"] > 1024 * 1024:
+                sz = f"{e['size']/(1024*1024):.1f} MB"
+            elif e["size"] > 1024:
+                sz = f"{e['size']/1024:.1f} KB"
+            else:
+                sz = f"{e['size']} B"
+            lines.append(f"{typ:4s} {sz:>12s}  {e['mtime']}  {e['path']}")
+
+        return True, "\n".join(lines), ""
+
+    except Exception as e:
+        return False, "", f"fresh_dir_stat hatasi: {e}"
+
+
+def handle_fresh_file_search(cmd: dict) -> tuple:
+    """HERHANGİ bir dosyada arama yap — FUSE cache bypass.
+
+    Parametreler:
+        path (str): Dosya yolu (zorunlu)
+        pattern (str): Arama deseni (zorunlu)
+        regex (bool): Regex modu (varsayilan False)
+        context (int): Context satir sayisi (varsayilan 0)
+        max_results (int): Maks sonuc (varsayilan 50)
+        max_bytes (int): Maks okuma boyutu (varsayilan 10MB)
+
+    Cikti:
+        Eslesen satirlar + context
+    """
+    filepath = cmd.get("path", "")
+    pattern = cmd.get("pattern", "")
+    if not filepath or not pattern:
+        return False, "", "path ve pattern zorunlu"
+
+    target = (USTAT_DIR / filepath).resolve()
+    if not str(target).startswith(str(USTAT_DIR.resolve())):
+        return False, "", "Guvenlik: Sadece USTAT dizini icinde."
+
+    if not target.exists():
+        return False, "", f"Dosya bulunamadi: {filepath}"
+
+    use_regex = cmd.get("regex", False)
+    context_n = cmd.get("context", 0)
+    max_results = cmd.get("max_results", 50)
+    max_bytes = cmd.get("max_bytes", 10 * 1024 * 1024)
+
+    try:
+        raw = _tail_file_binary(target, max_bytes)
+        all_lines = raw.splitlines()
+
+        real_size = target.stat().st_size
+        mtime = datetime.fromtimestamp(target.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+
+        if use_regex:
+            try:
+                compiled = _re.compile(pattern, _re.IGNORECASE)
+            except _re.error as e:
+                return False, "", f"Regex hatasi: {e}"
+            match_indices = [i for i, line in enumerate(all_lines) if compiled.search(line)]
+        else:
+            pattern_lower = pattern.lower()
+            match_indices = [i for i, line in enumerate(all_lines) if pattern_lower in line.lower()]
+
+        header = f"[{target.name} | {real_size/(1024*1024):.1f}MB | {mtime}]"
+
+        if not match_indices:
+            return True, f"{header}\nArama: '{pattern}' — 0 sonuc", ""
+
+        # Context ile topla
+        result_lines = []
+        seen = set()
+        for idx in match_indices[-max_results:]:
+            start = max(0, idx - context_n)
+            end = min(len(all_lines), idx + context_n + 1)
+            for i in range(start, end):
+                if i not in seen:
+                    seen.add(i)
+                    marker = ">>>" if i == idx else "   "
+                    result_lines.append((i, f"{marker} [{i+1}] {all_lines[i]}"))
+
+        result_lines.sort(key=lambda x: x[0])
+        output = "\n".join(line for _, line in result_lines)
+
+        return True, f"{header}\nArama: '{pattern}' — {len(match_indices)} sonuc (son {min(max_results, len(match_indices))} gosteriliyor)\n\n{output}", ""
+
+    except Exception as e:
+        return False, "", f"fresh_file_search hatasi: {e}"
+
+
+def handle_fresh_grep(cmd: dict) -> tuple:
+    """Birden fazla dosyada arama — FUSE cache bypass grep.
+
+    Parametreler:
+        pattern (str): Arama deseni (zorunlu)
+        path (str): Aranacak dizin (varsayilan kok)
+        glob (str): Dosya filtresi (varsayilan '*.py')
+        regex (bool): Regex modu (varsayilan False)
+        max_results (int): Dosya basi maks sonuc (varsayilan 10)
+        recursive (bool): Alt dizinleri de tara (varsayilan True)
+
+    Cikti:
+        Her eslesen dosya icin satirlar
+    """
+    search_pattern = cmd.get("pattern", "")
+    if not search_pattern:
+        return False, "", "Arama deseni (pattern) zorunlu"
+
+    dirpath = cmd.get("path", "")
+    file_glob = cmd.get("glob", "*.py")
+    use_regex = cmd.get("regex", False)
+    max_results = cmd.get("max_results", 10)
+    recursive = cmd.get("recursive", True)
+
+    target_dir = (USTAT_DIR / dirpath).resolve() if dirpath else USTAT_DIR
+    if not str(target_dir).startswith(str(USTAT_DIR.resolve())):
+        return False, "", "Guvenlik: Sadece USTAT dizini icinde."
+
+    try:
+        if recursive:
+            files = list(target_dir.rglob(file_glob))
+        else:
+            files = list(target_dir.glob(file_glob))
+
+        if use_regex:
+            compiled = _re.compile(search_pattern, _re.IGNORECASE)
+        else:
+            compiled = None
+
+        output_parts = []
+        total_matches = 0
+        files_matched = 0
+
+        for fpath in sorted(files)[:200]:  # Maks 200 dosya
+            if not fpath.is_file():
+                continue
+            try:
+                content = fpath.read_text(encoding="utf-8", errors="replace")
+                lines = content.splitlines()
+
+                if compiled:
+                    matches = [(i+1, line) for i, line in enumerate(lines) if compiled.search(line)]
+                else:
+                    pattern_lower = search_pattern.lower()
+                    matches = [(i+1, line) for i, line in enumerate(lines) if pattern_lower in line.lower()]
+
+                if matches:
+                    rel = fpath.relative_to(USTAT_DIR)
+                    files_matched += 1
+                    total_matches += len(matches)
+                    section = [f"--- {rel} ({len(matches)} eslesti) ---"]
+                    for line_num, line_text in matches[:max_results]:
+                        section.append(f"  [{line_num}] {line_text[:200]}")
+                    if len(matches) > max_results:
+                        section.append(f"  ... +{len(matches) - max_results} daha")
+                    output_parts.append("\n".join(section))
+
+            except Exception:
+                continue
+
+        if not output_parts:
+            return True, f"'{search_pattern}' icin {len(files)} dosyada sonuc bulunamadi.", ""
+
+        summary = f"GREP: '{search_pattern}' | {file_glob} | {files_matched}/{len(files)} dosyada {total_matches} eslesti\n\n"
+        return True, summary + "\n\n".join(output_parts), ""
+
+    except Exception as e:
+        return False, "", f"fresh_grep hatasi: {e}"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1626,6 +2462,18 @@ HANDLERS = {
     "trade_history": handle_trade_history,
     "mt5_check": handle_mt5_check,
     "agent_info": handle_agent_info,
+    # v3.0 — Log Yönetim Sistemi (FUSE cache bypass)
+    "fresh_engine_log": handle_fresh_engine_log,
+    "search_all_logs": handle_search_all_logs,
+    "log_digest": handle_log_digest,
+    "log_stats": handle_log_stats,
+    "log_export": handle_log_export,
+    # v4.0 — FUSE Bypass Sistemi (tam dosya erisim)
+    "fresh_file_read": handle_fresh_file_read,
+    "fresh_file_stat": handle_fresh_file_stat,
+    "fresh_dir_stat": handle_fresh_dir_stat,
+    "fresh_file_search": handle_fresh_file_search,
+    "fresh_grep": handle_fresh_grep,
 }
 
 
