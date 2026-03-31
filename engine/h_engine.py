@@ -391,10 +391,10 @@ class HEngine:
         if ref_price > 0:
             entry_prim = self._price_to_prim(entry_price, ref_price)
             if direction == "BUY":
-                stop_prim = entry_prim - self._primnet_faz1_stop
+                stop_prim = entry_prim - self._primnet_trailing
                 target_prim = self._primnet_target
             else:
-                stop_prim = entry_prim + self._primnet_faz1_stop
+                stop_prim = entry_prim + self._primnet_trailing
                 target_prim = -self._primnet_target
             suggested_sl = self._prim_to_price(stop_prim, ref_price)
             suggested_tp = self._prim_to_price(target_prim, ref_price)
@@ -839,10 +839,10 @@ class HEngine:
             if ref_price and ref_price > 0:
                 entry_prim = self._price_to_prim(mt5_entry, ref_price)
                 if hp.direction == "BUY":
-                    stop_prim = entry_prim - self._primnet_faz1_stop
+                    stop_prim = entry_prim - self._primnet_trailing
                     target_prim = self._primnet_target
                 else:
-                    stop_prim = entry_prim + self._primnet_faz1_stop
+                    stop_prim = entry_prim + self._primnet_trailing
                     target_prim = -self._primnet_target
                 hp.current_sl = self._prim_to_price(stop_prim, ref_price)
                 hp.current_tp = self._prim_to_price(target_prim, ref_price)
@@ -1493,17 +1493,8 @@ class HEngine:
             # Yeni primler hesapla
             entry_prim = self._price_to_prim(hp.entry_price, new_ref)
 
-            # Mevcut faz'ı belirle (trailing_active ise Faz 2 olabilir)
-            # Trailing mesafesini mevcut duruma göre hesapla
-            if hp.trailing_active:
-                # Trailing aktifse, mevcut SL'den faz belirle
-                current_price_approx = self._prim_to_price(entry_prim, new_ref)
-                # Faz 2 mesafesi kullan (pozisyon zaten kârda ve trailing aktif)
-                trailing_dist = self._primnet_faz2_trailing
-                faz = 2
-            else:
-                trailing_dist = self._primnet_faz1_stop
-                faz = 1
+            # Trailing mesafe SABİT (faz ayrımı yok)
+            trailing_dist = self._primnet_trailing
 
             # Yeni SL hesapla
             if hp.direction == "BUY":
