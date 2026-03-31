@@ -75,6 +75,7 @@
 - #97 — PRİMNET sabit trailing: Faz 1/Faz 2 ayrımı kaldırıldı, her zaman 1.5 prim sabit trailing, stop > giriş olduğunda kilitli kâr otomatik (9020e43)
 
 ### Fixed
+- #103 — OĞUL 3 katmanlı pipeline: SE3 binary→sürekli strength, confluence ≥50 kapı→çarpan (min 20), yön 2/3→1/3, R:R sert blok→penalty, risk_multiplier lot çarpanı (116cc5e, c755cf2, 04dc627, b0baa87)
 - #99 — 16 kritik sessiz mayın temizliği: haber filtresi VİOP ilgililik kontrolü, H1 iloc/label index, vade CRITICAL log, risk fail-safe, api.js client fix, 5 silent pass→logger (536ccb7, 57989f2)
 - #100 — Engine başlatma resilience: MT5 retry 15sn×20 döngü, smoke test toleransı (kısıtlı mod), API os._exit kaldırıldı→yeniden başlatma (59d81cd)
 - #101 — Açılış hızı optimizasyonu: wait_for_port 1s→0.2s polling, cleanup sleep'ler kısaltıldı, watchdog 30→10sn, splash 10→4sn, Vite poll 500→150ms (6f62507)
