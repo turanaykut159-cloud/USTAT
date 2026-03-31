@@ -390,7 +390,8 @@ async def broadcast(message: dict) -> None:
     for ws in snapshot:
         try:
             await ws.send_text(text)
-        except Exception:
+        except Exception as exc:
+            logger.debug(f"WebSocket send hatası, bağlantı kaldırılıyor: {exc}")
             disconnected.append(ws)
 
     if disconnected:

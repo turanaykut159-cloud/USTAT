@@ -310,8 +310,8 @@ class Baba:
         self._spread_history: dict[str, deque[float]] = {
             s: deque(maxlen=self._spread_history_len) for s in WATCHED_SYMBOLS
         }
-        # USD/TRY ring buffer
-        self._usdtry_history: list[float] = []
+        # USD/TRY ring buffer (deque: thread-safe append + auto truncation)
+        self._usdtry_history: deque[float] = deque(maxlen=self._spread_history_len)
 
         # ── Risk durumu (bellekte, her cycle kontrol edilir) ──────────
         self._risk_state: dict[str, Any] = {
@@ -348,6 +348,7 @@ class Baba:
         self._kill_switch_details: dict[str, Any] = {}
         self._killed_symbols: set[str] = set()
         self._ks_lock = threading.Lock()  # Kill-switch atomik geçiş kilidi (Anayasa 4.3)
+        self._rs_lock = threading.Lock()  # Risk-state atomik okuma/yazma kilidi
         # L3 kapanışta kapatılamayan pozisyon ticket'ları (API'ye iletilir)
         self._last_l3_failed_tickets: list[int] = []
         # v5.8/CEO-FAZ1: SL/TP eklenememiş + kapatılamamış korumasız pozisyonlar
@@ -1822,11 +1823,12 @@ class Baba:
         Args:
             trade_type: İşlem tipi ("auto" veya "manual"). Varsayılan "auto".
         """
-        self._risk_state["daily_trade_count"] += 1
-        if trade_type == "manual":
-            self._risk_state["daily_manual_trade_count"] += 1
-        else:  # default is "auto"
-            self._risk_state["daily_auto_trade_count"] += 1
+        with self._rs_lock:
+            self._risk_state["daily_trade_count"] += 1
+            if trade_type == "manual":
+                self._risk_state["daily_manual_trade_count"] += 1
+            else:  # default is "auto"
+                self._risk_state["daily_auto_trade_count"] += 1
         logger.debug(
             f"Günlük işlem sayısı: {self._risk_state['daily_trade_count']} "
             f"({trade_type})"
@@ -2977,8 +2979,6 @@ class Baba:
             return
         if tick is not None and tick.bid > 0:
             self._usdtry_history.append(tick.bid)
-            if len(self._usdtry_history) > self._spread_history_len:
-                self._usdtry_history = self._usdtry_history[-self._spread_history_len:]
 
     def _usdtry_5m_move_pct(self) -> float:
         """USD/TRY son ~5dk hareket yüzdesi."""

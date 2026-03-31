@@ -956,6 +956,8 @@ class Ogul:
                 m5_volume = df_m5["volume"].values.astype(np.float64)
                 m5_open = df_m5["open"].values.astype(np.float64) if "open" in df_m5.columns else m5_close.copy()
 
+                if len(m5_close) == 0:
+                    raise ValueError("m5_close boş array")
                 verdict = se3_generate_signal(
                     m5_open, m5_high, m5_low, m5_close, m5_volume,
                     current_price=float(m5_close[-1]),
@@ -1041,6 +1043,8 @@ class Ogul:
         #  M5 verisiyle beslenir, symbol + news_bridge ile tam kaynak
         # ═══════════════════════════════════════════════════════════════
         try:
+            if len(m5_close) == 0:
+                raise ValueError("m5_close boş array")
             _regime_str = regime.regime_type.value if regime else ""
             verdict: SignalVerdict = se3_generate_signal(
                 m5_open, m5_high, m5_low, m5_close, m5_volume,

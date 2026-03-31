@@ -207,8 +207,8 @@ class DataPipeline:
                             severity="INFO",
                             action="auto_reactivate",
                         )
-                except Exception:
-                    pass  # Hâlâ erişilemiyor, sonraki cycle'da dene
+                except Exception as exc:
+                    logger.debug(f"Sembol reaktivasyon başarısız [{sym}]: {exc}")
 
         total = (datetime.now() - t_start).total_seconds()
         if total > 3.0:

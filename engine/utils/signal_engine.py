@@ -469,7 +469,7 @@ def _source_volume_intelligence(
 
     # ── 1. OBV Divergence (0-8) ───────────────────────────────────
     obv_div = obv_divergence(close, volume, lookback=20)
-    div_val = float(obv_div[-1]) if not np.isnan(obv_div[-1]) else 0.0
+    div_val = float(obv_div[-1]) if len(obv_div) > 0 and not np.isnan(obv_div[-1]) else 0.0
 
     if div_val > 0.05:
         buy_score += min(div_val * 8.0, 8.0)  # Bullish divergence
@@ -480,7 +480,7 @@ def _source_volume_intelligence(
 
     # ── 2. Volume Momentum (0-7) ──────────────────────────────────
     vol_mom = volume_momentum(close, volume, 14)
-    vm_val = float(vol_mom[-1]) if not np.isnan(vol_mom[-1]) else 0.0
+    vm_val = float(vol_mom[-1]) if len(vol_mom) > 0 and not np.isnan(vol_mom[-1]) else 0.0
 
     # Normalize: vm / atr
     vm_norm = vm_val / atr_val if atr_val > 0 else 0.0

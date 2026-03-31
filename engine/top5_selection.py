@@ -342,6 +342,8 @@ class Top5Selector:
         ):
             return 50.0
 
+        if len(close) == 0:
+            return 50.0
         price = close[-1]
         if price <= 0:
             return 50.0
@@ -507,6 +509,8 @@ class Top5Selector:
 
         atr_arr = calc_atr(high, low, close, TECH_ATR_PERIOD)
         atr_val = last_valid(atr_arr)
+        if len(close) == 0:
+            return 50.0
         price = close[-1]
 
         if atr_val is None or price <= 0:

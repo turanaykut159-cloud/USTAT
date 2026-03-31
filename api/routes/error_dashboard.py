@@ -599,8 +599,8 @@ async def resolve_error_group(req: ResolveRequest):
                 message_prefix=req.message_prefix,
                 by=req.resolved_by,
             )
-        except Exception:
-            pass  # DB'ye yazıldı, tracker opsiyonel
+        except Exception as exc:
+            logger.warning(f"Error tracker resolve hatası: {exc}")
 
     return ResolveResponse(success=True, message=f"{req.error_type} çözümlendi")
 
@@ -654,7 +654,7 @@ async def resolve_all_errors(req: ResolveRequest | None = None, resolved_by: str
     if tracker:
         try:
             tracker.resolve_all(by=by)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(f"Error tracker resolve_all hatası: {exc}")
 
     return ResolveAllResponse(success=True, resolved_count=resolved_count)
