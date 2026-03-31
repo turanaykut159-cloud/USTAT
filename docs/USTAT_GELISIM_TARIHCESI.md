@@ -72,6 +72,7 @@
 - #83 — 10.003 kombinasyonlu stres testi: BABA/OĞUL/H-Engine/MT5/Manuel/Top5/DB/Entegrasyon (a36f3d0)
 
 ### Changed
+- #97 — PRİMNET sabit trailing: Faz 1/Faz 2 ayrımı kaldırıldı, her zaman 1.5 prim sabit trailing, stop > giriş olduğunda kilitli kâr otomatik (9020e43)
 - #75 — Vade geçişi GCM paraleli: EXPIRY_NO_NEW_TRADE_DAYS/EXPIRY_CLOSE_DAYS=1→0, gözlem süresi kaldırıldı (2026-03-26)
 - #80 — H-Engine: ATR/profit trailing kaldırıldı, PRİMNET tek pozisyon yönetim modu (6a38f64)
 - #80 — OĞUL EOD hibrit kapatma kaldırıldı — her motor kendi işini yapacak (6a38f64)
