@@ -25,7 +25,7 @@
     "consecutive_loss_limit": 3,
     "cooldown_hours": 4,
     "fake_signal_threshold": 5,
-    "baseline_date": "2026-03-19 00:00",
+    "baseline_date": "2026-03-31 12:30",
     "master_floating_loss_pct": 0.05,
     "sltp_max_retries": 3,
     "close_max_retries": 3
@@ -156,9 +156,7 @@
     "sl_atr_mult": 2.0,
     "tp_atr_mult": 2.0,
     "primnet": {
-      "faz1_stop_prim": 1.5,
-      "faz2_activation_prim": 2.0,
-      "faz2_trailing_prim": 1.0,
+      "trailing_prim": 1.5,
       "target_prim": 9.5
     }
   }

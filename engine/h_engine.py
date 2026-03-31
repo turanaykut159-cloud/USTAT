@@ -149,10 +149,9 @@ class HEngine:
 
         # ── PRİMNET — Prim Bazlı Net Emir Takip Sistemi ─────────
         # Tek pozisyon yönetim modu: prim cinsinden SL/TP, trailing, hedef
+        # Trailing mesafe HER ZAMAN SABİT (faz ayrımı yok)
         primnet_cfg = hybrid_cfg.get("primnet", {})
-        self._primnet_faz1_stop: float = primnet_cfg.get("faz1_stop_prim", 1.5)
-        self._primnet_faz2_activation: float = primnet_cfg.get("faz2_activation_prim", 2.0)
-        self._primnet_faz2_trailing: float = primnet_cfg.get("faz2_trailing_prim", 1.0)
+        self._primnet_trailing: float = primnet_cfg.get("trailing_prim", 1.5)
         self._primnet_target: float = primnet_cfg.get("target_prim", 9.5)
 
         sltp_mode = "NATIVE (MT5)" if self._native_sltp else "SOFTWARE (H-Oğul)"
@@ -161,8 +160,7 @@ class HEngine:
             f"daily_limit={self._config_daily_limit}, "
             f"SL/TP fallback={self._sl_atr_mult}×ATR/{self._tp_atr_mult}×ATR, "
             f"SL/TP modu={sltp_mode}, "
-            f"PRİMNET (stop={self._primnet_faz1_stop}, "
-            f"faz2={self._primnet_faz2_activation}→{self._primnet_faz2_trailing}, "
+            f"PRİMNET (trailing={self._primnet_trailing}, "
             f"hedef=±{self._primnet_target})"
         )
 
@@ -1295,9 +1293,7 @@ class HEngine:
     ) -> float | None:
         """PRİMNET prim bazlı trailing SL hesapla.
 
-        Faz 1 (kâr < faz2_activation): trailing mesafe = faz1_stop (1.5 prim)
-        Faz 2 (kâr ≥ faz2_activation): trailing mesafe = faz2_trailing (1.0 prim)
-
+        Trailing mesafe HER ZAMAN SABİT (1.5 prim).
         Stop sadece kâr yönünde hareket eder, asla geri gelmez.
 
         Args:
@@ -1334,13 +1330,8 @@ class HEngine:
         else:
             profit_prim = entry_prim - current_prim
 
-        # Faz belirle → trailing mesafe
-        if profit_prim >= self._primnet_faz2_activation:
-            trailing_dist = self._primnet_faz2_trailing  # 1.0 prim
-            faz = 2
-        else:
-            trailing_dist = self._primnet_faz1_stop  # 1.5 prim
-            faz = 1
+        # Trailing mesafe SABİT (faz ayrımı yok)
+        trailing_dist = self._primnet_trailing
 
         # Stop prim hesapla
         if hp.direction == "BUY":
@@ -1353,7 +1344,7 @@ class HEngine:
         logger.debug(
             f"PRİMNET [{hp.symbol}] t={hp.ticket}: "
             f"giriş_prim={entry_prim:.2f} güncel_prim={current_prim:.2f} "
-            f"kâr_prim={profit_prim:.2f} faz={faz} "
+            f"kâr_prim={profit_prim:.2f} trailing={trailing_dist} "
             f"stop_prim={stop_prim:.2f} → SL={new_sl:.4f}"
         )
 

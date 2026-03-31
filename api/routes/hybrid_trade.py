@@ -108,9 +108,7 @@ async def get_hybrid_status():
 
     # PRİMNET config
     primnet_cfg = PrimnetConfig(
-        faz1_stop_prim=h_engine._primnet_faz1_stop,
-        faz2_activation_prim=h_engine._primnet_faz2_activation,
-        faz2_trailing_prim=h_engine._primnet_faz2_trailing,
+        trailing_prim=h_engine._primnet_trailing,
         target_prim=h_engine._primnet_target,
     )
 

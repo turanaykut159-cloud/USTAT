@@ -558,9 +558,7 @@ class HybridPositionItem(BaseModel):
 
 class PrimnetConfig(BaseModel):
     """PRİMNET yapılandırma bilgisi (frontend hesaplama için)."""
-    faz1_stop_prim: float = 1.5
-    faz2_activation_prim: float = 2.0
-    faz2_trailing_prim: float = 1.0
+    trailing_prim: float = 1.5
     target_prim: float = 9.5
 
 

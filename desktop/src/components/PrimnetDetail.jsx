@@ -3,7 +3,7 @@
  *
  * Hibrit pozisyona tıklandığında açılır.
  * -10'dan +10'a kadar tüm prim kademelerini gösteren dinamik tablo.
- * Aktif kademe satırı yanıp söner, faz renkleri, kilitli kâr, açıklama kolonu.
+ * Sabit 1.5 prim trailing, kilitli kâr (stop > giriş olduğunda), açıklama kolonu.
  */
 
 import React, { useMemo, useRef, useEffect } from 'react';
@@ -45,37 +45,42 @@ function fmtMoneyFull(val) {
 
 function buildExplanation(row, data, cfg) {
   const { prim, statusClass, isEntry, isStop, isTarget } = row;
-  const { entryPrim, faz, trailingDist } = data;
+  const { entryPrim } = data;
   const dir = data.direction;
+  const trail = cfg.trailing_prim;
 
   if (statusClass === 'unreachable') {
-    return `Pozisyon ${cfg.target_prim - 0.5}'te kapatıldı, buraya ulaşılamaz`;
+    return `+${cfg.target_prim} hedefinde kapatıldı, buraya ulaşılamaz`;
   }
   if (isTarget || statusClass === 'target') {
-    return `Tavana 0.5 kala → ZORUNLU KAPANIŞ`;
+    return `HEDEF +${cfg.target_prim} → İŞLEMİ KAPAT`;
   }
-  if (statusClass === 'trailing' && row.fazLabel === 'Faz 2') {
+  if (statusClass === 'locked') {
     const stopPrim = dir === 'BUY'
-      ? prim - cfg.faz2_trailing_prim
-      : prim + cfg.faz2_trailing_prim;
+      ? prim - trail
+      : prim + trail;
     const lockedPrim = dir === 'BUY'
       ? stopPrim - entryPrim
       : entryPrim - stopPrim;
-    return `Stop ${fmtPrim(stopPrim)}'da. ${lockedPrim.toFixed(1)} prim kâr kilitli`;
+    return `Stop ${fmtPrim(stopPrim)} > Giriş → ${lockedPrim.toFixed(1)} prim kâr kilitli`;
   }
-  if (statusClass === 'trailing' && row.fazLabel === 'Faz 1') {
-    const primDist = dir === 'BUY'
-      ? prim - entryPrim
-      : entryPrim - prim;
-    if (primDist < cfg.faz2_activation_prim && primDist > 0) {
-      return `Stop -${cfg.faz1_stop_prim}'da. Kârda ama kilitli kâr yok henüz`;
-    }
+  if (statusClass === 'breakeven') {
+    const stopPrim = dir === 'BUY'
+      ? prim - trail
+      : prim + trail;
+    return `Stop ${fmtPrim(stopPrim)} = Giriş → Başabaş`;
+  }
+  if (statusClass === 'trailing') {
+    const stopPrim = dir === 'BUY'
+      ? prim - trail
+      : prim + trail;
+    return `Stop ${fmtPrim(stopPrim)} < Giriş → Kilitli kâr yok`;
   }
   if (isEntry) {
-    return `Pozisyon açıldı. Stop: -${cfg.faz1_stop_prim}`;
+    return `Pozisyon açıldı. Stop: ${fmtPrim(entryPrim - trail)} (-${trail} prim)`;
   }
   if (statusClass === 'open') {
-    return 'Stop henüz tetiklenmedi';
+    return `Zararda. Stop ${fmtPrim(entryPrim - trail)}'da`;
   }
   if (isStop || statusClass === 'stop') {
     return 'ZARAR DURDUR tetiklendi → KAPAT';
@@ -103,14 +108,14 @@ function buildLadder(pos, cfg) {
     ? currentPrim - entryPrim
     : entryPrim - currentPrim;
 
-  const faz = profitPrim >= cfg.faz2_activation_prim ? 2 : 1;
-  const trailingDist = faz === 2 ? cfg.faz2_trailing_prim : cfg.faz1_stop_prim;
+  // Trailing mesafe SABİT (faz ayrımı yok)
+  const trailingDist = cfg.trailing_prim;
 
   // Merdiven kademeleri:
   // 1) Tam sayılar: -10 ile +10
   // 2) Hedef kapanış: ±9.5
   // 3) Giriş primi (tam değeri, yuvarlanmadan)
-  // 4) Stop primi (giriş ± 1.5, tam değeri)
+  // 4) Stop primi (giriş ± trailing, tam değeri)
   // 5) Güncel fiyat (dinamik, kademeler arasına eklenir)
   const stepSet = new Set();
 
@@ -124,10 +129,10 @@ function buildLadder(pos, cfg) {
   const entryRounded = Math.round(entryPrim * 10) / 10;
   stepSet.add(entryRounded);
 
-  // 4. Stop primi — giriş ± faz1_stop_prim (1.5), 0.1 hassasiyet
+  // 4. Stop primi — giriş ± trailing_prim, 0.1 hassasiyet
   const stopPrimVal = dir === 'BUY'
-    ? Math.round((entryPrim - cfg.faz1_stop_prim) * 10) / 10
-    : Math.round((entryPrim + cfg.faz1_stop_prim) * 10) / 10;
+    ? Math.round((entryPrim - trailingDist) * 10) / 10
+    : Math.round((entryPrim + trailingDist) * 10) / 10;
   stepSet.add(stopPrimVal);
 
   // 5. Güncel fiyatın dinamik satırı
@@ -166,26 +171,29 @@ function buildLadder(pos, cfg) {
       if (prim >= cfg.target_prim) {
         if (Math.abs(prim - cfg.target_prim) < 0.25) {
           status = 'KAPAT'; statusClass = 'target'; fazLabel = 'Hedef';
-          lockedTL = (cfg.target_prim - trailingDist - entryPrim) * onePrimTL;
-          if (lockedTL < 0) lockedTL = 0;
         } else {
           status = 'ULAŞILAMAZ'; statusClass = 'unreachable';
         }
-      } else if (prim > entryPrim && prim - entryPrim >= cfg.faz2_activation_prim) {
-        status = 'TRAİLİNG'; statusClass = 'trailing'; fazLabel = 'Faz 2';
-        stopLevel = fmtPrim(prim - cfg.faz2_trailing_prim);
-        lockedTL = (prim - cfg.faz2_trailing_prim - entryPrim) * onePrimTL;
-        if (lockedTL < 0) lockedTL = 0;
-      } else if (prim > entryPrim) {
-        status = 'TRAİLİNG'; statusClass = 'trailing'; fazLabel = 'Faz 1';
-        stopLevel = fmtPrim(prim - cfg.faz1_stop_prim);
+      } else if (prim > entryPrim && !isEntry) {
+        // Kâr bölgesi — trailing SABİT
+        const sp = prim - trailingDist;
+        stopLevel = fmtPrim(sp);
+        const locked = sp - entryPrim;
+        if (Math.abs(locked) < 0.01) {
+          status = 'BREAKEVEN'; statusClass = 'breakeven';
+        } else if (locked > 0) {
+          status = 'KÂR KİLİTLİ'; statusClass = 'locked';
+          lockedTL = locked * onePrimTL;
+        } else {
+          status = 'TRAİLİNG'; statusClass = 'trailing';
+        }
       } else if (isEntry) {
         status = 'GİRİŞ'; statusClass = 'entry';
-        stopLevel = fmtPrim(entryPrim - cfg.faz1_stop_prim);
+        stopLevel = fmtPrim(entryPrim - trailingDist);
       } else if (prim < entryPrim && prim >= slPrim) {
-        status = 'AÇIK'; statusClass = 'open'; fazLabel = 'Faz 1';
-      } else if (isStop || (prim < slPrim && prim >= entryPrim - cfg.faz1_stop_prim - 0.25)) {
-        status = 'STOP'; statusClass = 'stop'; fazLabel = 'Faz 1';
+        status = 'AÇIK'; statusClass = 'open';
+      } else if (isStop || (prim < slPrim && prim >= entryPrim - trailingDist - 0.25)) {
+        status = 'STOP'; statusClass = 'stop';
         stopLevel = fmtPrim(slPrim);
       } else if (prim < slPrim) {
         status = 'DIŞARDA'; statusClass = 'outside';
@@ -195,26 +203,29 @@ function buildLadder(pos, cfg) {
       if (prim <= -cfg.target_prim) {
         if (Math.abs(prim + cfg.target_prim) < 0.25) {
           status = 'KAPAT'; statusClass = 'target'; fazLabel = 'Hedef';
-          lockedTL = (entryPrim - (-cfg.target_prim) - trailingDist) * onePrimTL;
-          if (lockedTL < 0) lockedTL = 0;
         } else {
           status = 'ULAŞILAMAZ'; statusClass = 'unreachable';
         }
-      } else if (prim < entryPrim && entryPrim - prim >= cfg.faz2_activation_prim) {
-        status = 'TRAİLİNG'; statusClass = 'trailing'; fazLabel = 'Faz 2';
-        stopLevel = fmtPrim(prim + cfg.faz2_trailing_prim);
-        lockedTL = (entryPrim - prim - cfg.faz2_trailing_prim) * onePrimTL;
-        if (lockedTL < 0) lockedTL = 0;
-      } else if (prim < entryPrim) {
-        status = 'TRAİLİNG'; statusClass = 'trailing'; fazLabel = 'Faz 1';
-        stopLevel = fmtPrim(prim + cfg.faz1_stop_prim);
+      } else if (prim < entryPrim && !isEntry) {
+        // Kâr bölgesi — trailing SABİT
+        const sp = prim + trailingDist;
+        stopLevel = fmtPrim(sp);
+        const locked = entryPrim - sp;
+        if (Math.abs(locked) < 0.01) {
+          status = 'BREAKEVEN'; statusClass = 'breakeven';
+        } else if (locked > 0) {
+          status = 'KÂR KİLİTLİ'; statusClass = 'locked';
+          lockedTL = locked * onePrimTL;
+        } else {
+          status = 'TRAİLİNG'; statusClass = 'trailing';
+        }
       } else if (isEntry) {
         status = 'GİRİŞ'; statusClass = 'entry';
-        stopLevel = fmtPrim(entryPrim + cfg.faz1_stop_prim);
+        stopLevel = fmtPrim(entryPrim + trailingDist);
       } else if (prim > entryPrim && prim <= slPrim) {
-        status = 'AÇIK'; statusClass = 'open'; fazLabel = 'Faz 1';
-      } else if (isStop || (prim > slPrim && prim <= entryPrim + cfg.faz1_stop_prim + 0.25)) {
-        status = 'STOP'; statusClass = 'stop'; fazLabel = 'Faz 1';
+        status = 'AÇIK'; statusClass = 'open';
+      } else if (isStop || (prim > slPrim && prim <= entryPrim + trailingDist + 0.25)) {
+        status = 'STOP'; statusClass = 'stop';
         stopLevel = fmtPrim(slPrim);
       } else if (prim > slPrim) {
         status = 'DIŞARDA'; statusClass = 'outside';
@@ -229,7 +240,7 @@ function buildLadder(pos, cfg) {
 
   return {
     rows, entryPrim, currentPrim, slPrim, tpPrim,
-    profitPrim, faz, trailingDist, onePrimTL, direction: dir,
+    profitPrim, trailingDist, onePrimTL, direction: dir,
   };
 }
 
@@ -337,12 +348,6 @@ export default function PrimnetDetail({ position, primnetConfig, onClose }) {
             </span>
           </div>
           <div className="pn-sum-card">
-            <span className="pn-sum-label">Faz</span>
-            <span className={`pn-sum-value ${hasData && data.faz === 2 ? 'pn-faz2-glow' : ''}`}>
-              {hasData ? data.faz : '—'}
-            </span>
-          </div>
-          <div className="pn-sum-card">
             <span className="pn-sum-label">K/Z</span>
             <span className={`pn-sum-value pn-sum-big ${pos.pnl >= 0 ? 'pn-profit' : 'pn-loss'}`}>
               {fmtMoneyFull((pos.pnl || 0) + (pos.swap || 0))}
@@ -367,13 +372,9 @@ export default function PrimnetDetail({ position, primnetConfig, onClose }) {
 
         {/* ── Kurallar satırı ──────────────────── */}
         <div className="pn-rules">
-          <span className="pn-rule-item pn-rule-stop">Stop: {cfg.faz1_stop_prim} prim</span>
+          <span className="pn-rule-item pn-rule-trail">Trailing: {cfg.trailing_prim} prim (SABİT)</span>
           <span className="pn-rule-sep">|</span>
-          <span className="pn-rule-item pn-rule-faz2">Faz 2: +{cfg.faz2_activation_prim} prim</span>
-          <span className="pn-rule-sep">|</span>
-          <span className="pn-rule-item pn-rule-trail">Trailing: {cfg.faz2_trailing_prim} prim</span>
-          <span className="pn-rule-sep">|</span>
-          <span className="pn-rule-item pn-rule-target">Hedef: {cfg.target_prim} prim</span>
+          <span className="pn-rule-item pn-rule-target">Hedef: ±{cfg.target_prim} prim</span>
         </div>
 
         {/* ── Prim merdiveni ───────────────────── */}
@@ -387,7 +388,6 @@ export default function PrimnetDetail({ position, primnetConfig, onClose }) {
                   <th className="pn-th-pnl">K/Z (TL)</th>
                   <th className="pn-th-stop">STOP SEV.</th>
                   <th className="pn-th-status">DURUM</th>
-                  <th className="pn-th-faz">FAZ</th>
                   <th className="pn-th-locked">KİLİTLİ KÂR</th>
                   <th className="pn-th-desc">AÇIKLAMA</th>
                 </tr>
@@ -419,11 +419,8 @@ export default function PrimnetDetail({ position, primnetConfig, onClose }) {
                       <td className={`pn-col-status pn-st--${r.statusClass}`}>
                         {r.status}
                       </td>
-                      <td className={`pn-col-faz ${r.fazLabel === 'Faz 2' ? 'pn-faz2-text' : ''}`}>
-                        {r.fazLabel}
-                      </td>
                       <td className="pn-col-locked">
-                        {r.lockedTL > 0 ? fmtMoney(r.lockedTL) : r.statusClass === 'trailing' ? '0' : ''}
+                        {r.lockedTL > 0 ? fmtMoney(r.lockedTL) : (r.statusClass === 'trailing' || r.statusClass === 'breakeven') ? '0' : ''}
                       </td>
                       <td className="pn-col-desc">{explanation}</td>
                     </tr>
