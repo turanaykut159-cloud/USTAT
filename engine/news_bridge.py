@@ -93,33 +93,36 @@ LOT_REDUCTION: dict[str, float] = {
     "LOW": 0.75,
 }
 
-# Sembol → şirket/sektör eşleştirme sözlüğü (VİOP kontratları)
+# Sembol → şirket eşleştirme sözlüğü (VİOP kontratları)
+# v5.9.1: Genel sektör kelimeleri kaldırıldı — yanlış eşleşme yapıyordu
+# (ör: "perakende" → DE Perakende Satışlar haberi F_BIMAS'ı tetikliyordu)
+# Sadece şirket adı ve ticker kalmalı.
 SYMBOL_KEYWORDS: dict[str, list[str]] = {
     "F_AKBNK": ["akbank", "akbnk"],
     "F_ARCLK": ["arçelik", "arcelik", "arclk"],
-    "F_ASELS": ["aselsan", "asels", "savunma"],
-    "F_BIMAS": ["bim", "bimas", "perakende"],
-    "F_EKGYO": ["emlak konut", "ekgyo", "gayrimenkul"],
-    "F_EREGL": ["ereğli", "eregli", "eregl", "çelik", "demir"],
+    "F_ASELS": ["aselsan", "asels"],
+    "F_BIMAS": ["bim", "bimas"],
+    "F_EKGYO": ["emlak konut", "ekgyo"],
+    "F_EREGL": ["ereğli", "eregli", "eregl"],
     "F_GARAN": ["garanti", "garan", "bbva"],
     "F_GUBRF": ["gübre", "gubre", "gubrf"],
     "F_HALKB": ["halkbank", "halkb"],
     "F_ISCTR": ["iş bankası", "isbank", "isctr", "is bankasi"],
     "F_KCHOL": ["koç", "koc", "kchol"],
-    "F_KONTR": ["konya", "kontr", "kontrat"],
-    "F_PGSUS": ["pegasus", "pgsus", "havacılık"],
+    "F_KONTR": ["konya", "kontr"],
+    "F_PGSUS": ["pegasus", "pgsus"],
     "F_SAHOL": ["sabancı", "sahol"],
-    "F_SISE": ["şişecam", "sisecam", "sise", "cam"],
-    "F_TAVHL": ["tav", "tavhl", "havalimanı"],
-    "F_TCELL": ["turkcell", "tcell", "telekom"],
-    "F_THYAO": ["thy", "thyao", "türk hava", "turk hava", "havayolu"],
-    "F_TKFEN": ["tekfen", "tkfen", "inşaat"],
-    "F_TOASO": ["tofaş", "toaso", "otomotiv"],
-    "F_TUPRS": ["tüpraş", "tupras", "tuprs", "rafineri", "petrol"],
+    "F_SISE": ["şişecam", "sisecam", "sise"],
+    "F_TAVHL": ["tav havalimanı", "tavhl"],
+    "F_TCELL": ["turkcell", "tcell"],
+    "F_THYAO": ["thy", "thyao", "türk hava", "turk hava"],
+    "F_TKFEN": ["tekfen", "tkfen"],
+    "F_TOASO": ["tofaş", "toaso"],
+    "F_TUPRS": ["tüpraş", "tupras", "tuprs"],
     "F_YKBNK": ["yapı kredi", "ykbnk", "yapi kredi"],
     # Endeks kontratları
-    "F_XU030": ["bist30", "xu030", "borsa", "endeks", "bist"],
-    "F_USDTRY": ["dolar", "usdtry", "kur", "döviz"],
+    "F_XU030": ["bist30", "xu030"],
+    "F_USDTRY": ["dolar", "usdtry"],
 }
 
 # Genel (tüm sembolü etkileyen) anahtar kelimeler
@@ -1063,6 +1066,11 @@ class NewsBridge:
         """
         warnings = []
         for event in self.get_active_events():
+            # v5.9.1: VİOP ilgisizlik filtresi — OLAY'da da kullanılan
+            # currency bazlı filtre burada da uygulanır. EUR/JPY/GBP vb.
+            # sektörel haberleri VİOP kontratlarına L1 tetiklememeli.
+            if not self._is_viop_relevant_for_olay(event):
+                continue
             if event.sentiment_score < self._negative_threshold:
                 severity = "CRITICAL" if event.severity in ("CRITICAL", "HIGH") else "WARNING"
                 for symbol in event.symbols:

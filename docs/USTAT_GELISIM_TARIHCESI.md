@@ -55,7 +55,7 @@
 
 ---
 
-## [5.9.0] — 2026-03-28 / 2026-03-30
+## [5.9.0] — 2026-03-28 / 2026-03-31
 
 ### Added
 - #90 — Log Yönetim Sistemi v3.0: FUSE cache bypass — 5 yeni ajan komutu (fresh_engine_log, search_all_logs, log_digest, log_stats, log_export), Claude Bridge v4.0, log_reader.py yardımcı scripti
@@ -88,6 +88,12 @@
 - #85 — Hibrit İşlem Paneli sürükle-bırak: react-grid-layout → @dnd-kit — 5 kart sürüklenebilir sıralama, localStorage kalıcılık, sıfırla butonu
 
 ### Fixed
+- #91 — Vade geçişi otomasyonu: `_resolve_symbols()` en yeni vadeden activate eder — vade son günü otomatik yeni kontrata geçiş (mt5_bridge.py)
+- #92 — Haber kaynaklı L1 kontrat engeli günlük sıfırlama: `_reset_daily()` önceki günün L1'ini kaldırır (baba.py)
+- #93 — VİOP ilgisizlik filtresi: `get_news_warnings()` currency kontrolü + SYMBOL_KEYWORDS genel sektör kelimeleri temizlendi (news_bridge.py)
+- #94 — OLAY rejimi vade kontrolü: `_check_olay()` EXPIRY_DAYS=0 ile `<=` → `<` operatörü (baba.py)
+- #95 — Pozisyon görünürlük: `_to_base()` prefix fallback + `_resolve_symbols()` çoklu visible'da max seçimi (mt5_bridge.py)
+- #96 — Başlatıcı: shutdown.signal koşulsuz temizleme + API timeout 30→15sn (start_ustat.py)
 - #88 — Confluence strateji-bazlı skorlama: trend_follow/breakout sinyallerinde RSI>70 ve direnç yakınlığı cezaları kaldırıldı — 184 sinyal/0 işlem sorununu çözer
 - #89 — PrimnetDetail.jsx Faz 2 açıklama satırları düzeltmesi + theme.css PRİMNET modal stilleri iyileştirmesi
 - #76 — VİOP ilgisizlik filtresi: USD haberlerinin Türk hisselerinde yanlış OLAY rejimi tetiklemesi (2026-03-27)

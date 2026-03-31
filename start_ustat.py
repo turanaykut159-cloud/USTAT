@@ -206,7 +206,7 @@ def start_api():
     except Exception:
         pass
 
-    return wait_for_port(8000, "API", 30)
+    return wait_for_port(8000, "API", 15)
 
 
 def start_vite():
@@ -528,18 +528,14 @@ def main():
     log(f"Python: {sys.executable}")
     log(f"Watchdog: {'AKTIF' if is_watchdog else 'DEVRE DISI'}")
 
-    # v5.7.2: shutdown.signal koşullu temizlik
-    # Taze signal (< 120sn) = kullanıcı az önce güvenli çıkış yaptı → başlatma
-    # Eski signal (>= 120sn) = ertesi gün başlatma → temizle, devam et
+    # v5.9.1: shutdown.signal → her başlatmada koşulsuz temizle
+    # Signal'in amacı watchdog'u durdurmak (check_shutdown_signal() bunu yapar)
+    # Kullanıcı kısayoldan başlattığında bu KASITLİ bir başlatmadır → engellenmemeli
     try:
         if os.path.exists(SHUTDOWN_SIGNAL_FILE):
             signal_age = time.time() - os.path.getmtime(SHUTDOWN_SIGNAL_FILE)
-            if signal_age < 120:
-                log(f"shutdown.signal taze ({signal_age:.0f}sn) — kullanici kasitli kapatti, baslatma iptal")
-                return
-            else:
-                os.remove(SHUTDOWN_SIGNAL_FILE)
-                log(f"Eski shutdown.signal temizlendi ({signal_age:.0f}sn)")
+            os.remove(SHUTDOWN_SIGNAL_FILE)
+            log(f"shutdown.signal temizlendi ({signal_age:.0f}sn)")
     except Exception:
         pass
 

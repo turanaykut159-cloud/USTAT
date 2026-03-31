@@ -268,8 +268,12 @@ class MT5Bridge:
         """WATCHED_SYMBOLS'daki base isimleri MT5'teki gerçek ada eşle.
 
         VİOP kontrat adları vade soneki içerir (ör. F_THYAO0226).
-        Her base için visible (aktif/front-month) kontratı bulur.
-        Bulunamazsa en kısa soneke sahip olanı seçer.
+        Her base için en yeni vadeden başlayarak symbol_select ile aktive eder.
+        İlk başarılı aktive olan kontrat seçilir.
+
+        v5.9.1: Vade geçişi otomasyonu — vade son günü eski kontrat
+        (ör. 0326) activate edilemezse otomatik olarak yeni vadeye (0426)
+        geçer. Seçim + aktivasyon tek döngüde yapılır.
         """
         try:
             all_symbols = self._safe_call(mt5.symbols_get)
@@ -299,28 +303,55 @@ class MT5Bridge:
                     mt5_name = exact[0].name
                     new_symbol_map[base] = mt5_name
                     new_reverse_map[mt5_name] = base
+                    # Tam eşleşmeyi de activate et
+                    try:
+                        self._safe_call(mt5.symbol_select, mt5_name, True)
+                    except (TimeoutError, Exception):
+                        pass
                     logger.info(f"Sembol eşleme: {base} → {mt5_name} (tam eşleşme)")
                 else:
                     logger.warning(f"Sembol bulunamadı: {base}")
                 continue
 
-            # Visible olanları tercih et (aktif kontrat)
-            visible = [s for s in candidates if s.visible]
-            chosen = None
+            # v5.9.1: Kontratları en yeni vadeden eskiye sırala
+            # Vade soneki MMYY formatında (0426 > 0326) — string sıralaması yeterli
+            sorted_candidates = sorted(candidates, key=lambda s: s.name, reverse=True)
 
-            if len(visible) == 1:
-                chosen = visible[0]
-            elif len(visible) > 1:
-                # Birden fazla visible varsa en kısa isimli olanı seç (yakın vade)
-                chosen = min(visible, key=lambda s: len(s.name))
-            else:
-                # Hiçbiri visible değil — en kısa sonekli olanı seç
-                chosen = min(candidates, key=lambda s: len(s.name))
+            # En yeniden başlayarak symbol_select ile dene
+            # İlk başarılı aktivasyon = aktif işlem kontratı
+            chosen = None
+            for candidate in sorted_candidates:
+                try:
+                    activated = self._safe_call(
+                        mt5.symbol_select, candidate.name, True
+                    )
+                except (TimeoutError, Exception):
+                    activated = False
+
+                if activated:
+                    chosen = candidate
+                    logger.info(
+                        f"Sembol eşleme: {base} → {candidate.name} "
+                        f"(visible={candidate.visible}, activated=True)"
+                    )
+                    break
+                else:
+                    logger.debug(
+                        f"Sembol activate başarısız: {base} → {candidate.name} "
+                        f"(visible={candidate.visible}) — sonraki vade deneniyor"
+                    )
+
+            if not chosen:
+                # Hiçbiri activate edilemedi — en yeniyi kullan (veri çekme için)
+                chosen = sorted_candidates[0]
+                logger.warning(
+                    f"Sembol eşleme (fallback): {base} → {chosen.name} "
+                    f"(hiçbir vade activate edilemedi)"
+                )
 
             mt5_name = chosen.name
             new_symbol_map[base] = mt5_name
             new_reverse_map[mt5_name] = base
-            logger.info(f"Sembol eşleme: {base} → {mt5_name} (visible={chosen.visible})")
 
         # USDTRY — BABA şok kontrolü için gerekli
         # GCM'de sembol adı farklı olabilir (ör. USDTRY_YAKINVADE)
@@ -329,9 +360,21 @@ class MT5Bridge:
             if "USDTRY" in s.name.upper()
         ]
         if usdtry_candidates:
-            usdtry_sym = min(usdtry_candidates, key=lambda s: len(s.name))
-            new_symbol_map["USDTRY"] = usdtry_sym.name
-            logger.info(f"Sembol eşleme: USDTRY → {usdtry_sym.name}")
+            # En yeniden eskiye dene
+            usdtry_sorted = sorted(usdtry_candidates, key=lambda s: s.name, reverse=True)
+            usdtry_chosen = None
+            for usdtry_sym in usdtry_sorted:
+                try:
+                    if self._safe_call(mt5.symbol_select, usdtry_sym.name, True):
+                        usdtry_chosen = usdtry_sym
+                        break
+                except (TimeoutError, Exception):
+                    continue
+            if not usdtry_chosen:
+                usdtry_chosen = usdtry_sorted[0]
+                logger.warning(f"USDTRY activate edilemedi — fallback: {usdtry_chosen.name}")
+            new_symbol_map["USDTRY"] = usdtry_chosen.name
+            logger.info(f"Sembol eşleme: USDTRY → {usdtry_chosen.name}")
         else:
             logger.warning("USDTRY sembolü bulunamadı — şok kontrolü pasif kalacak")
 
@@ -358,9 +401,17 @@ class MT5Bridge:
 
         Eşleme yoksa None döndürür (izlenmeyen sembol).
         v5.8/CEO-FAZ2: _map_lock ile thread-safe.
+        v5.9.1: Fallback — vade soneki farklı olabilir (ör. map 0326, pozisyon 0426)
         """
         with self._map_lock:
-            return self._reverse_map.get(mt5_symbol)
+            base = self._reverse_map.get(mt5_symbol)
+            if base:
+                return base
+            # Fallback: prefix eşleşmesi ile base çıkar
+            for watched in WATCHED_SYMBOLS:
+                if mt5_symbol.upper().startswith(watched.upper()):
+                    return watched
+            return None
 
     def _is_watched(self, mt5_symbol: str) -> bool:
         """MT5 sembolü izlenen kontratlardan biri mi?
@@ -431,25 +482,9 @@ class MT5Bridge:
                     continue
 
                 # Dinamik sembol çözümleme (base → MT5 gerçek ad)
+                # v5.9.1: _resolve_symbols() artık sembol aktivasyonunu da yapıyor
+                # (seçim + activate tek döngüde — vade geçişi otomatik)
                 self._resolve_symbols()
-
-                # Çözümlenen sembollerin görünürlüklerini aç
-                for base in WATCHED_SYMBOLS:
-                    mt5_name = self._to_mt5(base)
-                    try:
-                        if not self._safe_call(mt5.symbol_select, mt5_name, True):
-                            logger.warning(f"Sembol etkinleştirilemedi: {base} → {mt5_name}")
-                    except (TimeoutError, Exception):
-                        logger.warning(f"Sembol etkinleştirme timeout: {base} → {mt5_name}")
-
-                # USDTRY — BABA şok kontrolü için gerekli
-                usdtry_mt5 = self._to_mt5("USDTRY")
-                try:
-                    usdtry_ok = self._safe_call(mt5.symbol_select, usdtry_mt5, True)
-                except (TimeoutError, Exception):
-                    usdtry_ok = False
-                if not usdtry_ok:
-                    logger.warning(f"USDTRY ({usdtry_mt5}) MarketWatch'a eklenemedi — şok kontrolü pasif kalacak")
 
                 self._connected = True
                 self._last_heartbeat = _time.monotonic()

@@ -829,9 +829,11 @@ class Baba:
             )
 
         # 2. Vade bitiş — tam gün OLAY (OLAY_FULL_DAY_TRIGGERS)
+        # v5.9.1: EXPIRY_DAYS=0 ise vade kontrolü tamamen devre dışı
+        # (top5_selection.py ile tutarlı — oturum #83 düzeltmesinin baba.py karşılığı)
         for expiry in VIOP_EXPIRY_DATES:
             days = (expiry - today).days
-            if 0 <= days <= EXPIRY_DAYS:
+            if 0 <= days < EXPIRY_DAYS:
                 return {
                     "reason": f"Vade bitiş: {expiry} ({days} gün kaldı)",
                     "trigger": "expiry",
@@ -1257,6 +1259,13 @@ class Baba:
             in ("daily_loss", "consecutive_loss")
         ):
             self._clear_kill_switch("Günlük sıfırlama — L2 kaldırıldı")
+
+        # v5.9.1: Haber kaynaklı L1 kontrat engeli de yeni günde temizlenir
+        # (önceki günün haberi bugünkü ticareti engellemememeli)
+        if self._kill_switch_level == KILL_SWITCH_L1 and self._killed_symbols:
+            self._clear_kill_switch(
+                "Günlük sıfırlama — L1 kontrat engelleri kaldırıldı"
+            )
 
         # Yeni gün: üst üste kayıp sayacını ve cooldown'u sıfırla
         # (önceki günün consecutive loss'u bugünü engellemesini önle)
