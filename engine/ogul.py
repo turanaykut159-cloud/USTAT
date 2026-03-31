@@ -738,6 +738,7 @@ class Ogul:
 
         df = self.db.get_bars(symbol, "M15", limit=MIN_BARS_M15)
         if df is None or df.empty or len(df) < MIN_BARS_M15:
+            logger.debug(f"Voting atlandı [{symbol}]: M15 verisi yetersiz ({len(df) if df is not None and not df.empty else 0}/{MIN_BARS_M15} bar)")
             return result
 
         close = df["close"].values.astype(np.float64)
@@ -933,6 +934,8 @@ class Ogul:
 
         # ── Kaynak 2: H1 trend filtresi ──────────────────────────
         h1_df = self.db.get_bars(symbol, "H1", limit=70)
+        if h1_df is None or h1_df.empty or len(h1_df) < 30:
+            logger.debug(f"H1 trend filtresi atlandı [{symbol}]: yetersiz veri ({len(h1_df) if h1_df is not None and not h1_df.empty else 0}/30 bar)")
         if h1_df is not None and not h1_df.empty and len(h1_df) >= 30:
             h1_close = h1_df["close"].values.astype(np.float64)
             h1_ema_f = ema(h1_close, TF_EMA_FAST)
@@ -969,8 +972,8 @@ class Ogul:
                     votes["BUY"] += 1
                 elif verdict.direction == "SELL":
                     votes["SELL"] += 1
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(f"SE3 yön hatası [{symbol}]: {exc}")
 
         # ── Konsensüs: v5.9.2 — 1/3 bile yeterli, strength'e yansır ──
         # 3/3 = güçlü, 2/3 = normal, 1/3 = zayıf (ama yine de yön var)
@@ -1017,7 +1020,7 @@ class Ogul:
         # ── v5.7: M5 verisi SE2 sinyal tetiklemesi için ────────────────
         df_m5 = self.db.get_bars(symbol, "M5", limit=MIN_BARS_M5)
         if df_m5 is None or df_m5.empty or len(df_m5) < MIN_BARS_M5:
-            logger.debug(f"{symbol}: M5 verisi yetersiz ({len(df_m5) if df_m5 is not None else 0} bar)")
+            logger.warning(f"{symbol}: M5 verisi yetersiz ({len(df_m5) if df_m5 is not None else 0}/{MIN_BARS_M5} bar) — sinyal üretilemiyor")
             return None
 
         m5_close = df_m5["close"].values.astype(np.float64)

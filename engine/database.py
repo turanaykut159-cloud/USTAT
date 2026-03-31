@@ -253,8 +253,10 @@ class Database:
         )
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA synchronous=FULL")   # v5.8.1: WAL veri kaybı önlemi
+        self._conn.execute("PRAGMA synchronous=NORMAL")  # WAL modunda NORMAL güvenlidir ve yazma performansını artırır
         self._conn.execute("PRAGMA foreign_keys=ON")
+        self._conn.execute("PRAGMA cache_size=-64000")   # 64MB cache (varsayılan ~2MB)
+        self._conn.execute("PRAGMA mmap_size=268435456") # 256MB memory-mapped I/O
 
         # Bütünlük kontrolü — bozuk DB erken tespit
         self._check_integrity()
@@ -985,13 +987,13 @@ class Database:
                VALUES (?,?,?,?,?,?,?,?,?)""",
             (
                 snap.get("timestamp", self._now()),
-                snap["equity"], snap["floating_pnl"], snap["daily_pnl"],
+                snap.get("equity", 0.0), snap.get("floating_pnl", 0.0), snap.get("daily_pnl", 0.0),
                 positions or "[]",
                 snap.get("regime"), snap.get("drawdown"), snap.get("margin_usage"),
                 snap.get("balance", 0.0),
             ),
         )
-        logger.debug(f"Risk snapshot kaydedildi: equity={snap['equity']:.2f}")
+        logger.debug(f"Risk snapshot kaydedildi: equity={snap.get('equity', 0.0):.2f}")
 
     def get_risk_snapshots(
         self,
@@ -1218,6 +1220,9 @@ class Database:
             entries: Her biri → date, time, rank, symbol, score, regime
                      içeren sözlük listesi (genelde 5 adet).
         """
+        if not entries:
+            logger.warning("insert_top5 boş liste ile çağrıldı — kayıt yok")
+            return
         rows = [
             (
                 e["date"], e["time"], e["rank"],

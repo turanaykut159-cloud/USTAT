@@ -55,9 +55,12 @@
 
 ---
 
-## [5.9.0] — 2026-03-28 / 2026-03-31
+## [5.9.0] — 2026-03-28 / 2026-04-01
 
 ### Added
+- #104 — Veri Yönetim Sistemi iyileştirme: OHLCV validasyon katmanı (Katman 1), veri bayatlık tespiti (freshness monitor — FRESH/STALE/SOURCE_FAILURE ayrımı), SQLite PRAGMA optimizasyonu (synchronous=NORMAL, cache_size=64MB, mmap_size=256MB)
+- #104 — Retention düzeltme: M1/M5 bar temizliği eklendi, hard-coded retention→config'den okuma, trade_archive_days config desteği
+- #104 — 7 sessiz hata düzeltmesi: OĞUL SE3 `except: pass`→loglama, M5 yetersiz veri DEBUG→WARNING, H1/Voting atlama logları, insert_top5 boş liste koruması, insert_risk_snapshot güvenli .get() erişimi, insert_bars dönüş değeri kontrolü
 - #90 — Log Yönetim Sistemi v3.0: FUSE cache bypass — 5 yeni ajan komutu (fresh_engine_log, search_all_logs, log_digest, log_stats, log_export), Claude Bridge v4.0, log_reader.py yardımcı scripti
 - #55 — ÜSTAT Beyin Merkezi sayfası: trade kategorileri, kontrat profilleri, rejim analizi, hata atfetme (3d75fe3)
 - #56 — Haber entegrasyonu: MT5 Calendar → NewsBridge → BABA/OĞUL erken uyarı sistemi (2026-03-23)

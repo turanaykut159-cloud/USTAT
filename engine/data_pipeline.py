@@ -75,6 +75,9 @@ MAX_CONSECUTIVE_MISSING: int = 3
 # normal olmasına rağmen 3+ missing bar eşiğini aşıp sahte deaktivasyon tetikler.
 DEACTIVATION_TIMEFRAMES: frozenset[str] = frozenset({"M15", "H1"})
 
+# Veri bayatlık eşikleri (timeframe aralığının kaç katı → STALE)
+STALENESS_MULTIPLIER: float = 3.0
+
 
 # ── Yardımcı veri sınıfı ────────────────────────────────────────────
 @dataclass
@@ -126,6 +129,11 @@ class DataPipeline:
         self._last_gap_event: dict[str, datetime] = {}
         _GAP_EVENT_COOLDOWN_SEC: float = 300.0  # 5 dakika
 
+        # Veri bayatlık izleme — sembol+timeframe bazında son bar zamanı
+        self._last_bar_timestamps: dict[str, datetime] = {}
+        # Bayatlık uyarı throttle — aynı sembol için 5dk'da 1 uyarı
+        self._staleness_warned: dict[str, datetime] = {}
+
         # Peak equity baseline doğrulaması
         self._validate_peak_equity()
 
@@ -161,6 +169,114 @@ class DataPipeline:
             return True
         age = (datetime.now() - self._cache_time).total_seconds()
         return age > max_age_seconds
+
+    # ── Veri bayatlık tespiti ────────────────────────────────────────
+    def check_data_freshness(self, symbol: str, timeframe: str, df: pd.DataFrame) -> str:
+        """Bar verisinin tazeliğini kontrol et.
+
+        Returns:
+            "FRESH" — veri güncel,
+            "STALE" — veri bayat (son bar beklenen aralıktan eski),
+            "SOURCE_FAILURE" — MT5 kaynak arızası (boş veri + MT5 heartbeat kontrol).
+        """
+        if df.empty:
+            # MT5 bağlantı kontrolü — boş veri kaynak arızası mı yoksa gerçekten veri yok mu?
+            try:
+                tick = self._mt5.get_tick(symbol)
+                if tick is None or tick.bid <= 0:
+                    return "SOURCE_FAILURE"
+            except Exception:
+                return "SOURCE_FAILURE"
+            return "STALE"
+
+        # Son bar zamanını kontrol et
+        ts_col = "timestamp" if "timestamp" in df.columns else "time"
+        try:
+            last_ts = pd.Timestamp(df[ts_col].iloc[-1])
+            if last_ts.tzinfo is not None:
+                last_ts = last_ts.tz_localize(None)
+            elapsed = (datetime.now() - last_ts.to_pydatetime()).total_seconds()
+        except Exception:
+            return "FRESH"  # Zaman parse edilemezse varsayılan taze kabul et
+
+        expected = EXPECTED_INTERVALS.get(timeframe, 60)
+        cache_key = f"{symbol}_{timeframe}"
+        self._last_bar_timestamps[cache_key] = datetime.now()
+
+        if elapsed > expected * STALENESS_MULTIPLIER:
+            # Throttle: aynı sembol için 5dk'da 1 uyarı
+            now = datetime.now()
+            last_warn = self._staleness_warned.get(cache_key)
+            if last_warn is None or (now - last_warn).total_seconds() > 300:
+                self._staleness_warned[cache_key] = now
+                logger.warning(
+                    f"Bayat veri [{symbol}/{timeframe}]: son bar {elapsed:.0f}sn önce "
+                    f"(beklenen ≤{expected * STALENESS_MULTIPLIER:.0f}sn)"
+                )
+            return "STALE"
+
+        return "FRESH"
+
+    def validate_ohlcv(self, df: pd.DataFrame, symbol: str, timeframe: str) -> pd.DataFrame:
+        """OHLCV verisini doğrula — endüstri standardı Katman 1.
+
+        Kontroller:
+            1. High ≥ Low
+            2. Close [Low, High] aralığında
+            3. Open [Low, High] aralığında
+            4. Volume ≥ 0
+            5. Fiyat > 0 (sıfır fiyat reddi)
+
+        Geçersiz satırlar kaldırılır ve loglanır.
+
+        Returns:
+            Doğrulanmış DataFrame (geçersiz satırlar çıkarılmış).
+        """
+        if df.empty:
+            return df
+
+        initial_len = len(df)
+
+        # Gerekli sütunlar var mı?
+        required = {"open", "high", "low", "close"}
+        if not required.issubset(df.columns):
+            return df
+
+        mask_valid = pd.Series(True, index=df.index)
+
+        # 1. High ≥ Low
+        mask_hl = df["high"] >= df["low"]
+        bad_hl = (~mask_hl).sum()
+        mask_valid &= mask_hl
+
+        # 2-3. Open ve Close [Low, High] aralığında
+        mask_open = (df["open"] >= df["low"]) & (df["open"] <= df["high"])
+        mask_close = (df["close"] >= df["low"]) & (df["close"] <= df["high"])
+        bad_oc = ((~mask_open) | (~mask_close)).sum()
+        mask_valid &= mask_open & mask_close
+
+        # 4. Fiyat > 0
+        mask_price = (df["open"] > 0) & (df["high"] > 0) & (df["low"] > 0) & (df["close"] > 0)
+        bad_price = (~mask_price).sum()
+        mask_valid &= mask_price
+
+        # 5. Volume ≥ 0 (volume sütunu varsa)
+        vol_col = "tick_volume" if "tick_volume" in df.columns else ("volume" if "volume" in df.columns else None)
+        bad_vol = 0
+        if vol_col:
+            mask_vol = df[vol_col] >= 0
+            bad_vol = (~mask_vol).sum()
+            mask_valid &= mask_vol
+
+        removed = initial_len - mask_valid.sum()
+        if removed > 0:
+            logger.warning(
+                f"OHLCV validasyon [{symbol}/{timeframe}]: {removed}/{initial_len} bar reddedildi "
+                f"(H<L:{bad_hl}, OC_aralık:{bad_oc}, fiyat≤0:{bad_price}, vol<0:{bad_vol})"
+            )
+            df = df[mask_valid].reset_index(drop=True)
+
+        return df
 
     # ── public: ana cycle ────────────────────────────────────────────
     def run_cycle(self) -> None:
@@ -237,8 +353,23 @@ class DataPipeline:
 
         try:
             df = self._mt5.get_bars(symbol, mt5_tf, count)
+
+            # Bayatlık tespiti — "veri yok" vs "kaynak arızası" ayrımı
+            freshness = self.check_data_freshness(symbol, timeframe, df)
+            if freshness == "SOURCE_FAILURE":
+                logger.error(f"Kaynak arızası [{symbol}/{timeframe}]: MT5 bağlantısı yok veya tick alınamıyor")
+                return pd.DataFrame()
             if df.empty:
-                logger.warning(f"Boş bar verisi [{symbol}/{timeframe}]")
+                if freshness == "STALE":
+                    logger.warning(f"Bayat/boş bar verisi [{symbol}/{timeframe}] — MT5 bağlı ama veri yok")
+                else:
+                    logger.warning(f"Boş bar verisi [{symbol}/{timeframe}]")
+                return pd.DataFrame()
+
+            # OHLCV validasyon — endüstri standardı Katman 1
+            df = self.validate_ohlcv(df, symbol, timeframe)
+            if df.empty:
+                logger.warning(f"Tüm bar'lar validasyondan geçemedi [{symbol}/{timeframe}]")
                 return pd.DataFrame()
 
             # Temizle
@@ -255,10 +386,12 @@ class DataPipeline:
                 df = calculate_indicators(df)
 
             # DB'ye yaz
-            self._db.insert_bars(symbol, timeframe, df)
+            rows_written = self._db.insert_bars(symbol, timeframe, df)
+            if rows_written == 0 and len(df) > 0:
+                logger.warning(f"insert_bars başarısız [{symbol}/{timeframe}]: {len(df)} bar gönderildi ama 0 yazıldı")
 
             logger.debug(
-                f"Bars OK [{symbol}/{timeframe}]: {len(df)} bar"
+                f"Bars OK [{symbol}/{timeframe}]: {len(df)} bar, {rows_written} yazıldı, tazelik={freshness}"
             )
             return df
 

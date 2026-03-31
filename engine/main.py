@@ -1222,15 +1222,19 @@ class Engine:
         self._last_cleanup_date = today
 
         now = datetime.now()
-        bars_cutoff = (now - timedelta(days=30)).isoformat()
-        events_cutoff = (now - timedelta(days=60)).isoformat()
-        snaps_cutoff = (now - timedelta(days=90)).isoformat()
+        # Config'den retention süreleri oku (hard-coded fallback ile)
+        bars_days = self.config.get("retention.bars_days", 30)
+        events_days = self.config.get("retention.events_error_days", 90)
+        snaps_days = self.config.get("retention.risk_snapshots_days", 30)
+        bars_cutoff = (now - timedelta(days=bars_days)).isoformat()
+        events_cutoff = (now - timedelta(days=events_days)).isoformat()
+        snaps_cutoff = (now - timedelta(days=snaps_days)).isoformat()
 
         try:
             from engine.mt5_bridge import WATCHED_SYMBOLS
             bars_del = 0
             for sym in WATCHED_SYMBOLS:
-                for tf in ("M15", "H1"):
+                for tf in ("M1", "M5", "M15", "H1"):
                     bars_del += self.db.delete_bars(sym, tf, bars_cutoff)
             events_del = self.db.delete_events(events_cutoff)
             snaps_del = self.db.delete_risk_snapshots(snaps_cutoff)
@@ -1243,7 +1247,8 @@ class Engine:
 
             # v5.8/CEO-FAZ2: Trade arşivleme + WAL checkpoint
             # 90 günden eski kapanmış trade'leri archive.db'ye taşı
-            maintenance = self.db.run_maintenance(archive_days=90)
+            archive_days = self.config.get("retention.trade_archive_days", 180)
+            maintenance = self.db.run_maintenance(archive_days=archive_days)
             if maintenance["archived_trades"] > 0:
                 logger.info(
                     f"DB bakım: {maintenance['archived_trades']} trade arşivlendi, "
