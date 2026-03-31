@@ -971,20 +971,24 @@ class Ogul:
         except Exception:
             pass
 
-        # ── Konsensüs: 2/3 çoğunluk ─────────────────────────────
-        if votes["BUY"] >= 2:
+        # ── Konsensüs: v5.9.2 — 1/3 bile yeterli, strength'e yansır ──
+        # 3/3 = güçlü, 2/3 = normal, 1/3 = zayıf (ama yine de yön var)
+        buy_v = votes["BUY"]
+        sell_v = votes["SELL"]
+
+        if buy_v > sell_v and buy_v >= 1:
             logger.debug(
-                f"Yön konsensüsü [{symbol}]: BUY ({votes['BUY']}/3)"
+                f"Yön konsensüsü [{symbol}]: BUY ({buy_v}/3)"
             )
             return "BUY"
-        elif votes["SELL"] >= 2:
+        elif sell_v > buy_v and sell_v >= 1:
             logger.debug(
-                f"Yön konsensüsü [{symbol}]: SELL ({votes['SELL']}/3)"
+                f"Yön konsensüsü [{symbol}]: SELL ({sell_v}/3)"
             )
             return "SELL"
 
         logger.debug(
-            f"Yön konsensüsü yok [{symbol}]: BUY={votes['BUY']}, SELL={votes['SELL']}"
+            f"Yön konsensüsü yok [{symbol}]: BUY={buy_v}, SELL={sell_v}"
         )
         return "NOTR"
 
@@ -1188,22 +1192,27 @@ class Ogul:
                 logger.warning(f"[PA] Confluence hatası [{symbol}]: {exc}")
                 conf_score = 50.0  # Hata durumunda geçir (sinyal kaybetme)
 
-            # ── Confluence gate: skor > 50 → GEÇ ──────────────────
-            if conf_score >= CONFLUENCE_PASS_SCORE:
-                logger.info(
-                    f"Sinyal onaylandı [{symbol}]: {direction_str} "
-                    f"strateji={candidate.strategy.value} güç={candidate.strength:.2f} "
-                    f"confluence={conf_score:.0f} "
-                    f"SL={candidate.sl:.4f} TP={candidate.tp:.4f}"
-                )
-                return candidate
-            else:
+            # ── v5.9.2: Confluence çarpan — binary kapı yerine sürekli ──
+            # conf_score 0-100 → çarpan 0.0-1.0
+            # Minimum eşik 20: altında sinyal gerçekten yok
+            CONFLUENCE_MIN_SCORE = 20.0
+            if conf_score < CONFLUENCE_MIN_SCORE:
                 logger.debug(
                     f"Sinyal reddedildi [{symbol}]: {direction_str} "
-                    f"confluence={conf_score:.0f} < {CONFLUENCE_PASS_SCORE} "
-                    f"(yedek sinyale geçiliyor)"
+                    f"confluence={conf_score:.0f} < {CONFLUENCE_MIN_SCORE} (çok düşük)"
                 )
-                continue  # Sonraki adaya geç
+                continue
+
+            # Confluence'ı strength çarpanı olarak uygula
+            conf_multiplier = conf_score / 100.0
+            candidate.strength *= conf_multiplier
+            logger.info(
+                f"Sinyal onaylandı [{symbol}]: {direction_str} "
+                f"strateji={candidate.strategy.value} güç={candidate.strength:.2f} "
+                f"confluence={conf_score:.0f}(×{conf_multiplier:.2f}) "
+                f"SL={candidate.sl:.4f} TP={candidate.tp:.4f}"
+            )
+            return candidate
 
         # Hiçbir aday confluence'ı geçemedi
         logger.debug(f"Tüm sinyal adayları reddedildi [{symbol}]")
@@ -1674,12 +1683,8 @@ class Ogul:
         # ── FAZ 2: PENDING (pre-flight) ──────────────────────────────
         trade.state = TradeState.PENDING
 
-        # İşlem saatleri kontrolü
-        if not self._is_trading_allowed(now):
-            trade.state = TradeState.CANCELLED
-            trade.cancel_reason = "outside_trading_hours"
-            self._log_cancelled_trade(trade)
-            return
+        # v5.9.2: İşlem saatleri process_signals()'da zaten kontrol ediliyor
+        # Tekrar kontrol kaldırıldı (race condition riski: 17:44'te sinyal, 17:45'te red)
 
         # Eş zamanlı pozisyon limiti (atomik kontrol)
         with self._trade_lock:
