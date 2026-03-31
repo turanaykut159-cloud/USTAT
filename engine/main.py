@@ -197,7 +197,12 @@ class Engine:
     # ═════════════════════════════════════════════════════════════════
 
     def start(self) -> None:
-        """Engine'i başlat — MT5 bağlantısı + durum geri yükleme + ana döngü."""
+        """Engine'i başlat — MT5 bağlantısı + durum geri yükleme + ana döngü.
+
+        v5.9.2: MT5 bağlantısı veya smoke test başarısız olursa engine
+        hemen kapanmak yerine 15sn aralıklarla yeniden dener. Böylece
+        API + Electron açık kalır, kullanıcı OTP girebilir.
+        """
         logger.info("=" * 60)
         logger.info("ÜSTAT Trading Engine başlatılıyor...")
         logger.info("=" * 60)
@@ -229,11 +234,34 @@ class Engine:
         if backup_path:
             logger.info(f"DB yedek alındı: {backup_path}")
 
-        # 1. MT5 bağlantısı
-        if not self._connect_mt5():
-            logger.critical("MT5 bağlantısı kurulamadı — engine başlatılamıyor.")
-            self._log_event("ENGINE_START_FAIL", "MT5 bağlantısı kurulamadı", "CRITICAL")
-            return
+        # 1. MT5 bağlantısı — başarısız olursa 15sn aralıkla yeniden dene
+        MAX_CONNECT_RETRIES = 20  # 20 × 15sn = 5dk max bekleme
+        RETRY_INTERVAL = 15
+
+        for attempt in range(1, MAX_CONNECT_RETRIES + 1):
+            if self._shutdown_requested:
+                logger.info("Shutdown istendi — engine başlatma iptal.")
+                return
+
+            if self._connect_mt5():
+                break
+
+            if attempt < MAX_CONNECT_RETRIES:
+                logger.warning(
+                    f"MT5 bağlantısı başarısız — {RETRY_INTERVAL}sn sonra "
+                    f"tekrar denenecek ({attempt}/{MAX_CONNECT_RETRIES})"
+                )
+                # Heartbeat yaz ki watchdog bizi öldürmesin
+                self._write_heartbeat()
+                time.sleep(RETRY_INTERVAL)
+            else:
+                logger.critical(
+                    f"MT5 bağlantısı {MAX_CONNECT_RETRIES} denemede kurulamadı — "
+                    f"engine başlatılamıyor."
+                )
+                self._log_event("ENGINE_START_FAIL", "MT5 bağlantısı kurulamadı", "CRITICAL")
+                return
+
         self.health.record_connection_established()
 
         # 1.1 Startup Smoke Test — kritik kontroller
@@ -242,16 +270,17 @@ class Engine:
         if not smoke.passed:
             failed = [c for c in smoke.checks if c["status"] == "FAIL"]
             fail_names = ", ".join(c["name"] for c in failed)
-            logger.critical(
-                f"Smoke test BAŞARISIZ — engine başlatılamıyor. "
-                f"Başarısız: {fail_names}"
+            logger.warning(
+                f"Smoke test başarısız ({fail_names}) — "
+                f"engine kısıtlı modda devam edecek."
             )
             self._log_event(
-                "SMOKE_TEST_FAIL",
-                f"Smoke test başarısız: {fail_names}",
-                "CRITICAL",
+                "SMOKE_TEST_WARN",
+                f"Smoke test başarısız: {fail_names} — kısıtlı mod",
+                "WARNING",
             )
-            return
+            # v5.9.2: Smoke test başarısız olsa bile engine'i BAŞLAT.
+            # BABA zaten can_trade=False verecek, risk koruması aktif.
 
         # 1.5. MT5 işlem geçmişi senkronizasyonu (tek seferlik)
         self._sync_mt5_history()

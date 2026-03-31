@@ -40,6 +40,7 @@ from api.routes import (
     live,
     manual_trade,
     mt5_verify,
+    nabiz,
     news,
     notifications,
     ogul_activity,
@@ -102,32 +103,37 @@ async def lifespan(app: FastAPI):
         loop = asyncio.get_running_loop()
         engine_task = loop.run_in_executor(None, engine.start)
 
-        # Engine crash watchdog — thread sessizce ölürse API'yi de kapat
+        # Engine crash watchdog — thread biterse yeniden başlatma dene
+        MAX_ENGINE_RESTARTS = 3
+        _engine_restart_count = 0
+
         async def _engine_watchdog():
-            try:
-                await engine_task
-                # Engine.start() normal dönüş — MT5 bağlantı hatası vb.
-                logger.critical(
-                    "Engine thread sonlandı — API tek başına çalışamaz, "
-                    "süreç kapatılıyor."
+            nonlocal engine_task, _engine_restart_count
+
+            while True:
+                try:
+                    await engine_task
+                    logger.warning(
+                        "Engine thread sonlandı — API açık kalacak, "
+                        "engine yeniden başlatılacak."
+                    )
+                except Exception as exc:
+                    logger.error(f"Engine thread CRASHED: {exc}")
+
+                _engine_restart_count += 1
+                if _engine_restart_count > MAX_ENGINE_RESTARTS:
+                    logger.critical(
+                        f"Engine {MAX_ENGINE_RESTARTS} kez yeniden başlatılamadı — "
+                        f"API açık kalıyor, manuel müdahale gerekli."
+                    )
+                    return  # API açık kalır, engine duruyor
+
+                logger.info(
+                    f"Engine yeniden başlatılıyor "
+                    f"({_engine_restart_count}/{MAX_ENGINE_RESTARTS})..."
                 )
-            except Exception as exc:
-                logger.critical(
-                    f"Engine thread CRASHED: {exc} — "
-                    f"API tek başına çalışamaz, süreç kapatılıyor."
-                )
-            # v5.4.1: Graceful shutdown — os._exit() yerine engine.stop() çağır
-            # Bu pending trade'lerin DB'ye yazılmasını ve MT5 bağlantısının
-            # düzgün kapatılmasını sağlar
-            try:
-                logger.info("Watchdog: Graceful shutdown başlatılıyor...")
-                engine.stop(reason="engine_thread_terminated")
-                logger.info("Watchdog: Graceful shutdown tamamlandı.")
-            except Exception as stop_exc:
-                logger.error(f"Watchdog: Graceful shutdown hatası: {stop_exc}")
-            # Graceful shutdown tamamlandıktan sonra süreci kapat
-            import os
-            os._exit(1)
+                await asyncio.sleep(10)  # 10sn bekle, sonra tekrar dene
+                engine_task = loop.run_in_executor(None, engine.start)
 
         watchdog_task = asyncio.create_task(_engine_watchdog())
 
@@ -203,6 +209,7 @@ app.include_router(settings.router, prefix="/api", tags=["settings"])
 app.include_router(mt5_verify.router, prefix="/api", tags=["mt5"])
 app.include_router(error_dashboard.router, prefix="/api", tags=["errors"])
 app.include_router(news.router, prefix="/api", tags=["news"])
+app.include_router(nabiz.router, prefix="/api", tags=["nabiz"])
 
 
 @app.get("/")
