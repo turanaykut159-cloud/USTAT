@@ -1551,7 +1551,7 @@ class HEngine:
                     "old_sl": old_sl, "new_sl": new_sl,
                     "old_tp": old_tp, "new_tp": new_tp,
                     "entry_prim": round(entry_prim, 2),
-                    "faz": faz,
+                    "trailing_dist": trailing_dist,
                     "previous_date": previous_date,
                 },
             )
@@ -1582,7 +1582,7 @@ class HEngine:
                 f"ref={old_ref:.4f}→{new_ref:.4f} "
                 f"SL={old_sl:.4f}→{new_sl:.4f} "
                 f"TP={old_tp:.4f}→{new_tp:.4f} "
-                f"giriş_prim={entry_prim:.2f} faz={faz}"
+                f"giriş_prim={entry_prim:.2f} trailing={trailing_dist}"
             )
 
         logger.info("PRİMNET günlük yenileme tamamlandı")
