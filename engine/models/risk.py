@@ -59,6 +59,7 @@ class RiskVerdict:
     """
     can_trade: bool = True
     lot_multiplier: float = 1.0
+    risk_multiplier: float = 1.0   # v5.9.2: sürekli risk çarpanı [0.0-1.0]
     reason: str = ""
     kill_switch_level: int = 0
     blocked_symbols: list[str] = field(default_factory=list)

@@ -1353,12 +1353,21 @@ class Baba:
             verdict.blocked_symbols = list(self._killed_symbols)
             return verdict
 
-        # 2. Kill-switch L2 → sistem pause
+        # 2. Kill-switch L2 → sistem pause (can_trade=False kalır)
+        # v5.9.2: risk_multiplier ile kısıtlı işlem imkanı
         if self._kill_switch_level == KILL_SWITCH_L2:
             verdict.can_trade = False
             verdict.lot_multiplier = 0.0
             verdict.kill_switch_level = KILL_SWITCH_L2
             verdict.reason = "KILL_SWITCH L2 aktif — sistem durduruldu"
+            # v5.9.2: L2 nedenine göre kısıtlı risk_multiplier
+            ks_reason = self._kill_switch_details.get("reason", "")
+            if ks_reason == "olay_regime":
+                verdict.risk_multiplier = 0.15  # OLAY: çok küçük pozisyon
+            elif ks_reason in ("daily_loss", "consecutive_loss"):
+                verdict.risk_multiplier = 0.0   # Kayıp bazlı: tam blok
+            else:
+                verdict.risk_multiplier = 0.25  # Diğer L2: kısıtlı
             return verdict
 
         # 2b. v5.8/CEO-FAZ1: Korumasız pozisyon varsa yeni işlem yasak
@@ -1508,6 +1517,12 @@ class Baba:
             verdict.reason = f"{risk_params.consecutive_loss_limit} üst üste kayıp — cooldown başladı"
             verdict.kill_switch_level = KILL_SWITCH_L2
             return verdict
+
+        # v5.9.2: Ardışık kayıp kademeli risk_multiplier
+        cons_losses = self._risk_state.get("consecutive_losses", 0)
+        if cons_losses >= 1 and verdict.can_trade:
+            graduated = {1: 0.75, 2: 0.50}
+            verdict.risk_multiplier = graduated.get(cons_losses, 0.25)
 
         # v13.0: Risk göstergesi varken izin verildi → olay kaydı (ÜSTAT beslemesi)
         # 5 dk'da en fazla 1 kez logla (her cycle'da loglama çok fazla kayıt oluşturur)
