@@ -164,12 +164,12 @@ function createWindow() {
   // Splash/içerik hazır → pencereyi HEMEN göster
   const showTimeout = setTimeout(() => {
     if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
-      elog('Fallback timeout (10sn): pencere gosteriliyor');
+      elog('Fallback timeout (4sn): pencere gosteriliyor');
       mainWindow.maximize();
       mainWindow.show();
       mainWindow.focus();
     }
-  }, 10000);
+  }, 4000);
 
   mainWindow.once('ready-to-show', () => {
     elog('ready-to-show tetiklendi, pencere gosteriliyor');
@@ -327,7 +327,7 @@ function pollForVite(port, callback) {
         resolve(true);
       });
       client.on('error', () => resolve(false));
-      client.setTimeout(1000, () => {
+      client.setTimeout(500, () => {
         client.destroy();
         resolve(false);
       });
@@ -352,7 +352,7 @@ function pollForVite(port, callback) {
       console.log(`[Main] Vite hazir (IPv4=${ipv4}, IPv6=${ipv6})`);
       callback();
     } else {
-      setTimeout(check, 500);
+      setTimeout(check, 150);
     }
   };
 

@@ -65,12 +65,14 @@ def port_open(port):
 
 
 def wait_for_port(port, name, timeout_secs=15):
-    """Port acilana kadar bekle."""
-    for i in range(timeout_secs):
+    """Port acilana kadar bekle (200ms aralikla hizli polling)."""
+    max_checks = timeout_secs * 5  # 200ms × 5 = 1sn
+    for i in range(max_checks):
         if port_open(port):
-            log(f"  {name} hazir (port {port}, {i+1}sn)")
+            elapsed = (i + 1) * 0.2
+            log(f"  {name} hazir (port {port}, {elapsed:.1f}sn)")
             return True
-        time.sleep(1)
+        time.sleep(0.2)
     log(f"  HATA: {name} {timeout_secs}sn icinde baslamadi (port {port})")
     return False
 
@@ -145,7 +147,7 @@ def cleanup():
     # Fallback: port 8000 hala aciksa kill_port ile temizle
     if port_open(8000):
         kill_port(8000)
-        time.sleep(0.5)
+        time.sleep(0.3)
 
     # 1. Eski electron.exe process'lerini oldur (bekleme yok)
     try:
@@ -157,7 +159,7 @@ def cleanup():
         output = (r.stdout + r.stderr).upper()
         if "SUCCESS" in output:
             log("  Eski electron.exe sonlandirildi")
-            time.sleep(1)  # Single-instance lock'un serbest kalmasi icin bekle
+            time.sleep(0.3)  # Single-instance lock serbest kalmasi icin kisa bekleme
         if "ENGELLENDI" in output or "ACCESS" in output:
             log("  UYARI: electron.exe admin olarak calisiyor, taskkill ile durdurulamiyor!")
             log("  Gorev Yoneticisi'nden elle sonlandirin veya bilgisayari yeniden baslatin.")
@@ -167,7 +169,7 @@ def cleanup():
     # 2. Eski Vite temizle (port 5173) — kisa bekleme
     if port_open(5173):
         kill_port(5173)
-        time.sleep(0.5)
+        time.sleep(0.3)
         if port_open(5173):
             log("  UYARI: Port 5173 hala acik")
         else:
@@ -314,7 +316,7 @@ HEARTBEAT_FILE = os.path.join(USTAT_DIR, "engine.heartbeat")
 SHUTDOWN_SIGNAL_FILE = os.path.join(USTAT_DIR, "shutdown.signal")  # v5.5: Electron kasıtlı kapanış sinyali
 WATCHDOG_STALE_SECS = 45       # v5.4.1: heartbeat bu kadar saniye eskiyse engine ölmüş kabul et
 WATCHDOG_CHECK_INTERVAL = 15   # v5.4.1: kontrol aralığı (saniye)
-WATCHDOG_INITIAL_DELAY = 30    # v5.9: İlk açılışta OTP girişi için bekleme süresi (saniye)
+WATCHDOG_INITIAL_DELAY = 10    # v5.9.2: OTP bekleme kısaltıldı (Electron kendi bekliyor)
 MAX_AUTO_RESTARTS = 5          # v5.4.1: maksimum ardışık otomatik yeniden başlatma
 WATCHDOG_PID_FILE = os.path.join(USTAT_DIR, "watchdog.pid")  # v5.7.2: singleton watchdog kilidi
 
