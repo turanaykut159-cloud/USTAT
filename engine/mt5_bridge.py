@@ -277,6 +277,9 @@ class MT5Bridge:
         try:
             from engine.baba import VIOP_EXPIRY_DATES
         except ImportError:
+            logger.critical(
+                "VIOP_EXPIRY_DATES import BAŞARISIZ — vade çözümlemesi devre dışı!"
+            )
             return None
 
         if today not in VIOP_EXPIRY_DATES:
@@ -364,6 +367,11 @@ class MT5Bridge:
                     )
 
             # ── YÖNTEM 2: Normal gün veya hedef bulunamadı ──
+            if not chosen and target_suffix:
+                logger.warning(
+                    f"Vade hedefi {base}{target_suffix} bulunamadı — "
+                    f"YÖNTEM 2'ye düşülüyor (ilk aktif kontrat seçilecek)"
+                )
             if not chosen:
                 # Artan sırala, en yakın aktive edilebilir kontratı seç
                 sorted_cands = sorted(candidates, key=lambda s: s.name)

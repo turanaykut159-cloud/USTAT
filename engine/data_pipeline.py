@@ -575,10 +575,13 @@ class DataPipeline:
         missing_counts = missing_counts.clip(lower=0)
 
         # Piyasa kapalı saatlerindeki boşlukları sıfırla
-        for idx in missing_counts.index:
-            if missing_counts[idx] >= MAX_CONSECUTIVE_MISSING:
-                t1 = times.iloc[idx - 1] if idx > 0 else times.iloc[0]
-                t2 = times.iloc[idx] if idx < len(times) else times.iloc[-1]
+        for pos, idx in enumerate(missing_counts.index):
+            if missing_counts.iloc[pos] >= MAX_CONSECUTIVE_MISSING:
+                # idx = pandas label, times'da da aynı label var (aynı DataFrame'den)
+                iloc_pos = times.index.get_loc(idx) if idx in times.index else min(pos + 1, len(times) - 1)
+                iloc_prev = max(iloc_pos - 1, 0)
+                t1 = times.iloc[iloc_prev]
+                t2 = times.iloc[iloc_pos]
                 if self._is_market_hours_gap(t1, t2):
                     missing_counts.at[idx] = 0
 

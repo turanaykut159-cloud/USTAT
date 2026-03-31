@@ -406,6 +406,21 @@ export async function markAllNotificationsRead() {
   }
 }
 
+// ── NABIZ (Sistem Monitörü) ──────────────────────────────────────
+
+export async function getNabiz() {
+  try {
+    const { data } = await client.get('/nabiz');
+    return data;
+  } catch (err) {
+    console.error('[ÜSTAT API] getNabiz:', err?.message ?? err);
+    return {
+      database: {}, logs: {}, disk: {}, retention: {},
+      cleanup_conflict: { has_conflict: false },
+    };
+  }
+}
+
 // ── Health (Sistem Sağlığı) ──────────────────────────────────────
 
 export async function getHealth() {
@@ -437,7 +452,7 @@ export async function getAgentStatus() {
 /** Aktif haberleri getir — WebSocket çalışmadığında Dashboard polling ile kullanır. */
 export async function getNewsStatus() {
   try {
-    const { data } = await api.get('/news/status');
+    const { data } = await client.get('/news/status');
     return data;
   } catch (err) {
     console.warn('[ÜSTAT API] getNewsStatus:', err?.message);
@@ -448,7 +463,7 @@ export async function getNewsStatus() {
 /** Aktif haber listesi — NewsPanel için tam veri. */
 export async function getNewsActive() {
   try {
-    const { data } = await api.get('/news/active');
+    const { data } = await client.get('/news/active');
     return data;
   } catch (err) {
     console.warn('[ÜSTAT API] getNewsActive:', err?.message);

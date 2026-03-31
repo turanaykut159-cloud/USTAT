@@ -1110,11 +1110,13 @@ class NewsBridge:
         events = self._cache.get_active_for_symbol(symbol)
 
         # Ek: sembolsüz ve global olmayan ama ciddi haberler de
-        # tüm piyasayı etkiler (örn: "savaş ilanı" sembolsüz gelirse)
+        # tüm piyasayı etkiler — ancak VİOP ile ilgili olmalı.
+        # v5.9.2: _is_viop_relevant_for_olay filtresi eklendi.
         all_active = self._cache.get_active()
         for ev in all_active:
             if ev not in events and ev.severity in ("CRITICAL", "HIGH"):
-                events.append(ev)
+                if self._is_viop_relevant_for_olay(ev):
+                    events.append(ev)
 
         if not events:
             return 1.0

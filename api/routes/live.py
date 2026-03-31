@@ -174,8 +174,8 @@ async def _send_all_updates(ws: WebSocket):
                 try:
                     _risk_snapshot_cache = await asyncio.to_thread(db.get_latest_risk_snapshot)
                     _risk_snapshot_ts = now
-                except Exception:
-                    pass  # Cache'deki eski değeri kullan
+                except Exception as exc:
+                    logger.warning(f"Risk snapshot cache güncelleme hatası: {exc}")
             if _risk_snapshot_cache:
                 daily_pnl = _risk_snapshot_cache.get("daily_pnl", 0.0)
 
@@ -295,8 +295,9 @@ async def _send_all_updates(ws: WebSocket):
             try:
                 verdict = baba.check_risk_limits(engine.risk_params)
                 can_trade = verdict.can_trade
-            except Exception:
-                pass
+            except Exception as exc:
+                can_trade = False
+                logger.warning(f"Risk check hatası — can_trade=False: {exc}")
             risk_multiplier = getattr(engine.risk_params, "risk_multiplier", 1.0) if hasattr(engine, "risk_params") else 1.0
 
         messages.append({

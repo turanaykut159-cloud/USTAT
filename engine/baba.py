@@ -537,8 +537,8 @@ class Baba:
                         severity="WARNING",
                         action="baba_risk",
                     )
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(f"ÜSTAT bildirimi DB kayıt hatası: {exc}")
 
         # Kuyruğu temizle
         rp.ustat_notifications.clear()
@@ -1999,8 +1999,8 @@ class Baba:
                     ),
                     severity="WARNING",
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(f"Risk feedback DB kayıt hatası: {exc}")
 
         # ── ÜSTAT Feedback Aksiyonları ──
         now = datetime.now()
