@@ -131,19 +131,19 @@ REGIME_SE2_PARAMS: dict[str, dict] = {
         "min_rr": 1.2,
     },
     "RANGE": {
-        "min_sources": 3,
-        "min_score": 45.0,
-        "min_rr": 1.5,
+        "min_sources": 2,      # v5.9.2: 3→2 (RANGE'de 2 kaynak yeterli)
+        "min_score": 40.0,     # v5.9.2: 45→40
+        "min_rr": 1.3,         # v5.9.2: 1.5→1.3
     },
     "VOLATILE": {
-        "min_sources": 4,
-        "min_score": 60.0,
-        "min_rr": 2.0,
+        "min_sources": 3,      # v5.9.2: 4→3
+        "min_score": 50.0,     # v5.9.2: 60→50
+        "min_rr": 1.5,         # v5.9.2: 2.0→1.5
     },
     "OLAY": {
-        "min_sources": 99,  # Fiilen engelle
-        "min_score": 999.0,
-        "min_rr": 99.0,
+        "min_sources": 5,      # v5.9.2: 99→5 (zor ama imkansız değil)
+        "min_score": 70.0,     # v5.9.2: 999→70
+        "min_rr": 2.0,         # v5.9.2: 99→2.0
     },
 }
 
@@ -1402,9 +1402,16 @@ def generate_signal(
     total = sum(s.score for s in agreeing)
     verdict.total_score = total
 
-    if total < min_score and len(agreeing) < min_agree:
-        verdict.should_trade = False
-        return verdict
+    # v5.9.2: Skor düşük → sert blok yerine strength penalty
+    if total < min_score:
+        score_ratio = total / min_score if min_score > 0 else 0.0
+        if score_ratio < 0.5:
+            # Çok düşük skor — gerçekten sinyal yok
+            verdict.should_trade = False
+            verdict.reason = f"Skor çok düşük ({total:.0f} < {min_score * 0.5:.0f})"
+            return verdict
+        # Düşük ama kullanılabilir skor — strength penalty
+        verdict.strength *= score_ratio
 
     # ── Sinyal gücü (ağırlıklı) ──────────────────────────────────
     weighted_sum = 0.0
@@ -1461,10 +1468,17 @@ def generate_signal(
     reward = abs(verdict.structural_tp - current_price)
     verdict.risk_reward = reward / risk if risk > 0 else 0.0
 
+    # v5.9.2: R:R yetersiz → sert blok yerine strength penalty
+    # R:R min_rr'nin altındaysa strength orantılı düşürülür
     if verdict.risk_reward < min_rr:
-        verdict.should_trade = False
-        verdict.reason = f"R:R yetersiz ({verdict.risk_reward:.2f} < {min_rr})"
-        return verdict
+        if verdict.risk_reward <= 0:
+            verdict.should_trade = False
+            verdict.reason = f"R:R sıfır veya negatif ({verdict.risk_reward:.2f})"
+            return verdict
+        # Kademeli penalty: R:R = min_rr/2 ise strength × 0.5
+        rr_penalty = min(verdict.risk_reward / min_rr, 1.0)
+        verdict.strength *= rr_penalty
+        verdict.reason = f"R:R düşük ({verdict.risk_reward:.2f} < {min_rr}) — strength ×{rr_penalty:.2f}"
 
     # ── Strateji tipi eşleme (SE3: genişletilmiş) ────────────────
     dominant = max(agreeing, key=lambda s: s.score)
