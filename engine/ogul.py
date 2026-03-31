@@ -380,6 +380,7 @@ class Ogul:
         self.risk_params = risk_params or RiskParams()
         self.active_trades: dict[str, Trade] = {}
         self._trade_lock = threading.Lock()  # Pozisyon limiti atomik kontrolü
+        self._risk_multiplier: float = 1.0  # v5.9.2: BABA risk çarpanı (main.py set eder)
         # Config'den okunan parametreler (hardcoded değil)
         self._margin_reserve_pct: float = float(
             config.get("engine.margin_reserve_pct", MARGIN_RESERVE_PCT_DEFAULT)
@@ -1946,6 +1947,16 @@ class Ogul:
                     )
         except Exception as exc:
             logger.warning(f"[FAZ3] Conviction sizing hatası [{signal.symbol}]: {exc}")
+
+        # v5.9.2: Risk multiplier çarpanı (BABA'dan, main.py üzerinden)
+        if self._risk_multiplier < 1.0:
+            lot_before_rm = lot
+            lot = lot * self._risk_multiplier
+            if lot_before_rm > 0:
+                logger.info(
+                    f"Risk çarpanı [{signal.symbol}]: ×{self._risk_multiplier:.2f} "
+                    f"lot {lot_before_rm:.2f}→{lot:.2f}"
+                )
 
         # v14: Lot çarpan yığılması koruması — tüm çarpanlar sonrası
         # lot hâlâ pozitifse minimum 1.0 lot (vol_min) uygula

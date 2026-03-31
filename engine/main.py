@@ -813,7 +813,13 @@ class Engine:
         # risk kapalıyken top5 yerine boş liste → sinyal üretilmez.
         # Ama bias her zaman güncellenmeli (Dashboard doğru göstersin).
         try:
-            if risk_verdict.can_trade:
+            # v5.9.2: 3 katmanlı pipeline — risk_multiplier OĞUL'a aktarılır
+            # can_trade=True → tam işlem, risk_multiplier lot'u ayarlar
+            # can_trade=False + risk_multiplier>0 → kısıtlı işlem (OLAY vb.)
+            # can_trade=False + risk_multiplier=0 → tam blok (eski davranış)
+            self.ogul._risk_multiplier = risk_verdict.risk_multiplier
+
+            if risk_verdict.can_trade or risk_verdict.risk_multiplier > 0:
                 self.ogul.process_signals(top5, regime)
             else:
                 self.ogul.process_signals([], regime)
