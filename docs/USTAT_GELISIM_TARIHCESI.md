@@ -75,6 +75,10 @@
 - #97 — PRİMNET sabit trailing: Faz 1/Faz 2 ayrımı kaldırıldı, her zaman 1.5 prim sabit trailing, stop > giriş olduğunda kilitli kâr otomatik (9020e43)
 
 ### Fixed
+- #99 — 16 kritik sessiz mayın temizliği: haber filtresi VİOP ilgililik kontrolü, H1 iloc/label index, vade CRITICAL log, risk fail-safe, api.js client fix, 5 silent pass→logger (536ccb7, 57989f2)
+- #100 — Engine başlatma resilience: MT5 retry 15sn×20 döngü, smoke test toleransı (kısıtlı mod), API os._exit kaldırıldı→yeniden başlatma (59d81cd)
+- #101 — Açılış hızı optimizasyonu: wait_for_port 1s→0.2s polling, cleanup sleep'ler kısaltıldı, watchdog 30→10sn, splash 10→4sn, Vite poll 500→150ms (6f62507)
+- #102 — Nabız hardcoded kartlar dinamik kontrole çevrildi: çakışma uyarısı config karşılaştırması, missing_retention DB'den hesaplama (4c6364e)
 - #98 — PRİMNET devir hatası: h_engine.py'de 6 yerde eski _primnet_faz1_stop/_primnet_faz2_trailing referansları _primnet_trailing olarak düzeltildi — transfer_to_hybrid, netting sync, referans fiyat güncelleme fonksiyonları
 - #75 — Vade geçişi GCM paraleli: EXPIRY_NO_NEW_TRADE_DAYS/EXPIRY_CLOSE_DAYS=1→0, gözlem süresi kaldırıldı (2026-03-26)
 - #80 — H-Engine: ATR/profit trailing kaldırıldı, PRİMNET tek pozisyon yönetim modu (6a38f64)
