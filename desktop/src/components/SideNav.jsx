@@ -21,6 +21,7 @@ const NAV_ITEMS = [
   { path: '/risk',        label: 'Risk Yönetimi',      icon: '🛡️' },
   { path: '/monitor',     label: 'System Monitor',      icon: '📡' },
   { path: '/errors',      label: 'Hata Takip',          icon: '🔍' },
+  { path: '/nabiz',       label: 'NABIZ',               icon: '💓' },
   { path: '/settings',    label: 'Ayarlar',            icon: '⚙️' },
 ];
 

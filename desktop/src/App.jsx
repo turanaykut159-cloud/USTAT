@@ -19,6 +19,7 @@ import HybridTrade from './components/HybridTrade';
 import AutoTrading from './components/AutoTrading';
 import Monitor from './components/Monitor';
 import ErrorTracker from './components/ErrorTracker';
+import Nabiz from './components/Nabiz';
 import Settings from './components/Settings';
 import UstatBrain from './components/UstatBrain';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -66,6 +67,7 @@ export default function App() {
               <Route path="/risk" element={<RouteBoundary label="Risk"><RiskManagement /></RouteBoundary>} />
               <Route path="/monitor" element={<RouteBoundary label="Monitor"><Monitor /></RouteBoundary>} />
               <Route path="/errors" element={<RouteBoundary label="Hata Takip"><ErrorTracker /></RouteBoundary>} />
+              <Route path="/nabiz" element={<RouteBoundary label="NABIZ"><Nabiz /></RouteBoundary>} />
               <Route path="/settings" element={<RouteBoundary label="Ayarlar"><Settings /></RouteBoundary>} />
             </Routes>
           </main>
