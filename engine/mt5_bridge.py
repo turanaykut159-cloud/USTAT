@@ -264,16 +264,43 @@ class MT5Bridge:
 
     # ── Sembol çözümleme ─────────────────────────────────────────────
 
+    @staticmethod
+    def _next_expiry_suffix() -> str | None:
+        """Bugün VİOP vade günüyse, sonraki ayın suffix'ini döndür (MMYY).
+
+        Örnek: 31 Mart 2026 (vade günü) → '0426' (Nisan 2026).
+        Vade günü değilse None döndürür.
+        """
+        from datetime import date as _date
+
+        today = _date.today()
+        try:
+            from engine.baba import VIOP_EXPIRY_DATES
+        except ImportError:
+            return None
+
+        if today not in VIOP_EXPIRY_DATES:
+            return None
+
+        # Sonraki ay hesapla
+        if today.month == 12:
+            next_month, next_year = 1, today.year + 1
+        else:
+            next_month, next_year = today.month + 1, today.year
+
+        suffix = f"{next_month:02d}{next_year % 100:02d}"
+        return suffix
+
     def _resolve_symbols(self) -> None:
         """WATCHED_SYMBOLS'daki base isimleri MT5'teki gerçek ada eşle.
 
         VİOP kontrat adları vade soneki içerir (ör. F_THYAO0226).
-        Her base için en yeni vadeden başlayarak symbol_select ile aktive eder.
-        İlk başarılı aktive olan kontrat seçilir.
 
-        v5.9.1: Vade geçişi otomasyonu — vade son günü eski kontrat
-        (ör. 0326) activate edilemezse otomatik olarak yeni vadeye (0426)
-        geçer. Seçim + aktivasyon tek döngüde yapılır.
+        v5.9.1: Vade geçişi otomasyonu:
+        - Bugün vade günüyse → sonraki ayın suffix'i hesaplanır (ör. 0426)
+          → tüm kontratlar doğrudan bu suffix ile eşlenir
+        - Vade günü değilse → en yakın aktive edilebilir kontrat seçilir
+        - Eski vadede açık pozisyonlar _to_base() prefix fallback ile tanınır
         """
         try:
             all_symbols = self._safe_call(mt5.symbols_get)
@@ -283,8 +310,16 @@ class MT5Bridge:
             logger.warning("MT5 sembol listesi alınamadı, eşleme yapılamıyor")
             return
 
-        # v5.8/CEO-FAZ2: Atomik map güncellemesi — önce geçici dict oluştur,
-        # sonra tek lock altında swap et (okuyucular eski map ile devam edebilir).
+        # Vade günü tespiti — sonraki ayın suffix'ini belirle
+        target_suffix = self._next_expiry_suffix()
+        if target_suffix:
+            logger.info(
+                f"VADE GEÇİŞİ: Bugün vade son günü — "
+                f"hedef suffix: {target_suffix} "
+                f"(tüm kontratlar bu vadeye eşlenecek)"
+            )
+
+        # v5.8/CEO-FAZ2: Atomik map güncellemesi
         new_symbol_map: dict[str, str] = {}
         new_reverse_map: dict[str, str] = {}
 
@@ -293,17 +328,15 @@ class MT5Bridge:
             candidates = [
                 s for s in all_symbols
                 if s.name.upper().startswith(base.upper())
-                and len(s.name) > len(base)  # tam eşleşme değil, sonekli
+                and len(s.name) > len(base)
             ]
 
             if not candidates:
-                # Sonek yoksa base'in kendisi olabilir
                 exact = [s for s in all_symbols if s.name.upper() == base.upper()]
                 if exact:
                     mt5_name = exact[0].name
                     new_symbol_map[base] = mt5_name
                     new_reverse_map[mt5_name] = base
-                    # Tam eşleşmeyi de activate et
                     try:
                         self._safe_call(mt5.symbol_select, mt5_name, True)
                     except (TimeoutError, Exception):
@@ -313,40 +346,47 @@ class MT5Bridge:
                     logger.warning(f"Sembol bulunamadı: {base}")
                 continue
 
-            # v5.9.1: Kontratları en yeni vadeden eskiye sırala
-            # Vade soneki MMYY formatında (0426 > 0326) — string sıralaması yeterli
-            sorted_candidates = sorted(candidates, key=lambda s: s.name, reverse=True)
-
-            # En yeniden başlayarak symbol_select ile dene
-            # İlk başarılı aktivasyon = aktif işlem kontratı
             chosen = None
-            for candidate in sorted_candidates:
-                try:
-                    activated = self._safe_call(
-                        mt5.symbol_select, candidate.name, True
-                    )
-                except (TimeoutError, Exception):
-                    activated = False
 
-                if activated:
-                    chosen = candidate
+            # ── YÖNTEM 1: Vade günü — hedef suffix ile doğrudan eşle ──
+            if target_suffix:
+                target_name = f"{base}{target_suffix}"
+                match = [s for s in candidates if s.name.upper() == target_name.upper()]
+                if match:
+                    chosen = match[0]
+                    try:
+                        self._safe_call(mt5.symbol_select, chosen.name, True)
+                    except (TimeoutError, Exception):
+                        pass
                     logger.info(
-                        f"Sembol eşleme: {base} → {candidate.name} "
-                        f"(visible={candidate.visible}, activated=True)"
+                        f"Sembol eşleme: {base} → {chosen.name} "
+                        f"(vade geçişi — hedef suffix {target_suffix})"
                     )
-                    break
-                else:
-                    logger.debug(
-                        f"Sembol activate başarısız: {base} → {candidate.name} "
-                        f"(visible={candidate.visible}) — sonraki vade deneniyor"
-                    )
+
+            # ── YÖNTEM 2: Normal gün veya hedef bulunamadı ──
+            if not chosen:
+                # Artan sırala, en yakın aktive edilebilir kontratı seç
+                sorted_cands = sorted(candidates, key=lambda s: s.name)
+                for candidate in sorted_cands:
+                    try:
+                        activated = self._safe_call(
+                            mt5.symbol_select, candidate.name, True
+                        )
+                    except (TimeoutError, Exception):
+                        activated = False
+                    if activated:
+                        chosen = candidate
+                        logger.info(
+                            f"Sembol eşleme: {base} → {candidate.name} "
+                            f"(visible={candidate.visible}, activated=True)"
+                        )
+                        break
 
             if not chosen:
-                # Hiçbiri activate edilemedi — en yeniyi kullan (veri çekme için)
-                chosen = sorted_candidates[0]
+                # Hiçbiri çalışmadı — en yeni adayı kullan
+                chosen = max(candidates, key=lambda s: s.name)
                 logger.warning(
-                    f"Sembol eşleme (fallback): {base} → {chosen.name} "
-                    f"(hiçbir vade activate edilemedi)"
+                    f"Sembol eşleme (fallback): {base} → {chosen.name}"
                 )
 
             mt5_name = chosen.name
@@ -354,14 +394,12 @@ class MT5Bridge:
             new_reverse_map[mt5_name] = base
 
         # USDTRY — BABA şok kontrolü için gerekli
-        # GCM'de sembol adı farklı olabilir (ör. USDTRY_YAKINVADE)
         usdtry_candidates = [
             s for s in all_symbols
             if "USDTRY" in s.name.upper()
         ]
         if usdtry_candidates:
-            # En yeniden eskiye dene
-            usdtry_sorted = sorted(usdtry_candidates, key=lambda s: s.name, reverse=True)
+            usdtry_sorted = sorted(usdtry_candidates, key=lambda s: s.name)
             usdtry_chosen = None
             for usdtry_sym in usdtry_sorted:
                 try:
