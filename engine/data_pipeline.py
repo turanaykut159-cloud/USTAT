@@ -541,10 +541,14 @@ class DataPipeline:
         timeframe: str,
         original_len: int,
     ) -> bool:
-        """Ardışık eksik bar kontrolü.
+        """Ardışık eksik bar kontrolü (sadece son 20 bar).
 
-        3+ ardışık beklenen bar eksikse kontratı deaktif eder.
+        Son 20 bar içinde 5+ ardışık beklenen bar eksikse kontratı deaktif eder.
         Piyasa kapalı saatlerindeki (gece, hafta sonu) boşluklar sayılmaz.
+
+        Neden son 20 bar: Tüm geçmişi kontrol etmek, saatler önceki geçici
+        kesintilerin sürekli deaktivasyon → reaktivasyon döngüsü oluşturmasına
+        neden oluyordu (ping-pong bug). Sadece yakın geçmişteki gap'ler önemlidir.
 
         Args:
             df: Temizlenmiş DataFrame.
@@ -555,11 +559,15 @@ class DataPipeline:
         Returns:
             True ise kontrat sağlıklı, False ise deaktif edildi.
         """
-        if len(df) < 2:
+        # Sadece son 20 bar'ı kontrol et — geçmişteki gap'ler döngü yaratıyordu
+        RECENT_WINDOW = 20
+        recent_df = df.tail(RECENT_WINDOW) if len(df) > RECENT_WINDOW else df
+
+        if len(recent_df) < 2:
             return True
 
         expected_sec = EXPECTED_INTERVALS.get(timeframe, 60)
-        times = df["time"]
+        times = recent_df["time"]
         diffs = times.diff().dt.total_seconds().iloc[1:]
 
         # Ardışık eksik bar sayısı = (gerçek aralık / beklenen) - 1
@@ -580,7 +588,7 @@ class DataPipeline:
             self._deactivated.add(symbol)
             logger.error(
                 f"Kontrat deaktif edildi [{symbol}/{timeframe}]: "
-                f"{max_consecutive} ardışık eksik bar "
+                f"{max_consecutive} ardışık eksik bar (son {RECENT_WINDOW} bar) "
                 f"(eşik={MAX_CONSECUTIVE_MISSING})"
             )
             self._db.insert_event(
