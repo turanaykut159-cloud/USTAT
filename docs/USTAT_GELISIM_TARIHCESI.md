@@ -58,6 +58,8 @@
 ## [5.9.0] — 2026-03-28 / 2026-04-01
 
 ### Added
+- #105 — Otonom vade geçiş sistemi: 4 katmanlı koruma — trade_mode tabanlı kontrat seçimi, saatlik periyodik tarama, retcode 10044 reaktif handler, eski vade pozisyon tespiti + VADE_UYARI/STALE_POSITION event'leri (34ded93)
+- #105 — Yarım gün (arefe) desteği: HALF_DAYS setleri (2025-2027), is_half_day(), get_close_time(), is_market_open() arefe günü 12:40 kapanış (34ded93)
 - #104 — Veri Yönetim Sistemi iyileştirme: OHLCV validasyon katmanı (Katman 1), veri bayatlık tespiti (freshness monitor — FRESH/STALE/SOURCE_FAILURE ayrımı), SQLite PRAGMA optimizasyonu (synchronous=NORMAL, cache_size=64MB, mmap_size=256MB)
 - #104 — Retention düzeltme: M1/M5 bar temizliği eklendi, hard-coded retention→config'den okuma, trade_archive_days config desteği
 - #104 — 7 sessiz hata düzeltmesi: OĞUL SE3 `except: pass`→loglama, M5 yetersiz veri DEBUG→WARNING, H1/Voting atlama logları, insert_top5 boş liste koruması, insert_risk_snapshot güvenli .get() erişimi, insert_bars dönüş değeri kontrolü
@@ -78,6 +80,7 @@
 - #97 — PRİMNET sabit trailing: Faz 1/Faz 2 ayrımı kaldırıldı, her zaman 1.5 prim sabit trailing, stop > giriş olduğunda kilitli kâr otomatik (9020e43)
 
 ### Fixed
+- #105 — VIOP_EXPIRY_DATES Mayıs 2026 düzeltmesi: date(2026,5,29)→date(2026,5,25) — Kurban Bayramı arefesi yarım gün kuralı nedeniyle vade 25 Mayıs Pazartesi (34ded93)
 - #103 — OĞUL 3 katmanlı pipeline: SE3 binary→sürekli strength, confluence ≥50 kapı→çarpan (min 20), yön 2/3→1/3, R:R sert blok→penalty, risk_multiplier lot çarpanı (116cc5e, c755cf2, 04dc627, b0baa87)
 - #99 — 16 kritik sessiz mayın temizliği: haber filtresi VİOP ilgililik kontrolü, H1 iloc/label index, vade CRITICAL log, risk fail-safe, api.js client fix, 5 silent pass→logger (536ccb7, 57989f2)
 - #100 — Engine başlatma resilience: MT5 retry 15sn×20 döngü, smoke test toleransı (kısıtlı mod), API os._exit kaldırıldı→yeniden başlatma (59d81cd)
