@@ -94,6 +94,7 @@ class Engine:
         self.db = db or Database(self.config)
         self.mt5 = mt5 or MT5Bridge(self.config)
         self._last_symbol_resolve_date: date | None = None  # Günlük vade geçişi kontrolü
+        self._last_trade_mode_check: float = 0.0  # v5.9.2: Saatlik trade_mode tarama
         self.pipeline = pipeline or DataPipeline(self.mt5, self.db, self.config)
         self.ustat = ustat or Ustat(self.config, self.db)
         self.baba = baba or Baba(self.config, self.db, mt5=self.mt5)
@@ -741,6 +742,21 @@ class Engine:
                 logger.info(f"Günlük sembol re-resolve tamamlandı: {today}")
             except Exception as exc:
                 logger.error(f"Sembol re-resolve hatası: {exc}")
+
+        # ── 1c. Saatlik trade_mode tarama (v5.9.2 — vade geçişi) ──
+        _TRADE_MODE_CHECK_INTERVAL = 3600  # 1 saat
+        _now_ts = _time.time()
+        if _now_ts - self._last_trade_mode_check >= _TRADE_MODE_CHECK_INTERVAL:
+            self._last_trade_mode_check = _now_ts
+            try:
+                stale = self.mt5.check_trade_modes()
+                if stale:
+                    logger.warning(
+                        f"Saatlik vade tarama: {len(stale)} kontrat "
+                        f"CLOSEONLY/DISABLED — {stale}"
+                    )
+            except Exception as exc:
+                logger.error(f"Trade mode tarama hatası: {exc}")
 
         # ── 2. Veri Güncelleme ────────────────────────────────────
         self._update_data()

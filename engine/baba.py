@@ -246,9 +246,10 @@ VIOP_EXPIRY_DATES: set[date] = {
     date(2025, 4, 30), date(2025, 5, 30), date(2025, 6, 30),
     date(2025, 7, 31), date(2025, 8, 29), date(2025, 9, 30),
     date(2025, 10, 31), date(2025, 11, 28), date(2025, 12, 31),
-    # 2026
+    # 2026 (v5.9.2: Mayıs düzeltmesi — Kurban Bayramı arefe 26 May yarım gün
+    #        → VİOP kuralı: yarım gün = önceki iş günü → 25 Mayıs Pazartesi)
     date(2026, 1, 30), date(2026, 2, 27), date(2026, 3, 31),
-    date(2026, 4, 30), date(2026, 5, 29), date(2026, 6, 30),
+    date(2026, 4, 30), date(2026, 5, 25), date(2026, 6, 30),
     date(2026, 7, 31), date(2026, 8, 31), date(2026, 9, 30),
     date(2026, 10, 30), date(2026, 11, 30), date(2026, 12, 31),
 }
@@ -257,13 +258,15 @@ VIOP_EXPIRY_DATES: set[date] = {
 def validate_expiry_dates() -> list[str]:
     """VİOP vade tarihlerinin iş günü olduğunu doğrula (Madde 2.7).
 
-    Hafta sonu (Cumartesi/Pazar) veya tatile denk gelen tarihleri tespit eder.
+    Hafta sonu, tatil veya yarım güne denk gelen tarihleri tespit eder.
+    VİOP kuralı: Yarım gün (arefe) vadeye denk gelirse,
+    vade bir önceki iş gününe çekilmelidir.
     Engine başlangıcında çağrılır.
 
     Returns:
         Sorunlu tarihlerin açıklama listesi. Boş liste = tümü geçerli.
     """
-    from engine.utils.time_utils import ALL_HOLIDAYS
+    from engine.utils.time_utils import ALL_HOLIDAYS, ALL_HALF_DAYS
 
     issues: list[str] = []
     for expiry in sorted(VIOP_EXPIRY_DATES):
@@ -272,7 +275,12 @@ def validate_expiry_dates() -> list[str]:
             day_name = "Cumartesi" if weekday == 5 else "Pazar"
             issues.append(f"{expiry.isoformat()} - {day_name} (hafta sonu)")
         elif expiry in ALL_HOLIDAYS:
-            issues.append(f"{expiry.isoformat()} - Tatil gunu")
+            issues.append(f"{expiry.isoformat()} - Tatil günü")
+        elif expiry in ALL_HALF_DAYS:
+            issues.append(
+                f"{expiry.isoformat()} - Yarım gün (arefe) — "
+                f"vade önceki iş gününe çekilmeli!"
+            )
     return issues
 
 

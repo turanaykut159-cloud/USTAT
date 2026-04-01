@@ -605,9 +605,17 @@ class TestTimeUtils:
         # 1 Ocak 2027 Yılbaşı
         assert is_market_open(datetime(2027, 1, 1, 10, 0)) is False
 
-    def test_072_ramazan_2026_closed(self):
+    def test_072_ramazan_2026_half_day(self):
+        """19 Mart 2026 Ramazan arefesi — yarım gün açık (12:40'a kadar)."""
         from engine.utils.time_utils import is_market_open
-        assert is_market_open(datetime(2026, 3, 19, 10, 0)) is False
+        # Sabah 10:00 — yarım gün, borsa AÇIK
+        assert is_market_open(datetime(2026, 3, 19, 10, 0)) is True
+        # 12:30 — hâlâ açık (VİOP yarım gün kapanış 12:40)
+        assert is_market_open(datetime(2026, 3, 19, 12, 30)) is True
+        # 13:00 — yarım gün kapanmış, KAPALI
+        assert is_market_open(datetime(2026, 3, 19, 13, 0)) is False
+        # 20 Mart Ramazan 1. gün — tam gün KAPALI
+        assert is_market_open(datetime(2026, 3, 20, 10, 0)) is False
 
     def test_073_normal_day_2027_open(self):
         """2027'de normal iş günü açık."""

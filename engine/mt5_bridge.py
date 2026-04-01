@@ -356,15 +356,24 @@ class MT5Bridge:
                 target_name = f"{base}{target_suffix}"
                 match = [s for s in candidates if s.name.upper() == target_name.upper()]
                 if match:
-                    chosen = match[0]
+                    cand = match[0]
                     try:
-                        self._safe_call(mt5.symbol_select, chosen.name, True)
+                        self._safe_call(mt5.symbol_select, cand.name, True)
                     except (TimeoutError, Exception):
                         pass
-                    logger.info(
-                        f"Sembol eşleme: {base} → {chosen.name} "
-                        f"(vade geçişi — hedef suffix {target_suffix})"
-                    )
+                    # v5.9.2: trade_mode kontrolü — FULL (4) değilse atla
+                    _tm = getattr(cand, "trade_mode", 4)
+                    if _tm >= 4:  # SYMBOL_TRADE_MODE_FULL
+                        chosen = cand
+                        logger.info(
+                            f"Sembol eşleme: {base} → {cand.name} "
+                            f"(vade geçişi — hedef suffix {target_suffix})"
+                        )
+                    else:
+                        logger.warning(
+                            f"Vade hedefi {cand.name} trade_mode={_tm} "
+                            f"(FULL değil) — YÖNTEM 2'ye düşülüyor"
+                        )
 
             # ── YÖNTEM 2: Normal gün veya hedef bulunamadı ──
             if not chosen and target_suffix:
@@ -373,7 +382,7 @@ class MT5Bridge:
                     f"YÖNTEM 2'ye düşülüyor (ilk aktif kontrat seçilecek)"
                 )
             if not chosen:
-                # Artan sırala, en yakın aktive edilebilir kontratı seç
+                # Artan sırala, en yakın FULL modda kontratı seç
                 sorted_cands = sorted(candidates, key=lambda s: s.name)
                 for candidate in sorted_cands:
                     try:
@@ -382,19 +391,35 @@ class MT5Bridge:
                         )
                     except (TimeoutError, Exception):
                         activated = False
-                    if activated:
-                        chosen = candidate
-                        logger.info(
-                            f"Sembol eşleme: {base} → {candidate.name} "
-                            f"(visible={candidate.visible}, activated=True)"
+                    if not activated:
+                        continue
+                    # v5.9.2: trade_mode kontrolü — CLOSEONLY/DISABLED atla
+                    _tm = getattr(candidate, "trade_mode", 4)
+                    if _tm < 4:  # FULL (4) değil
+                        logger.warning(
+                            f"Sembol {candidate.name} atlandı — "
+                            f"trade_mode={_tm} (FULL değil, "
+                            f"muhtemelen vade sonu CLOSE_ONLY)"
                         )
-                        break
+                        continue
+                    chosen = candidate
+                    logger.info(
+                        f"Sembol eşleme: {base} → {candidate.name} "
+                        f"(visible={candidate.visible}, "
+                        f"trade_mode={_tm}, activated=True)"
+                    )
+                    break
 
             if not chosen:
-                # Hiçbiri çalışmadı — en yeni adayı kullan
+                # Hiçbir aday FULL modda değil — en yeni adayı kullan
+                # ama CLOSEONLY uyarısı logla
                 chosen = max(candidates, key=lambda s: s.name)
-                logger.warning(
-                    f"Sembol eşleme (fallback): {base} → {chosen.name}"
+                _tm = getattr(chosen, "trade_mode", -1)
+                logger.error(
+                    f"VADE UYARI: {base} için FULL modda kontrat "
+                    f"bulunamadı! Fallback: {chosen.name} "
+                    f"(trade_mode={_tm}). Bu kontratta yeni "
+                    f"pozisyon AÇILAMAZ."
                 )
 
             mt5_name = chosen.name
@@ -432,6 +457,117 @@ class MT5Bridge:
         resolved = len(self._symbol_map)
         total = len(WATCHED_SYMBOLS) + 1  # +1 USDTRY
         logger.info(f"Sembol çözümleme tamamlandı: {resolved}/{total} eşlendi")
+
+    def check_trade_modes(self) -> list[str]:
+        """v5.9.2: Mevcut map'teki kontratların trade_mode durumunu kontrol et.
+
+        CLOSEONLY veya DISABLED bulunan semboller için otomatik re-resolve
+        tetikler. Eski vadede kalan pozisyonları tespit eder ve uyarı verir.
+        Saatlik periyodik kontrol olarak main.py'den çağrılır.
+
+        Returns:
+            CLOSEONLY/DISABLED tespit edilen base sembol listesi.
+        """
+        if not self._connected:
+            return []
+
+        with self._map_lock:
+            current_map = dict(self._symbol_map)
+
+        stale_symbols: list[str] = []
+        for base, mt5_name in current_map.items():
+            if base == "USDTRY":
+                continue
+            try:
+                info = self._safe_call(mt5.symbol_info, mt5_name)
+            except (TimeoutError, Exception):
+                continue
+            if info is None:
+                continue
+            _tm = getattr(info, "trade_mode", 4)
+            if _tm < 4:  # FULL (4) değil
+                stale_symbols.append(base)
+                logger.warning(
+                    f"VADE TARAMA: {mt5_name} trade_mode={_tm} "
+                    f"(FULL değil) — re-resolve gerekli"
+                )
+
+        if stale_symbols:
+            logger.info(
+                f"VADE TARAMA: {len(stale_symbols)} kontrat CLOSEONLY/DISABLED "
+                f"tespit edildi: {stale_symbols}. Re-resolve başlatılıyor."
+            )
+            try:
+                self._resolve_symbols()
+                logger.info("Periyodik re-resolve tamamlandı.")
+            except Exception as exc:
+                logger.error(f"Periyodik re-resolve hatası: {exc}")
+
+        # ── Eski vadede kalan pozisyon tespiti ──────────────────
+        self._check_stale_positions()
+
+        return stale_symbols
+
+    def _check_stale_positions(self) -> None:
+        """v5.9.2: Eski vadede (CLOSEONLY/DISABLED) kalan pozisyonları tespit et.
+
+        Mevcut symbol_map'teki kontratla eşleşmeyen açık pozisyonlar
+        eski vadeye ait demektir. Bunları logla ve event bus'a bildir.
+        """
+        try:
+            positions = self._safe_call(mt5.positions_get)
+        except (TimeoutError, Exception):
+            return
+        if not positions:
+            return
+
+        with self._map_lock:
+            active_mt5_names = set(self._symbol_map.values())
+
+        stale_positions: list[dict] = []
+        for pos in positions:
+            # İzlenen sembol mü?
+            base = self._to_base(pos.symbol)
+            if base is None:
+                continue
+            # symbol_map'teki aktif kontratla eşleşiyor mu?
+            if pos.symbol in active_mt5_names:
+                continue
+            # Eski vadede kalan pozisyon tespit edildi
+            _tm = 4
+            try:
+                info = self._safe_call(mt5.symbol_info, pos.symbol)
+                if info:
+                    _tm = getattr(info, "trade_mode", 4)
+            except (TimeoutError, Exception):
+                pass
+            stale_positions.append({
+                "ticket": pos.ticket,
+                "symbol": pos.symbol,
+                "base": base,
+                "volume": pos.volume,
+                "profit": pos.profit,
+                "trade_mode": _tm,
+            })
+            logger.error(
+                f"ESKİ VADE POZİSYON: {pos.symbol} (base={base}) "
+                f"ticket={pos.ticket} vol={pos.volume} P&L={pos.profit:.2f} "
+                f"trade_mode={_tm}. Bu kontrat aktif map'te değil!"
+            )
+
+        if stale_positions:
+            try:
+                from engine.event_bus import emit as _emit
+                _emit("STALE_POSITION", {
+                    "count": len(stale_positions),
+                    "positions": stale_positions,
+                    "message": (
+                        f"{len(stale_positions)} pozisyon eski vadede — "
+                        f"manuel kapatma gerekebilir"
+                    ),
+                })
+            except Exception:
+                pass
 
     def _to_mt5(self, base_symbol: str) -> str:
         """Base sembol adını MT5 gerçek adına çevir.
@@ -957,16 +1093,50 @@ class MT5Bridge:
                         self._health.record_order_reject(
                             symbol, result.retcode, result.comment,
                         )
+                    # v5.9.2: retcode 10044 (CLOSE_ONLY) → vade geçişi tetikle
+                    _RETCODE_CLOSE_ONLY = 10044
+                    _RETCODE_TRADE_DISABLED = 10017
+                    if result.retcode in (
+                        _RETCODE_CLOSE_ONLY, _RETCODE_TRADE_DISABLED,
+                    ):
+                        logger.error(
+                            f"VADE GEÇİŞİ TETİKLENDİ: {symbol} "
+                            f"retcode={result.retcode} — kontrat "
+                            f"CLOSE_ONLY veya DISABLED. Anında "
+                            f"re-resolve başlatılıyor."
+                        )
+                        try:
+                            self._resolve_symbols()
+                            logger.info(
+                                "Reaktif re-resolve tamamlandı "
+                                f"(tetikleyen: {symbol})"
+                            )
+                        except Exception as _re_exc:
+                            logger.error(
+                                f"Reaktif re-resolve hatası: {_re_exc}"
+                            )
+
                     # Event bus: başarısız emir bildir (dashboard + WS)
+                    _event_type = "ORDER_REJECTED"
+                    _event_data: dict[str, Any] = {
+                        "symbol": symbol,
+                        "direction": direction,
+                        "retcode": result.retcode,
+                        "comment": result.comment,
+                        "timestamp": _time.time(),
+                    }
+                    # v5.9.2: CLOSE_ONLY ise özel vade uyarı event'i ekle
+                    if result.retcode == _RETCODE_CLOSE_ONLY:
+                        _event_data["vade_uyari"] = True
+                        _event_data["reason"] = (
+                            f"{symbol} kontratı CLOSE_ONLY modunda — "
+                            f"vade geçişi gerekiyor"
+                        )
                     try:
                         from engine.event_bus import emit as _emit_event
-                        _emit_event("ORDER_REJECTED", {
-                            "symbol": symbol,
-                            "direction": direction,
-                            "retcode": result.retcode,
-                            "comment": result.comment,
-                            "timestamp": _time.time(),
-                        })
+                        _emit_event(_event_type, _event_data)
+                        if result.retcode == _RETCODE_CLOSE_ONLY:
+                            _emit_event("VADE_UYARI", _event_data)
                     except Exception:
                         pass
                     return None
