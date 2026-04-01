@@ -1356,6 +1356,7 @@ class Baba:
         if self._kill_switch_level >= KILL_SWITCH_L3:
             verdict.can_trade = False
             verdict.lot_multiplier = 0.0
+            verdict.risk_multiplier = 0.0  # v5.9.2-fix: L3'te risk_multiplier mutlaka 0
             verdict.kill_switch_level = KILL_SWITCH_L3
             verdict.reason = "KILL_SWITCH L3 aktif — tam kapanış"
             verdict.blocked_symbols = list(self._killed_symbols)

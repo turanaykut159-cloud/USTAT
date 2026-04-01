@@ -74,3 +74,5 @@ class Trade:
     pyramid_prices: str = ""         # ekleme fiyatları (virgülle ayrılmış)
     # ── Maximum hold time ────────────────────────────────────────
     max_hold_warned: bool = False    # max süre uyarısı verildi mi
+    # ── Yetim pozisyon (v5.9.2-fix) ─────────────────────────────
+    orphan: bool = False             # DB eşleşmesi yok ama MT5'te var — duplicate engeli

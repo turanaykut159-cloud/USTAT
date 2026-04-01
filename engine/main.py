@@ -831,8 +831,10 @@ class Engine:
         try:
             # v5.9.2: 3 katmanlı pipeline — risk_multiplier OĞUL'a aktarılır
             # can_trade=True → tam işlem, risk_multiplier lot'u ayarlar
-            # can_trade=False + risk_multiplier>0 → kısıtlı işlem (OLAY vb.)
-            # can_trade=False + risk_multiplier=0 → tam blok (eski davranış)
+            # can_trade=False + risk_multiplier>0 → kısıtlı işlem (L2 OLAY vb.)
+            # can_trade=False + risk_multiplier=0 → tam blok (L3, kayıp bazlı L2)
+            # GÜVENLİK: L3'te BABA risk_multiplier=0.0 set eder (D3 fix)
+            # Ek savunma: OĞUL.process_signals() başında da L3 kontrolü var (D6 fix)
             self.ogul._risk_multiplier = risk_verdict.risk_multiplier
 
             if risk_verdict.can_trade or risk_verdict.risk_multiplier > 0:

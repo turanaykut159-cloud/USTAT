@@ -479,6 +479,21 @@ def watchdog_loop():
 
         log(f"[WATCHDOG] Otomatik yeniden baslatma #{restart_count}/{MAX_AUTO_RESTARTS}")
 
+        # v5.9.2-fix: Restart öncesi L3 kill-switch kontrolü
+        # L3 aktifse motor kasıtlı olarak durmuş demektir — restart yapma
+        try:
+            import urllib.request as _urlreq
+            import json as _json_mod
+            _resp = _urlreq.urlopen("http://localhost:8000/status", timeout=3)
+            _status_data = _json_mod.loads(_resp.read())
+            _ks_level = _status_data.get("kill_switch_level", 0)
+            if _ks_level >= 3:
+                log(f"[WATCHDOG] L3 kill-switch aktif (level={_ks_level}) — restart ENGELLENDI")
+                log("[WATCHDOG] Motor kasitli olarak durmus. Manuel mudahale gerekli.")
+                continue
+        except Exception:
+            pass  # API cevap vermiyorsa normal restart akışına devam
+
         # v5.7.1: Restart öncesi SON shutdown.signal kontrolü (yarış durumu önlemi)
         if check_shutdown_signal():
             log("[WATCHDOG] Restart oncesi shutdown.signal tespit edildi — watchdog durduruluyor")

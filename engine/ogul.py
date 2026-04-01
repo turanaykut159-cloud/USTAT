@@ -569,6 +569,12 @@ class Ogul:
         for symbol in symbols:
             self.last_signals[symbol] = self._calculate_voting(symbol)
 
+        # v5.9.2-fix: L3 kill-switch kontrolü — OĞUL seviyesinde ikinci savunma hattı
+        # main.py OR koşulunun herhangi bir şekilde bypass edilmesine karşı koruma
+        if self.baba and getattr(self.baba, "_kill_switch_level", 0) >= 3:
+            logger.warning("process_signals: L3 aktif — sinyal üretimi engellendi")
+            return
+
         # Günlük zarar durdurucu aktifse sinyal üretme
         if self._daily_loss_stop:
             logger.warning("Sinyal üretimi engellendi: günlük zarar durdurucu aktif (_daily_loss_stop=True)")
@@ -1687,8 +1693,13 @@ class Ogul:
         # ── FAZ 2: PENDING (pre-flight) ──────────────────────────────
         trade.state = TradeState.PENDING
 
-        # v5.9.2: İşlem saatleri process_signals()'da zaten kontrol ediliyor
-        # Tekrar kontrol kaldırıldı (race condition riski: 17:44'te sinyal, 17:45'te red)
+        # v5.9.2-fix: İşlem saati çift katmanlı koruma (savunma derinliği)
+        # process_signals()'da birincil kontrol var, burası ikincil güvenlik ağı
+        if not self._is_trading_allowed(now):
+            trade.state = TradeState.CANCELLED
+            trade.cancel_reason = "outside_trading_hours"
+            self._log_cancelled_trade(trade)
+            return
 
         # Eş zamanlı pozisyon limiti (atomik kontrol)
         with self._trade_lock:
@@ -4218,15 +4229,15 @@ class Ogul:
                     f"strateji={strategy} rejim={regime_at_entry}"
                 )
             else:
-                # DB eşleşmesi yok — OĞUL sahiplenmez, logla ve atla
-                # ManuelMotor kendi restore'unda bu pozisyonları sahiplenecek
+                # v5.9.2-fix: DB eşleşmesi yok ama MT5'te pozisyon var
+                # active_trades'te TUT — duplicate emir engeli olarak çalışır
+                # Eski davranış: pop → aynı sembole tekrar emir → kontrolsüz birikim
                 orphan_count += 1
-                self.active_trades.pop(symbol, None)
-                restored_count -= 1
+                trade.orphan = True
                 logger.warning(
                     f"Yetim pozisyon [{symbol}]: ticket={ticket} "
                     f"{direction} {pos.get('volume', 0)} lot — "
-                    f"OĞUL sahiplenmedi (DB eşleşmesi yok)"
+                    f"active_trades'te TUTULUYOR (duplicate engeli)"
                 )
                 continue
 

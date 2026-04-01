@@ -117,10 +117,11 @@ class MT5Bridge:
         # modify_position() başarısız olduğunda MT5 hata detayı (hibrit devir vb.)
         self._last_modify_error: dict[str, Any] = {}
         # Emir gönderimi tek seferde bir çağrı (manuel + engine race önlemi)
-        self._order_lock: threading.Lock = threading.Lock()
+        # v5.9.2-fix: RLock — send_order içinden close_position çağrılabilsin (deadlock önlemi)
+        self._order_lock: threading.RLock = threading.RLock()
         # v5.8/CEO-FAZ2: Tüm MT5 yazma işlemleri (close, modify) için kilit
-        # send_order zaten _order_lock ile korunuyor, ama close/modify korunmuyordu.
-        self._write_lock: threading.Lock = threading.Lock()
+        # v5.9.2-fix: RLock — aynı thread reentrant erişim (SL/TP fail → close_position)
+        self._write_lock: threading.RLock = threading.RLock()
         # Sistem sağlığı metrikleri (Engine tarafından set edilir)
         self._health: Any = None
 
@@ -1265,14 +1266,14 @@ class MT5Bridge:
                             order_result["unprotected"] = True
                             return order_result
 
+                    # v5.9.2-fix: TRADE_ACTION_SLTP sadece action/symbol/position/sl/tp kabul eder
+                    # type_filling ve type_time TRADE_ACTION_DEAL içindir — GCM retcode=10035 veriyordu
                     sltp_request: dict[str, Any] = {
                         "action": mt5.TRADE_ACTION_SLTP,
                         "symbol": mt5_name,
                         "position": position_ticket,
                         "sl": sl_rounded,
                         "tp": tp_rounded,
-                        "type_filling": filling,      # GCM VİOP: RETURN
-                        "type_time": mt5.ORDER_TIME_GTC,
                     }
 
                     logger.info(
@@ -1757,14 +1758,13 @@ class MT5Bridge:
                     return {"retcode": 0, "comment": "no_change"}
 
                 position_ticket = int(getattr(pos, "ticket", ticket))
+                # v5.9.2-fix: TRADE_ACTION_SLTP — type_filling/type_time kaldırıldı (10035 fix)
                 request: dict[str, Any] = {
                     "action": mt5.TRADE_ACTION_SLTP,
                     "symbol": pos.symbol,
                     "position": position_ticket,
                     "sl": float(new_sl),
                     "tp": float(new_tp),
-                    "type_filling": mt5.ORDER_FILLING_RETURN,
-                    "type_time": mt5.ORDER_TIME_GTC,
                 }
 
                 logger.info(
