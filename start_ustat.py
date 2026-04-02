@@ -117,7 +117,7 @@ border-radius:50%;animation:s 1s linear infinite;margin:0 auto"></div>
 ELECTRON_SHIM_JS = """
 (function() {
     function createShim() {
-        var api = window.pywebviewApi;
+        var api = (window.pywebview && window.pywebview.api) || window.pywebviewApi;
         if (!api) { setTimeout(createShim, 100); return; }
         window.electronAPI = {
             windowMinimize: function() { return api.minimize(); },
@@ -395,6 +395,7 @@ def run_webview_process():
         frameless=True,
         easy_drag=True,
         on_top=True,
+        maximized=True,
     )
     _win[0] = window
 
