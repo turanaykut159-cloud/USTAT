@@ -64,6 +64,8 @@
 - #108 — CORS/origin düzeltmesi: api.js absolute URL→relative (`/api`), server.py CORS listesine `127.0.0.1:8000` eklendi — pywebview origin uyumsuzluğu giderildi
 - #109 — logger.py UTF-8 stderr sarmalayıcı: pythonw.exe charmap codec hatası düzeltildi — MT5 bağlantı başarısızlığının kök nedeni
 - #110 — Tek instance kilidi: start_ustat.py port+PID kontrolü, stale lock temizleme, mevcut pencereyi öne getirme (EnumWindows)
+- #111 — pywebview shim API referansı: `window.pywebviewApi`→`window.pywebview.api` — pencere kontrolleri, güvenli kapat, pin butonu çalışmıyordu (26b4945)
+- #111 — Pencere maximized başlatma: `maximized=True` eklendi — uygulama tam ekran açılıyor (26b4945)
 - #106 — 8 güvenlik açığı düzeltmesi: 1 Nisan olay raporu (230ee5f)
 
 ### Changed
