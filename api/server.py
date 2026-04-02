@@ -24,10 +24,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from starlette.responses import FileResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from api.deps import set_engine
 from api.routes import (
@@ -212,11 +216,36 @@ app.include_router(news.router, prefix="/api", tags=["news"])
 app.include_router(nabiz.router, prefix="/api", tags=["nabiz"])
 
 
-@app.get("/")
-async def root():
-    """API kök endpoint."""
-    return {
-        "name": "ÜSTAT API",
-        "version": API_VERSION,
-        "docs": "/docs",
-    }
+# ── SPA Statik Dosya Sunumu (React build) ────────────────────────
+# dist/ varsa React build'i sun, yoksa API JSON dönsün
+
+_DIST_DIR = os.path.join(os.path.dirname(__file__), "..", "desktop", "dist")
+
+
+class _SPAStaticFiles(StaticFiles):
+    """React Router SPA fallback — bilinmeyen path → index.html."""
+
+    async def get_response(self, path: str, scope):
+        try:
+            response = await super().get_response(path, scope)
+            if response.status_code == 404:
+                return FileResponse(os.path.join(self.directory, "index.html"))
+            return response
+        except StarletteHTTPException as exc:
+            if exc.status_code == 404:
+                return FileResponse(os.path.join(self.directory, "index.html"))
+            raise
+
+
+if os.path.isfile(os.path.join(_DIST_DIR, "index.html")):
+    app.mount("/", _SPAStaticFiles(directory=_DIST_DIR, html=True), name="spa")
+    logger.info(f"SPA static files mounted: {_DIST_DIR}")
+else:
+    @app.get("/")
+    async def root():
+        """API kök endpoint (dist/ yoksa fallback)."""
+        return {
+            "name": "ÜSTAT API",
+            "version": API_VERSION,
+            "docs": "/docs",
+        }
