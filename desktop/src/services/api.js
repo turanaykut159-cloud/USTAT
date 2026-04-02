@@ -9,8 +9,8 @@
 
 import axios from 'axios';
 
-const API_BASE = 'http://localhost:8000/api';
-const WS_BASE = 'ws://localhost:8000';
+const API_BASE = '/api';
+const WS_BASE = `ws://${window.location.host}`;
 
 /** İstatistik hesaplamalarının başlangıç tarihi (backend _STATS_BASELINE ile eşleşmeli). */
 export const STATS_BASELINE = '2026-02-01';

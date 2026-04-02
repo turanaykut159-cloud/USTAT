@@ -208,11 +208,65 @@ class UstatWindowApi:
         slog(f"[Renderer/{level}] {msg}")
 
     def launch_mt5(self, creds_json):
-        return self._api_get("/api/mt5/verify",
-                             lambda r: {"success": r.get("connected", False),
-                                        "message": "MT5 bagli" if r.get("connected") else "MT5 bagli degil",
-                                        "alreadyConnected": r.get("connected", False)},
-                             {"success": False, "message": "API erisilemedi"})
+        """MT5 terminal'i baslat ve credentials'i kaydet."""
+        import json, subprocess, keyring
+
+        MT5_PATH = r"C:\Program Files\GCM MT5 Terminal\terminal64.exe"
+        KEYRING_SERVICE = "ustat-mt5"
+
+        # Credentials parse
+        try:
+            creds = json.loads(creds_json) if creds_json else {}
+        except Exception:
+            creds = {}
+
+        server = creds.get("server", "")
+        login = creds.get("login", "")
+        password = creds.get("password", "")
+
+        # Eger credentials bossa, kayitli olanlari kullan
+        if not server or not login:
+            try:
+                saved = keyring.get_password(KEYRING_SERVICE, "credentials")
+                if saved:
+                    saved_data = json.loads(saved)
+                    server = server or saved_data.get("server", "")
+                    login = login or saved_data.get("login", "")
+                    password = password or saved_data.get("password", "")
+            except Exception:
+                pass
+
+        # Credentials kaydet (Windows Credential Manager)
+        if server and login and password:
+            try:
+                keyring.set_password(KEYRING_SERVICE, "credentials",
+                                     json.dumps({"server": server, "login": login, "password": password}))
+                slog(f"[APP] MT5 credentials kaydedildi: {server}/{login}")
+            except Exception as e:
+                slog(f"[APP] Credential kaydetme hatasi: {e}")
+
+        # Zaten bagli mi kontrol
+        verify = self._api_get("/api/mt5/verify", lambda r: r, {})
+        if verify.get("connected"):
+            return {"success": True, "alreadyConnected": True, "message": "MT5 zaten bagli"}
+
+        # MT5 terminal baslatilsin mi?
+        if not os.path.exists(MT5_PATH):
+            return {"success": False, "message": f"MT5 bulunamadi: {MT5_PATH}"}
+
+        # MT5'i baslat (fire-and-forget)
+        try:
+            login_arg = f"/login:{login}" if login else ""
+            server_arg = f"/server:{server}" if server else ""
+            cmd = [MT5_PATH]
+            if login_arg: cmd.append(login_arg)
+            if server_arg: cmd.append(server_arg)
+
+            subprocess.Popen(cmd, creationflags=0x00000008)  # DETACHED_PROCESS
+            slog(f"[APP] MT5 baslatildi: {server}/{login}")
+            return {"success": True, "message": "MT5 baslatildi — OTP bekleniyor"}
+        except Exception as e:
+            return {"success": False, "message": f"MT5 baslatilamadi: {e}"}
 
     def send_otp(self, otp_code):
         """OTP kodunu MT5 dialog'una gonder (admin Python ile)."""
@@ -255,24 +309,49 @@ class UstatWindowApi:
             return {"success": False, "message": str(e)}
 
     def get_mt5_status(self):
-        return self._api_get("/api/mt5/verify",
-                             lambda r: {"running": r.get("connected", False),
-                                        "hasSaved": r.get("connected", False),
-                                        "server": r.get("account", {}).get("server"),
-                                        "login": str(r.get("account", {}).get("login", ""))},
-                             {"running": False, "hasSaved": False})
+        """MT5 durumu: keyring'den kayitli bilgi + API'den baglanti durumu."""
+        saved = self._load_credentials()
+        verify = self._api_get("/api/mt5/verify", lambda r: r, {})
+        return {
+            "running": verify.get("connected", False),
+            "hasSaved": saved is not None,
+            "server": saved.get("server") if saved else verify.get("account", {}).get("server"),
+            "login": saved.get("login") if saved else str(verify.get("account", {}).get("login", "")),
+        }
 
     def get_saved_credentials(self):
-        return self._api_get("/api/mt5/verify",
-                             lambda r: ({"hasSaved": True,
-                                         "server": r.get("account", {}).get("server", ""),
-                                         "login": str(r.get("account", {}).get("login", "")),
-                                         "passwordMask": "******"}
-                                        if r.get("connected") else {"hasSaved": False}),
-                             {"hasSaved": False})
+        """Kayitli credentials (Windows Credential Manager)."""
+        saved = self._load_credentials()
+        if saved:
+            return {
+                "hasSaved": True,
+                "server": saved.get("server", ""),
+                "login": saved.get("login", ""),
+                "passwordMask": "******",
+            }
+        return {"hasSaved": False}
 
     def clear_credentials(self):
+        """Kayitli credentials'i sil."""
+        try:
+            import keyring
+            keyring.delete_password("ustat-mt5", "credentials")
+            slog("[APP] Credentials silindi")
+        except Exception:
+            pass
         return True
+
+    def _load_credentials(self):
+        """Keyring'den credentials oku."""
+        import json
+        try:
+            import keyring
+            raw = keyring.get_password("ustat-mt5", "credentials")
+            if raw:
+                return json.loads(raw)
+        except Exception:
+            pass
+        return None
 
     def verify_mt5(self):
         return self._api_get("/api/mt5/verify", lambda r: r,
@@ -467,6 +546,92 @@ def _start_process_monitor(icon_ref):
     t.start()
 
 
+LOCK_FILE = os.path.join(USTAT_DIR, "ustat.lock")
+
+
+def _bring_existing_to_front():
+    """Zaten calisan USTAT penceresini on plana getir (Windows API)."""
+    try:
+        import ctypes
+        import ctypes.wintypes
+
+        user32 = ctypes.windll.user32
+
+        # EnumWindows ile USTAT penceresini bul
+        WNDENUMPROC = ctypes.WINFUNCTYPE(
+            ctypes.wintypes.BOOL, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM
+        )
+        target_hwnd = [None]
+
+        def enum_callback(hwnd, _lparam):
+            if user32.IsWindowVisible(hwnd):
+                length = user32.GetWindowTextLengthW(hwnd)
+                if length > 0:
+                    buf = ctypes.create_unicode_buffer(length + 1)
+                    user32.GetWindowTextW(hwnd, buf, length + 1)
+                    title = buf.value
+                    if "STAT" in title and "Trading" in title:
+                        target_hwnd[0] = hwnd
+                        return False  # dur
+            return True  # devam
+
+        user32.EnumWindows(WNDENUMPROC(enum_callback), 0)
+
+        if target_hwnd[0]:
+            SW_RESTORE = 9
+            user32.ShowWindow(target_hwnd[0], SW_RESTORE)
+            user32.SetForegroundWindow(target_hwnd[0])
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _check_single_instance():
+    """Single instance kilidi kontrol et.
+
+    Returns:
+        True ise bu tek instance (devam et), False ise baska instance calisiyor.
+    """
+    # 1. Port kontrolu — API zaten dinliyorsa baska instance var
+    if port_open(API_PORT):
+        slog(f"Port {API_PORT} zaten dinleniyor — baska USTAT instance calisiyor")
+        slog("Mevcut pencere on plana getiriliyor...")
+        if _bring_existing_to_front():
+            slog("Mevcut pencere on plana getirildi — yeni instance baslatilmiyor")
+        else:
+            slog("Pencere bulunamadi ama API aktif — yeni instance baslatilmiyor")
+        return False
+
+    # 2. Lock file kontrolu — stale lock temizligi
+    if os.path.exists(LOCK_FILE):
+        try:
+            with open(LOCK_FILE, "r") as f:
+                old_pid = int(f.read().strip())
+            # PID hala calisiyor mu?
+            import signal
+            os.kill(old_pid, 0)  # 0 sinyali: olup olmadigini kontrol et
+            slog(f"Lock file mevcut, PID {old_pid} hala calisiyor — yeni instance baslatilmiyor")
+            _bring_existing_to_front()
+            return False
+        except (ProcessLookupError, ValueError, OSError):
+            # PID olmus veya lock bozuk — stale lock, temizle
+            slog("Stale lock dosyasi temizlendi")
+            try:
+                os.remove(LOCK_FILE)
+            except Exception:
+                pass
+
+    # 3. Lock file olustur
+    try:
+        with open(LOCK_FILE, "w") as f:
+            f.write(str(os.getpid()))
+    except Exception:
+        pass
+
+    return True
+
+
 def main():
     # Temiz log
     with open(LOG_FILE, "w", encoding="utf-8") as f:
@@ -478,14 +643,19 @@ def main():
     slog(f"Mod: {'DEV' if IS_DEV else 'PRODUCTION'}")
     slog("=" * 60)
 
+    # ── Single instance kilidi ────────────────────────────────────
+    if not _check_single_instance():
+        slog("=== Mevcut instance aktif — cikiliyor ===")
+        sys.exit(0)
+
     # dist/ kontrolu
     if not IS_DEV and not os.path.isfile(os.path.join(DIST_DIR, "index.html")):
         slog("HATA: desktop/dist/index.html bulunamadi!")
         sys.exit(1)
 
-    # Port temizligi
+    # Port temizligi (sadece stale/orphan process icin — normal instance yukarida yakalandi)
     if port_open(API_PORT):
-        slog(f"Port {API_PORT} mesgul — temizleniyor")
+        slog(f"Port {API_PORT} mesgul (orphan process) — temizleniyor")
         kill_port(API_PORT)
         time.sleep(1)
 
@@ -515,6 +685,14 @@ def main():
 
     # Tray kapandi veya alt process bitti — temizlik
     stop_webview()
+
+    # Lock dosyasini temizle
+    try:
+        if os.path.exists(LOCK_FILE):
+            os.remove(LOCK_FILE)
+    except Exception:
+        pass
+
     slog("=== USTAT kapatildi ===")
 
 

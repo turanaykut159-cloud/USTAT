@@ -177,15 +177,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — Electron dev (5173) ve production
+# CORS — pywebview + dev modları
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        "http://127.0.0.1:8000",  # pywebview production
+        "http://localhost:8000",   # pywebview / Chrome
         "http://localhost:5173",   # Vite dev
         "http://localhost:3000",   # legacy
         "http://127.0.0.1:5173",
         "http://127.0.0.1:3000",
-        "app://.",                 # Electron production
+        "app://.",                 # Electron (eski)
     ],
     allow_credentials=True,
     allow_methods=["*"],

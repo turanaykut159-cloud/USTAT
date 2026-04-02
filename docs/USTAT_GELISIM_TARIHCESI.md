@@ -55,9 +55,18 @@
 
 ---
 
-## [5.9.0] — 2026-03-28 / 2026-04-01
+## [5.9.0] — 2026-03-28 / 2026-04-02
 
 ### Added
+- #107 — pywebview migrasyonu: Electron+Vite → pywebview+pystray tek process mimarisi, SPA static serving FastAPI'den (65dc9ff)
+
+### Fixed
+- #108 — CORS/origin düzeltmesi: api.js absolute URL→relative (`/api`), server.py CORS listesine `127.0.0.1:8000` eklendi — pywebview origin uyumsuzluğu giderildi
+- #109 — logger.py UTF-8 stderr sarmalayıcı: pythonw.exe charmap codec hatası düzeltildi — MT5 bağlantı başarısızlığının kök nedeni
+- #110 — Tek instance kilidi: start_ustat.py port+PID kontrolü, stale lock temizleme, mevcut pencereyi öne getirme (EnumWindows)
+- #106 — 8 güvenlik açığı düzeltmesi: 1 Nisan olay raporu (230ee5f)
+
+### Changed
 - #105 — Otonom vade geçiş sistemi: 4 katmanlı koruma — trade_mode tabanlı kontrat seçimi, saatlik periyodik tarama, retcode 10044 reaktif handler, eski vade pozisyon tespiti + VADE_UYARI/STALE_POSITION event'leri (34ded93)
 - #105 — Yarım gün (arefe) desteği: HALF_DAYS setleri (2025-2027), is_half_day(), get_close_time(), is_market_open() arefe günü 12:40 kapanış (34ded93)
 - #104 — Veri Yönetim Sistemi iyileştirme: OHLCV validasyon katmanı (Katman 1), veri bayatlık tespiti (freshness monitor — FRESH/STALE/SOURCE_FAILURE ayrımı), SQLite PRAGMA optimizasyonu (synchronous=NORMAL, cache_size=64MB, mmap_size=256MB)
