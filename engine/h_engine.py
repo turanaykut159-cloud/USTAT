@@ -91,6 +91,8 @@ class HybridPosition:
     transferred_at: str = ""
     db_id: int = 0
     reference_price: float = 0.0  # PRİMNET: Uzlaşma fiyatı (devir günü)
+    trailing_order_ticket: int = 0  # PRİMNET Stop Limit: trailing bekleyen emir ticket'ı
+    target_order_ticket: int = 0    # PRİMNET Stop Limit: hedef bekleyen emir ticket'ı
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -153,13 +155,17 @@ class HEngine:
         primnet_cfg = hybrid_cfg.get("primnet", {})
         self._primnet_trailing: float = primnet_cfg.get("trailing_prim", 1.5)
         self._primnet_target: float = primnet_cfg.get("target_prim", 9.5)
+        self._use_stop_limit: bool = primnet_cfg.get("use_stop_limit", False)
+        # Stop Limit emirde stop ile limit arasındaki mesafe (prim cinsinden)
+        self._stop_limit_gap_prim: float = primnet_cfg.get("stop_limit_gap_prim", 0.3)
 
         sltp_mode = "NATIVE (MT5)" if self._native_sltp else "SOFTWARE (H-Oğul)"
+        stop_limit_mode = "STOP LIMIT EMİR" if self._use_stop_limit else "TRADE_ACTION_SLTP"
         logger.info(
             f"H-Engine başlatıldı: max_concurrent={self._max_concurrent}, "
             f"daily_limit={self._config_daily_limit}, "
             f"SL/TP fallback={self._sl_atr_mult}×ATR/{self._tp_atr_mult}×ATR, "
-            f"SL/TP modu={sltp_mode}, "
+            f"SL/TP modu={sltp_mode}, trailing modu={stop_limit_mode}, "
             f"PRİMNET (trailing={self._primnet_trailing}, "
             f"hedef=±{self._primnet_target})"
         )
@@ -409,7 +415,71 @@ class HEngine:
             )
 
         # ── 1. SL/TP ataması ────────────────────────────────────────
-        if self._native_sltp:
+        trailing_order_ticket = 0
+        target_order_ticket = 0
+
+        if self._use_stop_limit and ref_price > 0:
+            # ─ Stop Limit mod: bekleyen emirlerle SL/TP yönetimi ─
+            gap = self._stop_limit_gap_prim * (ref_price * 0.01)
+
+            # Trailing Stop Limit emri
+            if direction == "BUY":
+                trail_dir = "SELL"
+                trail_stop = suggested_sl
+                trail_limit = suggested_sl + gap
+            else:
+                trail_dir = "BUY"
+                trail_stop = suggested_sl
+                trail_limit = suggested_sl - gap
+
+            trail_result = self.mt5.send_stop_limit(
+                symbol, trail_dir, volume,
+                trail_stop, trail_limit,
+                comment=f"PRIMNET_TRAIL_{ticket}",
+            )
+            if trail_result is None:
+                result["message"] = "Stop Limit trailing emri gönderilemedi — devir iptal"
+                logger.error(
+                    f"Hibrit devir başarısız — trailing Stop Limit hatası: "
+                    f"ticket={ticket} {symbol}"
+                )
+                return result
+            trailing_order_ticket = trail_result["order_ticket"]
+
+            # Hedef Stop Limit emri (target_prim seviyesinde)
+            if direction == "BUY":
+                tgt_dir = "SELL"
+                tgt_stop = suggested_tp
+                tgt_limit = suggested_tp + gap  # Sell: limit > stop
+            else:
+                tgt_dir = "BUY"
+                tgt_stop = suggested_tp
+                tgt_limit = suggested_tp - gap  # Buy: limit < stop
+
+            tgt_result = self.mt5.send_stop_limit(
+                symbol, tgt_dir, volume,
+                tgt_stop, tgt_limit,
+                comment=f"PRIMNET_TGT_{ticket}",
+            )
+            if tgt_result is not None:
+                target_order_ticket = tgt_result["order_ticket"]
+                logger.info(
+                    f"Hedef Stop Limit yerleştirildi: order={target_order_ticket} "
+                    f"{symbol} {tgt_dir} stop={tgt_stop:.4f} limit={tgt_limit:.4f}"
+                )
+            else:
+                # Hedef emri kritik değil — trailing yeterli, log yaz devam et
+                logger.warning(
+                    f"Hedef Stop Limit gönderilemedi: {symbol} {tgt_dir} "
+                    f"stop={tgt_stop:.4f} — sadece trailing aktif"
+                )
+
+            logger.info(
+                f"Stop Limit devir: ticket={ticket} {symbol} {direction} "
+                f"trail_order={trailing_order_ticket} tgt_order={target_order_ticket}"
+            )
+
+        elif self._native_sltp:
             # Native mod: MT5'e SL/TP yaz (atomik — başarısızsa devir iptal)
             modify_result = self.mt5.modify_position(
                 ticket, sl=suggested_sl, tp=suggested_tp,
@@ -493,6 +563,8 @@ class HEngine:
             transferred_at=datetime.now().isoformat(timespec="seconds"),
             db_id=db_id,
             reference_price=ref_price,
+            trailing_order_ticket=trailing_order_ticket,
+            target_order_ticket=target_order_ticket,
         )
         # PRİMNET: breakeven_hit baştan True — Faz 1 trailing hemen başlar
         hp.breakeven_hit = True
@@ -546,6 +618,9 @@ class HEngine:
 
         hp = self.hybrid_positions[ticket]
         symbol = hp.symbol
+
+        # Stop Limit emirlerini iptal et
+        self._cancel_stop_limit_orders(hp)
 
         # DB güncelle
         self.db.close_hybrid_position(
@@ -936,6 +1011,13 @@ class HEngine:
         Prim bazlı mesafe hesabı ile SL günceller.
         Kural: SL sadece daha iyi yöne taşınır (BUY: yukarı, SELL: aşağı)
 
+        use_stop_limit=True ise:
+            Stop Limit bekleyen emir ile trailing — modify_position yerine
+            Buy Stop Limit (SELL pozisyon) / Sell Stop Limit (BUY pozisyon)
+
+        use_stop_limit=False ise:
+            Eski davranış: TRADE_ACTION_SLTP ile pozisyon SL güncelleme
+
         Args:
             hp: Hibrit pozisyon.
             current_price: Güncel fiyat.
@@ -958,9 +1040,12 @@ class HEngine:
             if new_sl >= hp.current_sl:
                 return
 
-        # MT5'e native SL yaz — hem native hem software modda.
-        # Software modda da MT5'e yazarak gap koruması sağlanır:
-        # Trailing SL seviyesi broker tarafında korunur, 10sn polling beklenmez.
+        # ── Stop Limit modu: bekleyen emir ile trailing ─────────────
+        if self._use_stop_limit:
+            self._trailing_via_stop_limit(hp, new_sl, current_price, profit, swap)
+            return
+
+        # ── Eski mod: TRADE_ACTION_SLTP ile SL güncelleme ───────────
         modify_result = self.mt5.modify_position(hp.ticket, sl=new_sl)
         if modify_result is None:
             retry_key = f"tr_modify_{hp.ticket}"
@@ -1023,6 +1108,140 @@ class HEngine:
             f"kâr={total_pnl:.0f} TRY) [primnet]"
         )
 
+    # ── TRAILING VIA STOP LIMIT ─────────────────────────────────────
+
+    def _trailing_via_stop_limit(
+        self, hp: HybridPosition, new_sl: float,
+        current_price: float, profit: float, swap: float,
+    ) -> None:
+        """Stop Limit bekleyen emir ile trailing stop güncelleme.
+
+        SELL pozisyon → BUY STOP LIMIT (fiyat yükselirse pozisyonu kapat)
+        BUY pozisyon  → SELL STOP LIMIT (fiyat düşerse pozisyonu kapat)
+
+        Stop Limit emrin iki fiyatı:
+            stop_price  = trailing SL seviyesi (tetik)
+            limit_price = stop_price ± gap (slippage koruması)
+
+        Args:
+            hp: Hibrit pozisyon.
+            new_sl: Hesaplanan yeni trailing SL fiyatı.
+            current_price: Güncel fiyat.
+            profit: MT5 profit.
+            swap: Birikmiş swap.
+        """
+        ref_price = hp.reference_price or self._get_reference_price(hp.symbol)
+        gap = self._stop_limit_gap_prim * (ref_price * 0.01) if ref_price else 0.05
+
+        # Stop ve Limit fiyatları hesapla
+        if hp.direction == "BUY":
+            # BUY pozisyon → SELL STOP LIMIT (fiyat düşerse kapat)
+            stop_price = new_sl
+            limit_price = new_sl + gap  # Sell limit > stop (kural)
+            order_direction = "SELL"
+        else:
+            # SELL pozisyon → BUY STOP LIMIT (fiyat yükselirse kapat)
+            stop_price = new_sl
+            limit_price = new_sl - gap  # Buy limit < stop (kural)
+            order_direction = "BUY"
+
+        old_sl = hp.current_sl
+
+        # Mevcut trailing emir var mı? → MODIFY, yoksa → yeni emir gönder
+        if hp.trailing_order_ticket > 0:
+            # Önce emrin hâlâ bekliyor olduğunu kontrol et
+            pending = self.mt5.get_pending_orders(hp.symbol)
+            order_exists = any(
+                o.get("ticket") == hp.trailing_order_ticket for o in (pending or [])
+            )
+
+            if order_exists:
+                # TRADE_ACTION_MODIFY — atomik güncelleme
+                result = self.mt5.modify_stop_limit(
+                    hp.trailing_order_ticket, stop_price, limit_price,
+                )
+                if result is not None:
+                    self._close_retry_counts.pop(f"tr_sl_{hp.ticket}", None)
+                    logger.info(
+                        f"Trailing Stop Limit güncellendi: ticket={hp.trailing_order_ticket} "
+                        f"{hp.symbol} stop={stop_price:.4f} limit={limit_price:.4f}"
+                    )
+                else:
+                    retry_key = f"tr_sl_{hp.ticket}"
+                    fail_count = self._close_retry_counts.get(retry_key, 0) + 1
+                    self._close_retry_counts[retry_key] = fail_count
+                    if fail_count <= 3:
+                        logger.warning(
+                            f"Trailing Stop Limit modify başarısız: "
+                            f"ticket={hp.trailing_order_ticket} {hp.symbol} "
+                            f"(deneme {fail_count}/3)"
+                        )
+                    if fail_count == 3:
+                        # Modify 3x başarısız — emri iptal edip yeniden gönder
+                        logger.warning(
+                            f"Trailing Stop Limit 3x modify başarısız — "
+                            f"iptal edip yeniden gönderiliyor: {hp.symbol}"
+                        )
+                        self.mt5.cancel_stop_limit(hp.trailing_order_ticket)
+                        hp.trailing_order_ticket = 0
+                        self._close_retry_counts.pop(retry_key, None)
+            else:
+                # Emir tetiklenmiş veya iptal edilmiş — yenisini gönder
+                logger.info(
+                    f"Trailing Stop Limit emri kayboldu: "
+                    f"ticket={hp.trailing_order_ticket} {hp.symbol} — yenisi gönderiliyor"
+                )
+                hp.trailing_order_ticket = 0
+
+        # Yeni emir gönder (ilk kez veya eski iptal edilmiş)
+        if hp.trailing_order_ticket == 0:
+            result = self.mt5.send_stop_limit(
+                hp.symbol, order_direction, hp.volume,
+                stop_price, limit_price,
+                comment=f"PRIMNET_TRAIL_{hp.ticket}",
+            )
+            if result is not None:
+                hp.trailing_order_ticket = result["order_ticket"]
+                logger.info(
+                    f"Trailing Stop Limit yerleştirildi: "
+                    f"order={hp.trailing_order_ticket} {hp.symbol} "
+                    f"{order_direction} stop={stop_price:.4f} limit={limit_price:.4f}"
+                )
+            else:
+                logger.error(
+                    f"Trailing Stop Limit gönderilemedi: {hp.symbol} {order_direction} "
+                    f"stop={stop_price:.4f} limit={limit_price:.4f}"
+                )
+                return
+
+        # Bellek + DB güncelle
+        hp.current_sl = new_sl
+        hp.trailing_active = True
+
+        self.db.update_hybrid_position(hp.ticket, {
+            "current_sl": new_sl,
+            "trailing_active": 1,
+        })
+        total_pnl = profit + swap
+        self.db.insert_hybrid_event(
+            ticket=hp.ticket, symbol=hp.symbol, event="TRAILING_UPDATE",
+            details={
+                "old_sl": old_sl, "new_sl": new_sl,
+                "stop_price": stop_price, "limit_price": limit_price,
+                "trailing_order_ticket": hp.trailing_order_ticket,
+                "price": current_price, "entry_atr": hp.entry_atr,
+                "mode": "stop_limit",
+                "trailing_mode": "primnet",
+                "pnl": round(total_pnl, 2),
+            },
+        )
+
+        logger.info(
+            f"Trailing SL: ticket={hp.ticket} {hp.symbol} "
+            f"SL {old_sl:.4f} → {new_sl:.4f} (fiyat={current_price:.4f}, "
+            f"kâr={total_pnl:.0f} TRY) [stop_limit]"
+        )
+
     # ═════════════════════════════════════════════════════════════════
     #  MT5 SL DOĞRULAMA — v5.4.1
     # ═════════════════════════════════════════════════════════════════
@@ -1081,6 +1300,9 @@ class HEngine:
             hp = self.hybrid_positions.get(ticket)
             if hp is None or hp.state != "ACTIVE":
                 continue
+
+            # Stop Limit emirlerini iptal et (pozisyon kapatılmadan ÖNCE)
+            self._cancel_stop_limit_orders(hp)
 
             # MT5'ten güncel PnL al
             pnl = 0.0
@@ -1159,6 +1381,10 @@ class HEngine:
         count = len(self.hybrid_positions)
         if count > 0:
             logger.info(f"Hibrit pozisyonlar geri yüklendi: {count} adet")
+
+            # Stop Limit mod: bekleyen emirleri eşleştir
+            if self._use_stop_limit:
+                self._restore_stop_limit_tickets()
 
         # Günlük PnL'yi DB'den yükle
         self._refresh_daily_pnl()
@@ -1359,6 +1585,10 @@ class HEngine:
         BUY: güncel_prim ≥ +target_prim (varsayılan +9.5) → KAPAT
         SELL: güncel_prim ≤ -target_prim (varsayılan -9.5) → KAPAT
 
+        Stop Limit modda: hedef emir MT5'te bekliyor. Emir tetiklenmiş olabilir
+        (pozisyon kapanmış), ya da fiyat hedefe ulaşmış ama emir henüz tetiklenmemişse
+        market ile kapatır.
+
         Args:
             hp: Hibrit pozisyon.
             current_price: Güncel fiyat.
@@ -1382,6 +1612,22 @@ class HEngine:
             hit = True
 
         if not hit:
+            # Hedef vurulmadı — Stop Limit modda hedef emri hâlâ orada mı kontrol et
+            if self._use_stop_limit and hp.target_order_ticket > 0:
+                pending = self.mt5.get_pending_orders(hp.symbol)
+                tgt_exists = any(
+                    o.get("ticket") == hp.target_order_ticket
+                    for o in (pending or [])
+                )
+                if not tgt_exists:
+                    # Hedef emir kayboldu (iptal edilmiş veya kısmi tetik?)
+                    # Pozisyon hâlâ MT5'te açıksa yeniden yerleştir
+                    logger.warning(
+                        f"PRİMNET hedef emri kayboldu: order={hp.target_order_ticket} "
+                        f"{hp.symbol} — yeniden yerleştirilecek"
+                    )
+                    hp.target_order_ticket = 0
+                    self._place_target_stop_limit(hp)
             return False
 
         # Retry limiti kontrolü
@@ -1395,6 +1641,9 @@ class HEngine:
             f"prim={current_prim:.2f} hedef=±{target} — kapatılıyor"
         )
 
+        # Stop Limit modda: hedef emir tetiklenmiş olabilir, pozisyon zaten kapanmış
+        # olabilir — _manage_positions zaten external close algılar.
+        # Ama fiyat hedefe ulaşmış ve emir tetiklenmemişse market ile kapat.
         close_result = self.mt5.close_position(
             hp.ticket, expected_volume=hp.volume,
         )
@@ -1415,6 +1664,47 @@ class HEngine:
             f"prim={current_prim:.2f} PnL={total_pnl:.2f}"
         )
         return True
+
+    def _place_target_stop_limit(self, hp: HybridPosition) -> None:
+        """Hedef Stop Limit emrini (yeniden) yerleştir.
+
+        Args:
+            hp: Hibrit pozisyon.
+        """
+        ref_price = hp.reference_price or self._get_reference_price(hp.symbol)
+        if not ref_price or ref_price <= 0:
+            return
+
+        gap = self._stop_limit_gap_prim * (ref_price * 0.01)
+        target = self._primnet_target
+
+        if hp.direction == "BUY":
+            target_prim = target
+            tgt_dir = "SELL"
+            tgt_stop = self._prim_to_price(target_prim, ref_price)
+            tgt_limit = tgt_stop + gap
+        else:
+            target_prim = -target
+            tgt_dir = "BUY"
+            tgt_stop = self._prim_to_price(target_prim, ref_price)
+            tgt_limit = tgt_stop - gap
+
+        result = self.mt5.send_stop_limit(
+            hp.symbol, tgt_dir, hp.volume,
+            tgt_stop, tgt_limit,
+            comment=f"PRIMNET_TGT_{hp.ticket}",
+        )
+        if result is not None:
+            hp.target_order_ticket = result["order_ticket"]
+            logger.info(
+                f"Hedef Stop Limit yeniden yerleştirildi: "
+                f"order={hp.target_order_ticket} {hp.symbol} {tgt_dir} "
+                f"stop={tgt_stop:.4f} limit={tgt_limit:.4f}"
+            )
+        else:
+            logger.error(
+                f"Hedef Stop Limit yeniden gönderilemedi: {hp.symbol} {tgt_dir}"
+            )
 
     def _is_trading_hours(self, now: datetime | None = None) -> bool:
         """İşlem saatleri içinde olup olmadığını kontrol et (09:40-17:50).
@@ -1527,8 +1817,40 @@ class HEngine:
             hp.current_tp = new_tp
             hp.breakeven_hit = True  # PRİMNET: trailing her zaman aktif
 
-            # MT5'e yaz (native mod)
-            if self._native_sltp:
+            # MT5'e yaz
+            if self._use_stop_limit and new_ref > 0:
+                # Stop Limit mod: eski emirleri iptal et, yenilerini koy
+                self._cancel_stop_limit_orders(hp)
+
+                gap = self._stop_limit_gap_prim * (new_ref * 0.01)
+
+                # Trailing Stop Limit
+                if hp.direction == "BUY":
+                    trail_dir = "SELL"
+                    trail_stop = new_sl
+                    trail_limit = new_sl + gap
+                else:
+                    trail_dir = "BUY"
+                    trail_stop = new_sl
+                    trail_limit = new_sl - gap
+
+                trail_res = self.mt5.send_stop_limit(
+                    hp.symbol, trail_dir, hp.volume,
+                    trail_stop, trail_limit,
+                    comment=f"PRIMNET_TRAIL_{ticket}",
+                )
+                if trail_res is not None:
+                    hp.trailing_order_ticket = trail_res["order_ticket"]
+                else:
+                    logger.error(
+                        f"PRİMNET yenileme trailing Stop Limit başarısız: "
+                        f"ticket={ticket} {hp.symbol}"
+                    )
+
+                # Hedef Stop Limit
+                self._place_target_stop_limit(hp)
+
+            elif self._native_sltp:
                 modify_result = self.mt5.modify_position(ticket, sl=new_sl, tp=new_tp)
                 if modify_result is None:
                     logger.error(
@@ -1587,15 +1909,95 @@ class HEngine:
 
         logger.info("PRİMNET günlük yenileme tamamlandı")
 
+    def _cancel_stop_limit_orders(self, hp: HybridPosition) -> None:
+        """Pozisyona ait bekleyen Stop Limit emirlerini iptal et.
+
+        Trailing ve hedef emirleri kontrol eder, hâlâ bekleyenleri iptal eder.
+        Ticket'ları sıfırlar.
+
+        Args:
+            hp: Hibrit pozisyon.
+        """
+        if not self._use_stop_limit:
+            return
+
+        for attr_name, label in [
+            ("trailing_order_ticket", "trailing"),
+            ("target_order_ticket", "hedef"),
+        ]:
+            order_ticket = getattr(hp, attr_name, 0)
+            if order_ticket > 0:
+                result = self.mt5.cancel_stop_limit(order_ticket)
+                if result is not None:
+                    logger.info(
+                        f"Stop Limit {label} emri iptal edildi: "
+                        f"order={order_ticket} {hp.symbol}"
+                    )
+                else:
+                    logger.warning(
+                        f"Stop Limit {label} emri iptal edilemedi: "
+                        f"order={order_ticket} {hp.symbol}"
+                    )
+                setattr(hp, attr_name, 0)
+
+    def _restore_stop_limit_tickets(self) -> None:
+        """Restart sonrası bekleyen Stop Limit emirlerini hibrit pozisyonlarla eşleştir.
+
+        MT5'teki bekleyen emirlerin comment alanından PRIMNET_TRAIL_<ticket> ve
+        PRIMNET_TGT_<ticket> bilgisi çıkarılır, ilgili pozisyonla eşlenir.
+        Eşleşmeyen emirler loglanır.
+        """
+        for hp in self.hybrid_positions.values():
+            if hp.state != "ACTIVE":
+                continue
+            pending = self.mt5.get_pending_orders(hp.symbol)
+            if not pending:
+                continue
+
+            for order in pending:
+                comment = order.get("comment", "")
+                order_ticket = order.get("ticket", 0)
+                if not order_ticket:
+                    continue
+
+                if comment == f"PRIMNET_TRAIL_{hp.ticket}":
+                    hp.trailing_order_ticket = order_ticket
+                    logger.info(
+                        f"Trailing Stop Limit eşleştirildi: order={order_ticket} "
+                        f"← pozisyon={hp.ticket} {hp.symbol}"
+                    )
+                elif comment == f"PRIMNET_TGT_{hp.ticket}":
+                    hp.target_order_ticket = order_ticket
+                    logger.info(
+                        f"Hedef Stop Limit eşleştirildi: order={order_ticket} "
+                        f"← pozisyon={hp.ticket} {hp.symbol}"
+                    )
+
+            # Emir bulunamadıysa: yeniden yerleştir
+            if hp.trailing_order_ticket == 0:
+                logger.warning(
+                    f"Trailing Stop Limit bulunamadı: pozisyon={hp.ticket} "
+                    f"{hp.symbol} — sonraki cycle'da yeniden yerleştirilecek"
+                )
+            if hp.target_order_ticket == 0:
+                logger.warning(
+                    f"Hedef Stop Limit bulunamadı: pozisyon={hp.ticket} "
+                    f"{hp.symbol} — sonraki cycle'da yeniden yerleştirilecek"
+                )
+
     def _handle_external_close(self, hp: HybridPosition) -> None:
         """MT5'te kapatılmış (harici kapanış) hibrit pozisyonu işle.
 
         SL/TP hit veya kullanıcı MT5'ten kapatmış olabilir.
+        Stop Limit emir tetiklenmiş de olabilir.
         Gerçek PnL'i MT5 deal geçmişinden almaya çalışır.
 
         Args:
             hp: Kapatılan hibrit pozisyon.
         """
+        # Stop Limit emirlerini temizle (tetiklenmemiş kalanları iptal et)
+        self._cancel_stop_limit_orders(hp)
+
         # Gerçek PnL bilgisi: Deal geçmişinden almayı dene
         pnl = 0.0
         swap = 0.0
@@ -1628,6 +2030,9 @@ class HEngine:
             pnl: Toplam K/Z (profit + swap).
             swap: Swap maliyeti.
         """
+        # Stop Limit bekleyen emirleri temizle
+        self._cancel_stop_limit_orders(hp)
+
         hp.state = "CLOSED"
 
         # DB güncelle

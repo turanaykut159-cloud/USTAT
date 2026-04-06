@@ -93,6 +93,9 @@
 - #83 — 10.003 kombinasyonlu stres testi: BABA/OĞUL/H-Engine/MT5/Manuel/Top5/DB/Entegrasyon (a36f3d0)
 
 ### Changed
+- #117 — PRİMNET Stop Limit emir sistemi: TRADE_ACTION_SLTP (modify_position) yerine Buy/Sell Stop Limit bekleyen emirler ile trailing stop ve hedef yönetimi — GCM VİOP netting modunda "Invalid order" (retcode 10035) sorununu çözer
+- #117 — mt5_bridge.py'ye 3 yeni fonksiyon: send_stop_limit, modify_stop_limit, cancel_stop_limit + get_pending_orders STOP_LIMIT tip tanıma
+- #117 — H-Engine tam yaşam döngüsü: devir→trailing→hedef→kapanış→gece geçişi→restart kurtarma Stop Limit emirlerle
 - #97 — PRİMNET sabit trailing: Faz 1/Faz 2 ayrımı kaldırıldı, her zaman 1.5 prim sabit trailing, stop > giriş olduğunda kilitli kâr otomatik (9020e43)
 
 ### Fixed
