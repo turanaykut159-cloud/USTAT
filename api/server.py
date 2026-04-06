@@ -150,6 +150,14 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
+    # 1. WebSocket bağlantılarını kapat (socket'ler serbest kalsın)
+    try:
+        from api.routes.live import shutdown_all_connections
+        await shutdown_all_connections()
+    except Exception as e:
+        logger.warning(f"WebSocket kapatma hatası: {e}")
+
+    # 2. Engine'i durdur
     if engine is not None:
         try:
             engine.stop("API shutdown")
@@ -166,6 +174,14 @@ async def lifespan(app: FastAPI):
             logger.info("ÜSTAT Engine durduruldu.")
         except Exception as e:
             logger.warning(f"Engine durdurma hatası: {e}")
+
+    # 3. api.pid dosyasını temizle
+    try:
+        _api_pid_path = os.path.join(os.path.dirname(__file__), "..", "api.pid")
+        if os.path.exists(_api_pid_path):
+            os.remove(_api_pid_path)
+    except Exception:
+        pass
 
 
 # ── FastAPI Uygulama ──────────────────────────────────────────────

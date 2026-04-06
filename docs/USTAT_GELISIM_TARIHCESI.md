@@ -55,12 +55,17 @@
 
 ---
 
-## [5.9.0] — 2026-03-28 / 2026-04-02
+## [5.9.0] — 2026-03-28 / 2026-04-06
 
 ### Added
+- #112 — ProcessGuard hayalet koruma modülü: PID registry, tree-kill, orphan Electron/MT5 tespiti, port/socket temizliği — kapanışta kalan zombie process/port/socket sorununu çözer
+- #113 — api.pid dosya yazımı: start_ustat.py API başladığında PID yazar, Electron killApiProcess() artık API process'i bulabilir
+- #114 — WebSocket graceful shutdown: shutdown_all_connections() fonksiyonu — kapanışta tüm WS bağlantıları kapatılır, TIME_WAIT socket birikimi önlenir
 - #107 — pywebview migrasyonu: Electron+Vite → pywebview+pystray tek process mimarisi, SPA static serving FastAPI'den (65dc9ff)
 
 ### Fixed
+- #115 — Shutdown zinciri düzeltmesi: _shutdown_api() timeout 20sn→45sn (engine.stop() 30sn sürebilir), çift çağrı koruması, Electron tree-kill subprocess durumundan bağımsız hale getirildi
+- #116 — Kapanış sırası düzeltmesi: server.py lifespan shutdown — WebSocket kapat → Engine durdur → api.pid temizle (eskiden WebSocket cleanup yoktu)
 - #108 — CORS/origin düzeltmesi: api.js absolute URL→relative (`/api`), server.py CORS listesine `127.0.0.1:8000` eklendi — pywebview origin uyumsuzluğu giderildi
 - #109 — logger.py UTF-8 stderr sarmalayıcı: pythonw.exe charmap codec hatası düzeltildi — MT5 bağlantı başarısızlığının kök nedeni
 - #110 — Tek instance kilidi: start_ustat.py port+PID kontrolü, stale lock temizleme, mevcut pencereyi öne getirme (EnumWindows)

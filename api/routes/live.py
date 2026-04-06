@@ -375,6 +375,37 @@ async def _send_all_updates(ws: WebSocket):
         await ws.send_text(payload)
 
 
+async def shutdown_all_connections() -> None:
+    """Tüm aktif WebSocket bağlantılarını kapat (graceful shutdown).
+
+    api/server.py lifespan shutdown'ından çağrılır. Açık bağlantılar
+    kapatılmazsa uvicorn process'i socket'leri bırakmaz ve port
+    TIME_WAIT durumunda kalır.
+    """
+    global _event_drain_task
+
+    # Event drain task'i durdur
+    if _event_drain_task and not _event_drain_task.done():
+        _event_drain_task.cancel()
+        _event_drain_task = None
+
+    # Tüm bağlantıları kapat
+    async with _connections_lock:
+        snapshot = list(_active_connections)
+        _active_connections.clear()
+
+    closed_count = 0
+    for ws in snapshot:
+        try:
+            await ws.close(code=1001, reason="Server shutdown")
+            closed_count += 1
+        except Exception:
+            pass  # Zaten kopmuş olabilir
+
+    if closed_count > 0:
+        logger.info(f"Shutdown: {closed_count} WebSocket bağlantısı kapatıldı")
+
+
 async def broadcast(message: dict) -> None:
     """Tüm aktif bağlantılara mesaj gönder (engine tarafından çağrılabilir)."""
     if not _active_connections:
