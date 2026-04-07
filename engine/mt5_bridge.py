@@ -2318,6 +2318,422 @@ class MT5Bridge:
             )
             return None
 
+    # ── send_stop ────────────────────────────────────────────────────
+    def send_stop(
+        self,
+        symbol: str,
+        direction: str,
+        lot: float,
+        price: float,
+        comment: str = "USTAT_SL",
+    ) -> dict[str, Any] | None:
+        """Buy Stop veya Sell Stop bekleyen emri gönder.
+
+        SL koruması için kullanılır. Tetiklendiğinde MARKET emri olarak
+        çalışır — dolum garantili.
+
+        Buy Stop  : ask ≥ price → market buy tetiklenir
+        Sell Stop : bid ≤ price → market sell tetiklenir
+
+        VİOP netting modda ters yönlü emir pozisyonu kapatır/azaltır.
+
+        Args:
+            symbol: Kontrat sembolü (ör. "F_AKBNK").
+            direction: "BUY" (Buy Stop) veya "SELL" (Sell Stop).
+            lot: Lot miktarı.
+            price: Tetikleme fiyatı (stop seviyesi).
+            comment: Emir yorumu.
+
+        Returns:
+            Emir sonuç sözlüğü (order_ticket, retcode) veya None.
+        """
+        with self._order_lock, self._write_lock:
+            if not self._ensure_connection():
+                logger.error("send_stop: MT5 bağlantısı yok")
+                return None
+
+            try:
+                mt5_name = self._to_mt5(symbol)
+
+                # Sembol bilgisi
+                sym_info = self._safe_call(mt5.symbol_info, mt5_name)
+                if sym_info is None:
+                    logger.error(f"send_stop: symbol_info alınamadı [{symbol}]")
+                    return None
+
+                tick_size = sym_info.trade_tick_size
+                if tick_size <= 0:
+                    tick_size = sym_info.point
+
+                # Fiyatı tick_size'a yuvarla
+                price = round(price / tick_size) * tick_size
+
+                # Lot validasyonu
+                vol_min = sym_info.volume_min
+                vol_max = sym_info.volume_max
+                vol_step = sym_info.volume_step if sym_info.volume_step > 0 else vol_min
+                lot = round(lot / vol_step) * vol_step
+                lot = max(vol_min, min(vol_max, lot))
+
+                # Emir tipi belirle
+                if direction.upper() == "BUY":
+                    mt5_type = mt5.ORDER_TYPE_BUY_STOP
+                elif direction.upper() == "SELL":
+                    mt5_type = mt5.ORDER_TYPE_SELL_STOP
+                else:
+                    logger.error(f"send_stop: Geçersiz yön: {direction}")
+                    return None
+
+                # Fiyat ilişkisi doğrulama
+                tick = self._safe_call(mt5.symbol_info_tick, mt5_name)
+                if tick is not None:
+                    if direction.upper() == "BUY":
+                        if price <= tick.ask:
+                            logger.warning(
+                                f"send_stop: BUY STOP price ({price:.4f}) "
+                                f"<= Ask ({tick.ask:.4f}) — emir reddedilecek"
+                            )
+                    else:
+                        if price >= tick.bid:
+                            logger.warning(
+                                f"send_stop: SELL STOP price ({price:.4f}) "
+                                f">= Bid ({tick.bid:.4f}) — emir reddedilecek"
+                            )
+
+                # Emir isteği — ORDER_TIME_DAY (GCM VİOP)
+                request: dict[str, Any] = {
+                    "action": mt5.TRADE_ACTION_PENDING,
+                    "symbol": mt5_name,
+                    "volume": lot,
+                    "type": mt5_type,
+                    "price": price,
+                    "type_filling": mt5.ORDER_FILLING_RETURN,
+                    "type_time": mt5.ORDER_TIME_DAY,
+                    "comment": comment,
+                }
+
+                logger.info(
+                    f"Stop emri gönderiliyor: {direction} {lot} lot {symbol} "
+                    f"price={price:.4f} request={request}"
+                )
+
+                result = self._safe_call(mt5.order_send, request, timeout=15.0)
+                if result is None:
+                    err = mt5.last_error()
+                    logger.error(f"send_stop None [{symbol}]: {err}")
+                    return None
+
+                accepted = {mt5.TRADE_RETCODE_DONE, mt5.TRADE_RETCODE_PLACED}
+                if result.retcode not in accepted:
+                    logger.error(
+                        f"Stop emri reddedildi [{symbol}]: "
+                        f"retcode={result.retcode}, comment={result.comment}"
+                    )
+                    return None
+
+                order_ticket = result.order
+                logger.info(
+                    f"Stop emri başarılı: ticket={order_ticket} "
+                    f"{direction} {lot} lot {symbol} price={price:.4f} "
+                    f"retcode={result.retcode}"
+                )
+
+                return {
+                    "order_ticket": order_ticket,
+                    "retcode": result.retcode,
+                    "comment": result.comment,
+                }
+
+            except Exception as exc:
+                logger.error(f"send_stop istisnası [{symbol}]: {exc}")
+                return None
+
+    # ── send_limit ───────────────────────────────────────────────────
+    def send_limit(
+        self,
+        symbol: str,
+        direction: str,
+        lot: float,
+        price: float,
+        comment: str = "USTAT_TP",
+    ) -> dict[str, Any] | None:
+        """Buy Limit veya Sell Limit bekleyen emri gönder.
+
+        TP koruması için kullanılır. Fiyat hedefe ulaştığında tetiklenir.
+
+        Buy Limit  : ask ≤ price → market buy tetiklenir
+        Sell Limit : bid ≥ price → market sell tetiklenir
+
+        VİOP netting modda ters yönlü emir pozisyonu kapatır/azaltır.
+
+        Args:
+            symbol: Kontrat sembolü (ör. "F_AKBNK").
+            direction: "BUY" (Buy Limit) veya "SELL" (Sell Limit).
+            lot: Lot miktarı.
+            price: Hedef fiyat (limit seviyesi).
+            comment: Emir yorumu.
+
+        Returns:
+            Emir sonuç sözlüğü (order_ticket, retcode) veya None.
+        """
+        with self._order_lock, self._write_lock:
+            if not self._ensure_connection():
+                logger.error("send_limit: MT5 bağlantısı yok")
+                return None
+
+            try:
+                mt5_name = self._to_mt5(symbol)
+
+                # Sembol bilgisi
+                sym_info = self._safe_call(mt5.symbol_info, mt5_name)
+                if sym_info is None:
+                    logger.error(f"send_limit: symbol_info alınamadı [{symbol}]")
+                    return None
+
+                tick_size = sym_info.trade_tick_size
+                if tick_size <= 0:
+                    tick_size = sym_info.point
+
+                # Fiyatı tick_size'a yuvarla
+                price = round(price / tick_size) * tick_size
+
+                # Lot validasyonu
+                vol_min = sym_info.volume_min
+                vol_max = sym_info.volume_max
+                vol_step = sym_info.volume_step if sym_info.volume_step > 0 else vol_min
+                lot = round(lot / vol_step) * vol_step
+                lot = max(vol_min, min(vol_max, lot))
+
+                # Emir tipi belirle
+                if direction.upper() == "BUY":
+                    mt5_type = mt5.ORDER_TYPE_BUY_LIMIT
+                elif direction.upper() == "SELL":
+                    mt5_type = mt5.ORDER_TYPE_SELL_LIMIT
+                else:
+                    logger.error(f"send_limit: Geçersiz yön: {direction}")
+                    return None
+
+                # Fiyat ilişkisi doğrulama
+                tick = self._safe_call(mt5.symbol_info_tick, mt5_name)
+                if tick is not None:
+                    if direction.upper() == "BUY":
+                        if price >= tick.ask:
+                            logger.warning(
+                                f"send_limit: BUY LIMIT price ({price:.4f}) "
+                                f">= Ask ({tick.ask:.4f}) — hemen dolabilir"
+                            )
+                    else:
+                        if price <= tick.bid:
+                            logger.warning(
+                                f"send_limit: SELL LIMIT price ({price:.4f}) "
+                                f"<= Bid ({tick.bid:.4f}) — hemen dolabilir"
+                            )
+
+                # Emir isteği — ORDER_TIME_DAY (GCM VİOP)
+                request: dict[str, Any] = {
+                    "action": mt5.TRADE_ACTION_PENDING,
+                    "symbol": mt5_name,
+                    "volume": lot,
+                    "type": mt5_type,
+                    "price": price,
+                    "type_filling": mt5.ORDER_FILLING_RETURN,
+                    "type_time": mt5.ORDER_TIME_DAY,
+                    "comment": comment,
+                }
+
+                logger.info(
+                    f"Limit emri gönderiliyor: {direction} {lot} lot {symbol} "
+                    f"price={price:.4f} request={request}"
+                )
+
+                result = self._safe_call(mt5.order_send, request, timeout=15.0)
+                if result is None:
+                    err = mt5.last_error()
+                    logger.error(f"send_limit None [{symbol}]: {err}")
+                    return None
+
+                accepted = {mt5.TRADE_RETCODE_DONE, mt5.TRADE_RETCODE_PLACED}
+                if result.retcode not in accepted:
+                    logger.error(
+                        f"Limit emri reddedildi [{symbol}]: "
+                        f"retcode={result.retcode}, comment={result.comment}"
+                    )
+                    return None
+
+                order_ticket = result.order
+                logger.info(
+                    f"Limit emri başarılı: ticket={order_ticket} "
+                    f"{direction} {lot} lot {symbol} price={price:.4f} "
+                    f"retcode={result.retcode}"
+                )
+
+                return {
+                    "order_ticket": order_ticket,
+                    "retcode": result.retcode,
+                    "comment": result.comment,
+                }
+
+            except Exception as exc:
+                logger.error(f"send_limit istisnası [{symbol}]: {exc}")
+                return None
+
+    # ── modify_pending_order ─────────────────────────────────────────
+    def modify_pending_order(
+        self,
+        order_ticket: int,
+        new_price: float,
+    ) -> dict[str, Any] | None:
+        """Bekleyen STOP veya LIMIT emrinin fiyatını güncelle.
+
+        TRADE_ACTION_MODIFY ile atomik güncelleme — tek API çağrısı.
+        PrimNet trailing stop ve OĞUL trailing SL için kullanılır.
+
+        Args:
+            order_ticket: Bekleyen emir ticket numarası.
+            new_price: Yeni tetikleme/limit fiyatı.
+
+        Returns:
+            Değiştirme sonuç sözlüğü veya None.
+        """
+        with self._order_lock, self._write_lock:
+            if not self._ensure_connection():
+                logger.error("modify_pending_order: MT5 bağlantısı yok")
+                return None
+
+            try:
+                # Mevcut emri bul
+                pending = self._safe_call(mt5.orders_get, ticket=order_ticket)
+                if pending is None or len(pending) == 0:
+                    logger.error(
+                        f"modify_pending_order: Emir bulunamadı ticket={order_ticket}"
+                    )
+                    return None
+
+                order = pending[0]
+
+                # tick_size al
+                sym_info = self._safe_call(mt5.symbol_info, order.symbol)
+                tick_size = 0.01
+                if sym_info is not None:
+                    tick_size = sym_info.trade_tick_size or sym_info.point or 0.01
+
+                # Fiyatı tick_size'a yuvarla
+                new_price = round(new_price / tick_size) * tick_size
+
+                # Değişiklik yoksa atla
+                if abs(new_price - order.price_open) < tick_size * 0.5:
+                    logger.debug(
+                        f"modify_pending_order atlandı [{order_ticket}]: fiyat aynı"
+                    )
+                    return {"retcode": 0, "comment": "no_change"}
+
+                request: dict[str, Any] = {
+                    "action": mt5.TRADE_ACTION_MODIFY,
+                    "order": order_ticket,
+                    "price": new_price,
+                    "type_time": mt5.ORDER_TIME_DAY,
+                }
+
+                logger.info(
+                    f"Pending order modify: ticket={order_ticket} "
+                    f"price={new_price:.4f}"
+                )
+
+                MODIFY_MAX_RETRIES = 3
+                for attempt in range(1, MODIFY_MAX_RETRIES + 1):
+                    result = self._safe_call(mt5.order_send, request, timeout=10.0)
+
+                    if result is not None and result.retcode == mt5.TRADE_RETCODE_DONE:
+                        logger.info(
+                            f"Pending order modify başarılı (deneme {attempt}): "
+                            f"ticket={order_ticket} price={new_price:.4f}"
+                        )
+                        return {"retcode": result.retcode, "comment": result.comment}
+
+                    err_comment = result.comment if result else str(mt5.last_error())
+                    ret = result.retcode if result else -1
+                    logger.warning(
+                        f"Pending order modify deneme {attempt}/{MODIFY_MAX_RETRIES} "
+                        f"başarısız [{order_ticket}]: retcode={ret} {err_comment}"
+                    )
+                    if attempt < MODIFY_MAX_RETRIES:
+                        _time.sleep(0.3 * attempt)
+
+                logger.error(
+                    f"Pending order modify {MODIFY_MAX_RETRIES} denemede başarısız: "
+                    f"ticket={order_ticket}"
+                )
+                return None
+
+            except Exception as exc:
+                logger.error(
+                    f"modify_pending_order istisnası [{order_ticket}]: {exc}"
+                )
+                return None
+
+    # ── cancel_pending_order ─────────────────────────────────────────
+    def cancel_pending_order(
+        self,
+        order_ticket: int,
+    ) -> dict[str, Any] | None:
+        """Bekleyen STOP veya LIMIT emrini iptal et.
+
+        Pozisyon kapanışında veya yeni emir yerleştirmede eski emri temizler.
+
+        Args:
+            order_ticket: İptal edilecek bekleyen emir ticket numarası.
+
+        Returns:
+            İptal sonuç sözlüğü veya None.
+        """
+        with self._order_lock, self._write_lock:
+            if not self._ensure_connection():
+                logger.error("cancel_pending_order: MT5 bağlantısı yok")
+                return None
+
+            try:
+                # Emir hâlâ bekliyor mu kontrol et
+                pending = self._safe_call(mt5.orders_get, ticket=order_ticket)
+                if pending is None or len(pending) == 0:
+                    logger.debug(
+                        f"cancel_pending_order: Emir zaten yok ticket={order_ticket} "
+                        f"(tetiklenmiş veya iptal edilmiş olabilir)"
+                    )
+                    return {"retcode": 0, "comment": "already_gone"}
+
+                request: dict[str, Any] = {
+                    "action": mt5.TRADE_ACTION_REMOVE,
+                    "order": order_ticket,
+                }
+
+                logger.info(f"Pending order iptal: ticket={order_ticket}")
+
+                result = self._safe_call(mt5.order_send, request, timeout=10.0)
+                if result is None:
+                    err = mt5.last_error()
+                    logger.error(
+                        f"cancel_pending_order None [{order_ticket}]: {err}"
+                    )
+                    return None
+
+                if result.retcode != mt5.TRADE_RETCODE_DONE:
+                    logger.error(
+                        f"cancel_pending_order reddedildi [{order_ticket}]: "
+                        f"retcode={result.retcode}, comment={result.comment}"
+                    )
+                    return None
+
+                logger.info(
+                    f"Pending order iptal başarılı: ticket={order_ticket}"
+                )
+                return {"retcode": result.retcode, "comment": result.comment}
+
+            except Exception as exc:
+                logger.error(
+                    f"cancel_pending_order istisnası [{order_ticket}]: {exc}"
+                )
+                return None
+
     # ── send_stop_limit ─────────────────────────────────────────────
     def send_stop_limit(
         self,

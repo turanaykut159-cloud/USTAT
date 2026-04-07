@@ -419,63 +419,56 @@ class HEngine:
         target_order_ticket = 0
 
         if self._use_stop_limit and ref_price > 0:
-            # ─ Stop Limit mod: bekleyen emirlerle SL/TP yönetimi ─
-            gap = self._stop_limit_gap_prim * (ref_price * 0.01)
+            # ─ Bekleyen emirlerle SL/TP yönetimi ─
+            # SL: plain STOP (tetiklenince market — dolum garantili)
+            # TP: plain LIMIT (fiyat hedefe ulaşınca tetiklenir)
 
-            # Trailing Stop Limit emri
+            # Trailing Stop emri (SL)
             if direction == "BUY":
                 trail_dir = "SELL"
-                trail_stop = suggested_sl
-                trail_limit = suggested_sl + gap
             else:
                 trail_dir = "BUY"
-                trail_stop = suggested_sl
-                trail_limit = suggested_sl - gap
 
-            trail_result = self.mt5.send_stop_limit(
+            trail_result = self.mt5.send_stop(
                 symbol, trail_dir, volume,
-                trail_stop, trail_limit,
+                suggested_sl,
                 comment=f"PRIMNET_TRAIL_{ticket}",
             )
             if trail_result is None:
-                result["message"] = "Stop Limit trailing emri gönderilemedi — devir iptal"
+                result["message"] = "Stop trailing emri gönderilemedi — devir iptal"
                 logger.error(
-                    f"Hibrit devir başarısız — trailing Stop Limit hatası: "
+                    f"Hibrit devir başarısız — trailing Stop hatası: "
                     f"ticket={ticket} {symbol}"
                 )
                 return result
             trailing_order_ticket = trail_result["order_ticket"]
 
-            # Hedef Stop Limit emri (target_prim seviyesinde)
+            # Hedef Limit emri (TP — target_prim seviyesinde)
             if direction == "BUY":
                 tgt_dir = "SELL"
-                tgt_stop = suggested_tp
-                tgt_limit = suggested_tp + gap  # Sell: limit > stop
             else:
                 tgt_dir = "BUY"
-                tgt_stop = suggested_tp
-                tgt_limit = suggested_tp - gap  # Buy: limit < stop
 
-            tgt_result = self.mt5.send_stop_limit(
+            tgt_result = self.mt5.send_limit(
                 symbol, tgt_dir, volume,
-                tgt_stop, tgt_limit,
+                suggested_tp,
                 comment=f"PRIMNET_TGT_{ticket}",
             )
             if tgt_result is not None:
                 target_order_ticket = tgt_result["order_ticket"]
                 logger.info(
-                    f"Hedef Stop Limit yerleştirildi: order={target_order_ticket} "
-                    f"{symbol} {tgt_dir} stop={tgt_stop:.4f} limit={tgt_limit:.4f}"
+                    f"Hedef Limit yerleştirildi: order={target_order_ticket} "
+                    f"{symbol} {tgt_dir} price={suggested_tp:.4f}"
                 )
             else:
                 # Hedef emri kritik değil — trailing yeterli, log yaz devam et
                 logger.warning(
-                    f"Hedef Stop Limit gönderilemedi: {symbol} {tgt_dir} "
-                    f"stop={tgt_stop:.4f} — sadece trailing aktif"
+                    f"Hedef Limit gönderilemedi: {symbol} {tgt_dir} "
+                    f"price={suggested_tp:.4f} — sadece trailing aktif"
                 )
 
             logger.info(
-                f"Stop Limit devir: ticket={ticket} {symbol} {direction} "
+                f"Bekleyen emir devir: ticket={ticket} {symbol} {direction} "
                 f"trail_order={trailing_order_ticket} tgt_order={target_order_ticket}"
             )
 
@@ -1114,14 +1107,13 @@ class HEngine:
         self, hp: HybridPosition, new_sl: float,
         current_price: float, profit: float, swap: float,
     ) -> None:
-        """Stop Limit bekleyen emir ile trailing stop güncelleme.
+        """Plain STOP bekleyen emir ile trailing stop güncelleme.
 
-        SELL pozisyon → BUY STOP LIMIT (fiyat yükselirse pozisyonu kapat)
-        BUY pozisyon  → SELL STOP LIMIT (fiyat düşerse pozisyonu kapat)
+        SELL pozisyon → BUY STOP (ask ≥ price → market buy → pozisyonu kapat)
+        BUY pozisyon  → SELL STOP (bid ≤ price → market sell → pozisyonu kapat)
 
-        Stop Limit emrin iki fiyatı:
-            stop_price  = trailing SL seviyesi (tetik)
-            limit_price = stop_price ± gap (slippage koruması)
+        Plain STOP emri tetiklendiğinde MARKET olarak çalışır — dolum garantili.
+        Stop Limit'ten farklı olarak limit fiyatı yoktur.
 
         Args:
             hp: Hibrit pozisyon.
@@ -1130,19 +1122,13 @@ class HEngine:
             profit: MT5 profit.
             swap: Birikmiş swap.
         """
-        ref_price = hp.reference_price or self._get_reference_price(hp.symbol)
-        gap = self._stop_limit_gap_prim * (ref_price * 0.01) if ref_price else 0.05
-
-        # Stop ve Limit fiyatları hesapla
+        # Stop fiyatı hesapla (limit yok — plain STOP)
+        stop_price = new_sl
         if hp.direction == "BUY":
-            # BUY pozisyon → SELL STOP LIMIT (fiyat düşerse kapat)
-            stop_price = new_sl
-            limit_price = new_sl + gap  # Sell limit > stop (kural)
+            # BUY pozisyon → SELL STOP (fiyat düşerse kapat)
             order_direction = "SELL"
         else:
-            # SELL pozisyon → BUY STOP LIMIT (fiyat yükselirse kapat)
-            stop_price = new_sl
-            limit_price = new_sl - gap  # Buy limit < stop (kural)
+            # SELL pozisyon → BUY STOP (fiyat yükselirse kapat)
             order_direction = "BUY"
 
         old_sl = hp.current_sl
@@ -1156,15 +1142,15 @@ class HEngine:
             )
 
             if order_exists:
-                # TRADE_ACTION_MODIFY — atomik güncelleme
-                result = self.mt5.modify_stop_limit(
-                    hp.trailing_order_ticket, stop_price, limit_price,
+                # TRADE_ACTION_MODIFY — atomik güncelleme (tek fiyat)
+                result = self.mt5.modify_pending_order(
+                    hp.trailing_order_ticket, stop_price,
                 )
                 if result is not None:
                     self._close_retry_counts.pop(f"tr_sl_{hp.ticket}", None)
                     logger.info(
-                        f"Trailing Stop Limit güncellendi: ticket={hp.trailing_order_ticket} "
-                        f"{hp.symbol} stop={stop_price:.4f} limit={limit_price:.4f}"
+                        f"Trailing Stop güncellendi: ticket={hp.trailing_order_ticket} "
+                        f"{hp.symbol} price={stop_price:.4f}"
                     )
                 else:
                     retry_key = f"tr_sl_{hp.ticket}"
@@ -1172,45 +1158,45 @@ class HEngine:
                     self._close_retry_counts[retry_key] = fail_count
                     if fail_count <= 3:
                         logger.warning(
-                            f"Trailing Stop Limit modify başarısız: "
+                            f"Trailing Stop modify başarısız: "
                             f"ticket={hp.trailing_order_ticket} {hp.symbol} "
                             f"(deneme {fail_count}/3)"
                         )
                     if fail_count == 3:
                         # Modify 3x başarısız — emri iptal edip yeniden gönder
                         logger.warning(
-                            f"Trailing Stop Limit 3x modify başarısız — "
+                            f"Trailing Stop 3x modify başarısız — "
                             f"iptal edip yeniden gönderiliyor: {hp.symbol}"
                         )
-                        self.mt5.cancel_stop_limit(hp.trailing_order_ticket)
+                        self.mt5.cancel_pending_order(hp.trailing_order_ticket)
                         hp.trailing_order_ticket = 0
                         self._close_retry_counts.pop(retry_key, None)
             else:
                 # Emir tetiklenmiş veya iptal edilmiş — yenisini gönder
                 logger.info(
-                    f"Trailing Stop Limit emri kayboldu: "
+                    f"Trailing Stop emri kayboldu: "
                     f"ticket={hp.trailing_order_ticket} {hp.symbol} — yenisi gönderiliyor"
                 )
                 hp.trailing_order_ticket = 0
 
         # Yeni emir gönder (ilk kez veya eski iptal edilmiş)
         if hp.trailing_order_ticket == 0:
-            result = self.mt5.send_stop_limit(
+            result = self.mt5.send_stop(
                 hp.symbol, order_direction, hp.volume,
-                stop_price, limit_price,
+                stop_price,
                 comment=f"PRIMNET_TRAIL_{hp.ticket}",
             )
             if result is not None:
                 hp.trailing_order_ticket = result["order_ticket"]
                 logger.info(
-                    f"Trailing Stop Limit yerleştirildi: "
+                    f"Trailing Stop yerleştirildi: "
                     f"order={hp.trailing_order_ticket} {hp.symbol} "
-                    f"{order_direction} stop={stop_price:.4f} limit={limit_price:.4f}"
+                    f"{order_direction} price={stop_price:.4f}"
                 )
             else:
                 logger.error(
-                    f"Trailing Stop Limit gönderilemedi: {hp.symbol} {order_direction} "
-                    f"stop={stop_price:.4f} limit={limit_price:.4f}"
+                    f"Trailing Stop gönderilemedi: {hp.symbol} {order_direction} "
+                    f"price={stop_price:.4f}"
                 )
                 return
 
@@ -1666,7 +1652,11 @@ class HEngine:
         return True
 
     def _place_target_stop_limit(self, hp: HybridPosition) -> None:
-        """Hedef Stop Limit emrini (yeniden) yerleştir.
+        """Hedef Limit emrini (yeniden) yerleştir.
+
+        Plain LIMIT kullanır — fiyat hedefe ulaştığında tetiklenir.
+        BUY pozisyon → SELL LIMIT (bid ≥ price → pozisyonu kapat)
+        SELL pozisyon → BUY LIMIT (ask ≤ price → pozisyonu kapat)
 
         Args:
             hp: Hibrit pozisyon.
@@ -1675,35 +1665,33 @@ class HEngine:
         if not ref_price or ref_price <= 0:
             return
 
-        gap = self._stop_limit_gap_prim * (ref_price * 0.01)
         target = self._primnet_target
 
         if hp.direction == "BUY":
             target_prim = target
             tgt_dir = "SELL"
-            tgt_stop = self._prim_to_price(target_prim, ref_price)
-            tgt_limit = tgt_stop + gap
+            tgt_price = self._prim_to_price(target_prim, ref_price)
         else:
             target_prim = -target
             tgt_dir = "BUY"
-            tgt_stop = self._prim_to_price(target_prim, ref_price)
-            tgt_limit = tgt_stop - gap
+            tgt_price = self._prim_to_price(target_prim, ref_price)
 
-        result = self.mt5.send_stop_limit(
+        result = self.mt5.send_limit(
             hp.symbol, tgt_dir, hp.volume,
-            tgt_stop, tgt_limit,
+            tgt_price,
             comment=f"PRIMNET_TGT_{hp.ticket}",
         )
         if result is not None:
             hp.target_order_ticket = result["order_ticket"]
             logger.info(
-                f"Hedef Stop Limit yeniden yerleştirildi: "
+                f"Hedef Limit yerleştirildi: "
                 f"order={hp.target_order_ticket} {hp.symbol} {tgt_dir} "
-                f"stop={tgt_stop:.4f} limit={tgt_limit:.4f}"
+                f"price={tgt_price:.4f}"
             )
         else:
             logger.error(
-                f"Hedef Stop Limit yeniden gönderilemedi: {hp.symbol} {tgt_dir}"
+                f"Hedef Limit gönderilemedi: {hp.symbol} {tgt_dir} "
+                f"price={tgt_price:.4f}"
             )
 
     def _is_trading_hours(self, now: datetime | None = None) -> bool:
@@ -1819,31 +1807,25 @@ class HEngine:
 
             # MT5'e yaz
             if self._use_stop_limit and new_ref > 0:
-                # Stop Limit mod: eski emirleri iptal et, yenilerini koy
+                # Eski emirleri iptal et, yenilerini koy
                 self._cancel_stop_limit_orders(hp)
 
-                gap = self._stop_limit_gap_prim * (new_ref * 0.01)
-
-                # Trailing Stop Limit
+                # Trailing Stop emri (SL)
                 if hp.direction == "BUY":
                     trail_dir = "SELL"
-                    trail_stop = new_sl
-                    trail_limit = new_sl + gap
                 else:
                     trail_dir = "BUY"
-                    trail_stop = new_sl
-                    trail_limit = new_sl - gap
 
-                trail_res = self.mt5.send_stop_limit(
+                trail_res = self.mt5.send_stop(
                     hp.symbol, trail_dir, hp.volume,
-                    trail_stop, trail_limit,
+                    new_sl,
                     comment=f"PRIMNET_TRAIL_{ticket}",
                 )
                 if trail_res is not None:
                     hp.trailing_order_ticket = trail_res["order_ticket"]
                 else:
                     logger.error(
-                        f"PRİMNET yenileme trailing Stop Limit başarısız: "
+                        f"PRİMNET yenileme trailing Stop başarısız: "
                         f"ticket={ticket} {hp.symbol}"
                     )
 
@@ -1910,7 +1892,7 @@ class HEngine:
         logger.info("PRİMNET günlük yenileme tamamlandı")
 
     def _cancel_stop_limit_orders(self, hp: HybridPosition) -> None:
-        """Pozisyona ait bekleyen Stop Limit emirlerini iptal et.
+        """Pozisyona ait bekleyen emirleri (STOP/LIMIT) iptal et.
 
         Trailing ve hedef emirleri kontrol eder, hâlâ bekleyenleri iptal eder.
         Ticket'ları sıfırlar.
@@ -1927,15 +1909,15 @@ class HEngine:
         ]:
             order_ticket = getattr(hp, attr_name, 0)
             if order_ticket > 0:
-                result = self.mt5.cancel_stop_limit(order_ticket)
+                result = self.mt5.cancel_pending_order(order_ticket)
                 if result is not None:
                     logger.info(
-                        f"Stop Limit {label} emri iptal edildi: "
+                        f"Bekleyen {label} emri iptal edildi: "
                         f"order={order_ticket} {hp.symbol}"
                     )
                 else:
                     logger.warning(
-                        f"Stop Limit {label} emri iptal edilemedi: "
+                        f"Bekleyen {label} emri iptal edilemedi: "
                         f"order={order_ticket} {hp.symbol}"
                     )
                 setattr(hp, attr_name, 0)

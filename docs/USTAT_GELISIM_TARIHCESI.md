@@ -93,10 +93,18 @@
 - #83 — 10.003 kombinasyonlu stres testi: BABA/OĞUL/H-Engine/MT5/Manuel/Top5/DB/Entegrasyon (a36f3d0)
 
 ### Added
-- #119 — OĞUL Stop Limit SL/TP sistemi: ogul_sltp.py modülü — GCM VİOP netting modunda TRADE_ACTION_SLTP yerine Stop Limit bekleyen emirlerle SL koruması (H-Engine #117 pattern'i adapte)
-- #119 — Trade modeline sl_order_ticket alanı eklendi (Stop Limit emir takibi)
+- #120 — mt5_bridge.py'ye 4 yeni fonksiyon: send_stop (BUY/SELL STOP), send_limit (BUY/SELL LIMIT), modify_pending_order, cancel_pending_order — plain STOP/LIMIT emir desteği
+- #119 — OĞUL Stop Limit SL/TP sistemi: ogul_sltp.py modülü — GCM VİOP netting modunda TRADE_ACTION_SLTP yerine bekleyen emirlerle SL koruması
+- #119 — Trade modeline sl_order_ticket alanı eklendi (bekleyen emir takibi)
+
+### Fixed
+- #120 — Stop Limit → plain STOP/LIMIT migrasyonu: Stop Limit emirleri tetiklendiğinde limit fiyatı yüzünden dolmuyordu (SL) veya [Invalid price] hatası veriyordu (TP). Plain STOP (SL için — market dolum garantili) ve plain LIMIT (TP için — doğru fiyat yönü) ile değiştirildi
 
 ### Changed
+- #120 — H-Engine trailing: _trailing_via_stop_limit() artık send_stop + modify_pending_order kullanıyor (Stop Limit + gap yerine tek fiyatlı plain STOP)
+- #120 — H-Engine hedef: _place_target_stop_limit() artık send_limit kullanıyor (TP için plain LIMIT — [Invalid price] hatası düzeldi)
+- #120 — H-Engine devir + yenileme: send_stop_limit çağrıları send_stop/send_limit ile değiştirildi, _cancel_stop_limit_orders cancel_pending_order kullanıyor
+- #120 — ogul_sltp.py: Stop Limit → plain STOP migrasyonu, gap/limit_price hesabı kaldırıldı, modify_stop_limit → modify_pending_order
 - #119 — OĞUL'da tüm modify_position çağrıları OgulSLTP.update_trailing_sl() ile değiştirildi — breakeven, KORUMA, TREND, SAVUNMA, fallback trailing, MR breakeven, breakout trailing
 - #119 — Lifecycle entegrasyonu: _handle_closed_trade → SL iptal, EOD → SL iptal, _sync_positions → SL tetiklenme kontrolü, restore_active_trades → SL kurtarma
 - #119 — config/default.json'a ogul.stop_limit_gap_prim=0.3 eklendi
