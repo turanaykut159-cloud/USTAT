@@ -1511,16 +1511,66 @@ class HEngine:
         """PRİMNET prim bazlı trailing SL hesapla.
 
         Trailing mesafe HER ZAMAN SABİT (1.5 prim).
-        Stop sadece kâr yönünde hareket eder, asla geri gelmez.
+        Stop sadece kâr yönünde hareket eder, asla geri gelmez (KİLİT).
         Stop primi 0.50 prim adımlarına (step_prim) yuvarlanır:
           BUY  → floor (aşağı yuvarla — güvenli taraf)
           SELL → ceil  (yukarı yuvarla — güvenli taraf)
 
-        Örnek (SELL, giriş +0.3, step=0.5):
-          current_prim = -0.35 → stop_raw = +1.15
-          → ceil(1.15 / 0.5) × 0.5 = +1.5 (güvenli yöne yuvarla)
-          Sonraki adım: current = -0.70 → stop_raw = +0.80
-          → ceil(0.80 / 0.5) × 0.5 = +1.0 (tam adıma düşer)
+        ═══════════════════════════════════════════════════════════════
+        REFERANS TABLO — BUY YÖNÜ (giriş=0.00, trailing=1.5, adım=0.5)
+        ═══════════════════════════════════════════════════════════════
+        Güncel Prim │ RAW Stop │ Izgara Stop │ Durum
+        ────────────┼──────────┼─────────────┼─────────────────────────
+          +0.00     │  -1.50   │    -1.50    │ İlk SL (giriş anı)
+          +0.50     │  -1.00   │    -1.00    │ Stop yükseldi (zarar azaldı)
+          +1.00     │  -0.50   │    -0.50    │ Stop yükseldi (zarar azaldı)
+          +1.50     │  +0.00   │    +0.00    │ BREAKEVEN — giriş fiyatı
+          +2.00     │  +0.50   │    +0.50    │ KİLİTLİ KÂR: +0.50 garantili
+          +2.50     │  +1.00   │    +1.00    │ KİLİTLİ KÂR: +1.00 garantili
+          +3.00     │  +1.50   │    +1.50    │ KİLİTLİ KÂR: +1.50 garantili
+          +3.50     │  +2.00   │    +2.00    │ KİLİTLİ KÂR: +2.00 garantili
+          +4.00     │  +2.50   │    +2.50    │ KİLİTLİ KÂR: +2.50 garantili
+          +4.50     │  +3.00   │    +3.00    │ KİLİTLİ KÂR: +3.00 garantili
+          +5.00     │  +3.50   │    +3.50    │ KİLİTLİ KÂR: +3.50 garantili
+          +5.50     │  +4.00   │    +4.00    │ KİLİTLİ KÂR: +4.00 garantili
+          +6.00     │  +4.50   │    +4.50    │ KİLİTLİ KÂR: +4.50 garantili
+          +6.50     │  +5.00   │    +5.00    │ KİLİTLİ KÂR: +5.00 garantili
+          +7.00     │  +5.50   │    +5.50    │ KİLİTLİ KÂR: +5.50 garantili
+          +7.50     │  +6.00   │    +6.00    │ KİLİTLİ KÂR: +6.00 garantili
+          +8.00     │  +6.50   │    +6.50    │ KİLİTLİ KÂR: +6.50 garantili
+          +8.50     │  +7.00   │    +7.00    │ KİLİTLİ KÂR: +7.00 garantili
+          +9.00     │  +7.50   │    +7.50    │ KİLİTLİ KÂR: +7.50 garantili
+          +9.50     │   ---    │     ---     │ HEDEF KAPANIŞ → poz. kapatılır
+
+        ═══════════════════════════════════════════════════════════════
+        REFERANS TABLO — SELL YÖNÜ (giriş=0.00, trailing=1.5, adım=0.5)
+        ═══════════════════════════════════════════════════════════════
+        Güncel Prim │ RAW Stop │ Izgara Stop │ Durum
+        ────────────┼──────────┼─────────────┼─────────────────────────
+          +0.00     │  +1.50   │    +1.50    │ İlk SL (giriş anı)
+          -0.50     │  +1.00   │    +1.00    │ Stop düştü (zarar azaldı)
+          -1.00     │  +0.50   │    +0.50    │ Stop düştü (zarar azaldı)
+          -1.50     │  +0.00   │    +0.00    │ BREAKEVEN — giriş fiyatı
+          -2.00     │  -0.50   │    -0.50    │ KİLİTLİ KÂR: +0.50 garantili
+          -2.50     │  -1.00   │    -1.00    │ KİLİTLİ KÂR: +1.00 garantili
+          -3.00     │  -1.50   │    -1.50    │ KİLİTLİ KÂR: +1.50 garantili
+          -3.50     │  -2.00   │    -2.00    │ KİLİTLİ KÂR: +2.00 garantili
+          -4.00     │  -2.50   │    -2.50    │ KİLİTLİ KÂR: +2.50 garantili
+          -4.50     │  -3.00   │    -3.00    │ KİLİTLİ KÂR: +3.00 garantili
+          -5.00     │  -3.50   │    -3.50    │ KİLİTLİ KÂR: +3.50 garantili
+          -5.50     │  -4.00   │    -4.00    │ KİLİTLİ KÂR: +4.00 garantili
+          -6.00     │  -4.50   │    -4.50    │ KİLİTLİ KÂR: +4.50 garantili
+          -6.50     │  -5.00   │    -5.00    │ KİLİTLİ KÂR: +5.00 garantili
+          -7.00     │  -5.50   │    -5.50    │ KİLİTLİ KÂR: +5.50 garantili
+          -7.50     │  -6.00   │    -6.00    │ KİLİTLİ KÂR: +6.00 garantili
+          -8.00     │  -6.50   │    -6.50    │ KİLİTLİ KÂR: +6.50 garantili
+          -8.50     │  -7.00   │    -7.00    │ KİLİTLİ KÂR: +7.00 garantili
+          -9.00     │  -7.50   │    -7.50    │ KİLİTLİ KÂR: +7.50 garantili
+          -9.50     │   ---    │     ---     │ HEDEF KAPANIŞ → poz. kapatılır
+
+        KİLİT: _check_trailing() içinde uygulanır (bu fonksiyon değil).
+          BUY  → new_sl <= hp.current_sl ise güncelleme ATLANIR
+          SELL → new_sl >= hp.current_sl ise güncelleme ATLANIR
 
         Args:
             hp: Hibrit pozisyon.
