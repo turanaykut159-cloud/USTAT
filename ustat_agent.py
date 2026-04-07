@@ -1,8 +1,9 @@
 """
-ÜSTAT AJAN v2.0 — Akıllı Otonom Ajan
+ÜSTAT AJAN v3.0 — Akıllı Otonom Ajan
 
 v1.0: Basit komut aktarıcı (shell → sonuç)
 v2.0: Düşünen, izleyen, kendini iyileştiren otonom varlık
+v3.0: FUSE Bypass + Log Management + State bug fix
 
 Mimari:
   ┌─────────────────────────────────────────┐
@@ -97,7 +98,7 @@ DESKTOP_DIR = USTAT_DIR / "desktop"
 DB_PATH = USTAT_DIR / "database" / "trades.db"
 CONFIG_PATH = USTAT_DIR / "config.json"
 
-AGENT_VERSION = "2.0.0"
+AGENT_VERSION = "3.0.0"
 
 # Zamanlama
 POLL_INTERVAL = 1.0            # komut tarama aralığı (saniye)
@@ -357,12 +358,13 @@ class StateManager:
                     name = (p.info.get("name") or "").lower()
                     cmdline = " ".join(p.info.get("cmdline") or []).lower()
                     if "python" in name and ("start_ustat" in cmdline or "uvicorn" in cmdline):
-                        return True
+                        self.state.engine_running = True
+                        return
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
-            return False
+            self.state.engine_running = False
         except Exception:
-            return False
+            self.state.engine_running = False
 
     def _check_desktop(self):
         """Electron/Vite çalışıyor mu?"""
@@ -407,12 +409,13 @@ class StateManager:
                 try:
                     name = (p.info.get("name") or "").lower()
                     if "terminal64" in name:
-                        return True
+                        self.state.mt5_connected = True
+                        return
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
-            return False
+            self.state.mt5_connected = False
         except Exception:
-            return False
+            self.state.mt5_connected = False
 
     def _detect_transitions(self):
         """Durum değişikliklerini tespit et ve alert oluştur."""
@@ -533,19 +536,19 @@ class Monitor:
             log("shutdown.signal mevcut — kullanıcı kasıtlı kapattı, restart atlanıyor", "MONITOR")
             return
 
-        # 1. API düştüyse → restart dene (engine durumu fark etmez)
+        # 1. API düştüyse → SADECE UYAR, restart YAPMA (v5.9.1 — kullanıcı kararı)
+        # Kullanıcı onayı olmadan uygulama AÇILMAYACAK.
         if not state.api_alive:
-            if self._can_heal("api_restart", 300):
+            if self._can_heal("api_alert", 300):
                 reason = "API düşmüş"
                 if not state.engine_running:
                     reason = "API ve Engine ikisi de düşmüş"
-                log(f"{reason} — ÜSTAT restart denenecek", "HEAL")
+                log(f"{reason} — sadece uyarı (otomatik restart DEVRE DIŞI)", "MONITOR")
                 self.alerts.fire(
                     Severity.CRITICAL, SystemComponent.API,
-                    f"{reason}. Otomatik restart deneniyor.",
-                    action_taken="restart_attempted",
+                    f"{reason}. Kullanıcı müdahalesi gerekiyor.",
+                    action_taken="alert_only",
                 )
-                self._try_restart_ustat()
 
         # 2. MT5 düştüyse → alarm (MT5 otomatik restart yapılamaz ama uyar)
         if not state.mt5_connected:
@@ -570,37 +573,10 @@ class Monitor:
                 self._rotate_log()
 
     def _try_restart_ustat(self):
-        """ÜSTAT'ı yeniden başlatmayı dene."""
-        # shutdown.signal varsa → kullanıcı kasıtlı kapattı, restart YAPMA
-        shutdown_signal = USTAT_DIR / "shutdown.signal"
-        if shutdown_signal.exists():
-            log("shutdown.signal mevcut — restart iptal edildi", "HEAL")
-            return
-        try:
-            start_script = USTAT_DIR / "start_ustat.py"
-            if start_script.exists():
-                CREATE_NO_WINDOW = 0x08000000
-                DETACHED_PROCESS = 0x00000008
-                subprocess.Popen(
-                    [sys.executable, str(start_script)],
-                    cwd=str(USTAT_DIR),
-                    creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW,
-                    startupinfo=_hidden_si(),
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                )
-                log("ÜSTAT restart komutu gönderildi", "HEAL")
-                time.sleep(5)
-                self.state_mgr.update()
-                if self.state_mgr.state.api_alive:
-                    self.alerts.fire(
-                        Severity.INFO, SystemComponent.API,
-                        "API otomatik restart sonrası tekrar aktif!",
-                        action_taken="restart_success",
-                    )
-                    log("ÜSTAT başarıyla yeniden başlatıldı!", "HEAL")
-        except Exception as e:
-            log(f"ÜSTAT restart hatası: {e}", "ERROR")
+        """DEVRE DIŞI (v5.9.1) — Kullanıcı kararı: otomatik restart YASAK.
+        Uygulama sadece kullanıcı tarafından masaüstü kısayolundan açılacak."""
+        log("_try_restart_ustat çağrıldı ama DEVRE DIŞI — otomatik restart YASAK", "HEAL")
+        return
 
     def _rotate_log(self):
         """Log dosyasını döndür."""
@@ -880,9 +856,8 @@ def handle_shell(cmd: dict) -> tuple[bool, str, str]:
 def handle_start_app(cmd: dict) -> tuple[bool, str, str]:
     """ÜSTAT uygulamasını başlat.
 
-    Ajan SYSTEM (Session 0) oturumunda çalıştığı için subprocess.Popen
-    ile başlatılan Electron penceresi kullanıcı masaüstünde görünmez.
-    Çözüm: schtasks /IT ile interaktif kullanıcı oturumunda başlatma.
+    schtasks /IT ile kullanıcı oturumunda interaktif olarak çalıştırır.
+    API'nin ayağa kalkmasını bekler (max 20sn).
     """
     try:
         start_script = USTAT_DIR / "start_ustat.py"
@@ -952,11 +927,17 @@ def handle_start_app(cmd: dict) -> tuple[bool, str, str]:
 
 
 def handle_stop_app(cmd: dict) -> tuple[bool, str, str]:
-    """ÜSTAT uygulamasını durdur."""
+    """ÜSTAT uygulamasını durdur.
+
+    İki aşamalı durdurma:
+    1. Normal Stop-Process (CommandLine match ile)
+    2. Başarısız olursa admin yetkili taskkill /F /PID ile zorla kapat
+    """
     killed = []
     errors = []
     targets = ["python.*start_ustat", "uvicorn", "node.*electron", "node.*vite"]
 
+    # ── Aşama 1: Normal Stop-Process ──────────────────────────────
     for target in targets:
         try:
             result = subprocess.run(
@@ -971,6 +952,63 @@ def handle_stop_app(cmd: dict) -> tuple[bool, str, str]:
                 killed.append(target)
         except Exception as e:
             errors.append(f"{target}: {e}")
+
+    # ── Aşama 2: Hâlâ çalışan ÜSTAT process'leri varsa admin taskkill ─
+    still_running = []
+    # Ajan PID'leri — bunları ASLA kapatma
+    agent_pid = os.getpid()
+    agent_pids = {agent_pid}
+    # Ajan watchdog (parent) PID'ini de koru
+    try:
+        import psutil
+        agent_pids.add(psutil.Process(agent_pid).ppid())
+    except Exception:
+        pass
+
+    # Sadece ÜSTAT ile ilişkili process'leri bul (CommandLine match)
+    ustat_patterns = ["start_ustat", "uvicorn", "electron", "vite"]
+    try:
+        check = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "Get-Process -Name python,pythonw,node,electron -ErrorAction SilentlyContinue "
+             "| Select-Object Id,@{n='CL';e={$_.CommandLine}} "
+             "| ConvertTo-Json -Compress"],
+            capture_output=True, text=True, timeout=10,
+            encoding="utf-8", errors="replace",
+            creationflags=0x08000000 if os.name == chr(110)+chr(116) else 0,
+            startupinfo=_hidden_si(),
+        )
+        if check.stdout.strip():
+            import json as _json
+            procs = _json.loads(check.stdout)
+            if isinstance(procs, dict):
+                procs = [procs]
+            for p in procs:
+                pid = p.get("Id", 0)
+                cl = (p.get("CL") or "").lower()
+                if pid in agent_pids:
+                    continue  # Ajanı koru
+                if "ustat_agent" in cl:
+                    continue  # Ajan scriptini koru
+                if any(pat in cl for pat in ustat_patterns):
+                    still_running.append(pid)
+    except Exception:
+        pass
+
+    if still_running:
+        for pid in still_running:
+            try:
+                subprocess.run(
+                    ["powershell", "-NoProfile", "-Command",
+                     f"Start-Process taskkill -ArgumentList '/F /PID {pid}' -Verb RunAs -WindowStyle Hidden -Wait"],
+                    capture_output=True, text=True, timeout=15,
+                    encoding="utf-8", errors="replace",
+                    creationflags=0x08000000 if os.name == chr(110)+chr(116) else 0,
+                    startupinfo=_hidden_si(),
+                )
+                killed.append(f"PID:{pid}")
+            except Exception as e:
+                errors.append(f"taskkill PID {pid}: {e}")
 
     if killed:
         return True, f"Durduruldu: {', '.join(killed)}", "\n".join(errors) if errors else ""
@@ -1302,7 +1340,7 @@ def handle_read_config(cmd: dict) -> tuple[bool, str, str]:
 
 
 def handle_restart_app(cmd: dict) -> tuple[bool, str, str]:
-    """ÜSTAT'ı durdur + başlat (akıllı restart)."""
+    """ÜSTAT uygulamasını yeniden başlat (stop + start)."""
     log("ÜSTAT restart başlatılıyor...", "INFO")
 
     # 1. Durdur
@@ -2686,15 +2724,17 @@ def main():
 
     ensure_dirs()
 
-    # v5.9: Windows başlangıcına otomatik kayıt (her açılışta çalışsın)
-    _auto_install_startup()
+    # v5.9: Windows başlangıcına otomatik kayıt — DEVRE DIŞI (v5.9.1)
+    # Kullanıcı kararı: Uygulama sadece masaüstü kısayolundan açılacak.
+    # Windows açılışında otomatik başlatma istenmiyor.
+    # _auto_install_startup()
 
     # PID dosyası
     PID_FILE.write_text(str(os.getpid()), encoding="utf-8")
 
     safe_print("")
     safe_print("  ╔══════════════════════════════════════════════════╗")
-    safe_print("  ║    ÜSTAT AJAN v2.0 — Akıllı Otonom Ajan         ║")
+    safe_print("  ║    ÜSTAT AJAN v3.0 — Akıllı Otonom Ajan         ║")
     safe_print("  ╠══════════════════════════════════════════════════╣")
     safe_print(f"  ║  PID      : {os.getpid():<37}║")
     safe_print(f"  ║  Klasör   : {str(USTAT_DIR):<37}║")
@@ -2790,7 +2830,7 @@ if _HAS_WIN32:
         Veya:     net start USTATAgent / net stop USTATAgent
         """
         _svc_name_ = "USTATAgent"
-        _svc_display_name_ = "ÜSTAT Ajan v2.0"
+        _svc_display_name_ = "ÜSTAT Ajan v3.0"
         _svc_description_ = (
             "ÜSTAT Trading Platform — Otonom arka plan ajanı. "
             "Claude ile Windows arasında köprü görevi görür. "
@@ -2882,7 +2922,12 @@ if _HAS_WIN32:
 
 
 def install_service():
-    """Windows Service olarak kur + crash restart politikası ayarla."""
+    """DEVRE DIŞI (v5.9.1): Windows Service kurulumu YASAK.
+    Kullanıcı kararı — uygulama sadece masaüstü kısayolundan açılacak."""
+    safe_print("  [ENGEL] Windows Service kurulumu devre dışı bırakıldı (v5.9.1)")
+    safe_print("  Uygulama sadece masaüstü kısayolundan açılacak.")
+    return False
+    # ── Aşağıdaki kod devre dışı bırakıldı ──
     if not _HAS_WIN32:
         safe_print("  [HATA] pywin32 yüklü değil. Önce kur: pip install pywin32")
         safe_print("         Sonra: python Scripts/pywin32_postinstall.py -install")
@@ -2996,7 +3041,7 @@ if __name__ == "__main__":
             servicemanager.PrepareToHostSingle(UstatAgentService)
             servicemanager.StartServiceCtrlDispatcher()
         else:
-            safe_print("  Kullanım: python ustat_agent.py --service [install|remove|start|stop]")
+            safe_print(f"  Bilinmeyen service komutu: {action}")
+            safe_print("  Kullanım: --service install|remove|start|stop|run")
     else:
-        # Normal mod (eski davranış: konsol veya pythonw)
         main()
