@@ -92,7 +92,14 @@
 - #82 — Watchdog OTP bekleme: WATCHDOG_INITIAL_DELAY=30sn, eski heartbeat temizleme (da730b1)
 - #83 — 10.003 kombinasyonlu stres testi: BABA/OĞUL/H-Engine/MT5/Manuel/Top5/DB/Entegrasyon (a36f3d0)
 
+### Added
+- #119 — OĞUL Stop Limit SL/TP sistemi: ogul_sltp.py modülü — GCM VİOP netting modunda TRADE_ACTION_SLTP yerine Stop Limit bekleyen emirlerle SL koruması (H-Engine #117 pattern'i adapte)
+- #119 — Trade modeline sl_order_ticket alanı eklendi (Stop Limit emir takibi)
+
 ### Changed
+- #119 — OĞUL'da tüm modify_position çağrıları OgulSLTP.update_trailing_sl() ile değiştirildi — breakeven, KORUMA, TREND, SAVUNMA, fallback trailing, MR breakeven, breakout trailing
+- #119 — Lifecycle entegrasyonu: _handle_closed_trade → SL iptal, EOD → SL iptal, _sync_positions → SL tetiklenme kontrolü, restore_active_trades → SL kurtarma
+- #119 — config/default.json'a ogul.stop_limit_gap_prim=0.3 eklendi
 - #118 — Motor izolasyonu: OĞUL ardışık kayıp sayacı motor bazlı ayrıştırma — H-Engine/ManuelMotor kayıpları OĞUL cooldown'ını tetiklemez, OĞUL trade kaydına `source: "auto"` eklendi (baba.py, ogul.py)
 - #117 — PRİMNET Stop Limit emir sistemi: TRADE_ACTION_SLTP (modify_position) yerine Buy/Sell Stop Limit bekleyen emirler ile trailing stop ve hedef yönetimi — GCM VİOP netting modunda "Invalid order" (retcode 10035) sorununu çözer
 - #117 — mt5_bridge.py'ye 3 yeni fonksiyon: send_stop_limit, modify_stop_limit, cancel_stop_limit + get_pending_orders STOP_LIMIT tip tanıma

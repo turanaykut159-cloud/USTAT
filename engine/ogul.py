@@ -434,6 +434,10 @@ class Ogul:
         # Pyramid tracking per symbol
         self._pyramid_last_add: dict[str, float] = {}     # symbol → son ekleme fiyatı
 
+        # ── Stop Limit SL/TP yönetimi (v5.9.2 — GCM VİOP netting fix) ──
+        from engine.ogul_sltp import OgulSLTP
+        self._sltp = OgulSLTP(mt5=mt5, config=config)
+
     # ═════════════════════════════════════════════════════════════════
     #  ÜSTAT ENTEGRASYONu — Dinamik Parametre Okuma
     # ═════════════════════════════════════════════════════════════════
@@ -1810,6 +1814,22 @@ class Ogul:
         # Dolum fiyatını MT5'ten al
         self._update_fill_price(symbol, trade)
 
+        # ── Stop Limit SL yerleştir (GCM VİOP netting fix) ─────────
+        # send_order ADIM 2 (TRADE_ACTION_SLTP) başarısız olabilir.
+        # Ek güvenlik: OgulSLTP ile Stop Limit emir yerleştir.
+        if not result.get("sl_tp_applied", False) and signal.sl > 0:
+            sl_ok = self._sltp.set_initial_sl(trade, signal.sl)
+            if sl_ok:
+                logger.info(
+                    f"Stop Limit SL yerleştirildi [{symbol}]: "
+                    f"SL={signal.sl:.4f} (TRADE_ACTION_SLTP bypass)"
+                )
+            else:
+                logger.error(
+                    f"Stop Limit SL de başarısız [{symbol}] — "
+                    f"korumasız pozisyon riski!"
+                )
+
         # Günlük işlem sayacı
         if self.baba:
             self.baba.increment_daily_trade_count()
@@ -2504,6 +2524,11 @@ class Ogul:
             trade = self.active_trades[symbol]
 
             if trade.state == TradeState.FILLED:
+                # Önce Stop Limit SL emirlerini iptal et (v5.9.2)
+                try:
+                    self._sltp.cancel_orders(trade)
+                except Exception as exc:
+                    logger.error(f"EOD Stop Limit iptal hatası [{symbol}]: {exc}")
                 # Pozisyonu kapat
                 try:
                     self.mt5.close_position(trade.ticket)
@@ -2916,16 +2941,10 @@ class Ogul:
                     be_sl = trade.entry_price + spread
                 else:
                     be_sl = trade.entry_price - spread
-                try:
-                    result = self.mt5.modify_position(trade.ticket, sl=be_sl)
-                    if result:
-                        trade.sl = be_sl
-                        trade.trailing_sl = be_sl
-                        logger.info(
-                            f"Breakeven çekildi [{trade.symbol}]: SL={be_sl:.4f}"
-                        )
-                except Exception as exc:
-                    logger.error(f"Breakeven modify hatası [{trade.symbol}]: {exc}")
+                if self._sltp.update_trailing_sl(trade, be_sl):
+                    logger.info(
+                        f"Breakeven çekildi [{trade.symbol}]: SL={be_sl:.4f}"
+                    )
                 return "TREND"
             return "KORUMA"
 
@@ -3042,23 +3061,13 @@ class Ogul:
             if trade.direction == "BUY":
                 new_sl = trade.entry_price - 0.5 * atr_val
                 if new_sl > trade.sl:
-                    try:
-                        result = self.mt5.modify_position(trade.ticket, sl=new_sl)
-                        if result:
-                            trade.sl = new_sl
-                            logger.info(f"KORUMA 2saat SL sıkılaştırıldı [{symbol}]: SL={new_sl:.4f}")
-                    except Exception as exc:
-                        logger.error(f"KORUMA SL modify hatası [{symbol}]: {exc}")
+                    if self._sltp.update_trailing_sl(trade, new_sl):
+                        logger.info(f"KORUMA 2saat SL sıkılaştırıldı [{symbol}]: SL={new_sl:.4f}")
             else:
                 new_sl = trade.entry_price + 0.5 * atr_val
                 if trade.sl <= 0 or new_sl < trade.sl:
-                    try:
-                        result = self.mt5.modify_position(trade.ticket, sl=new_sl)
-                        if result:
-                            trade.sl = new_sl
-                            logger.info(f"KORUMA 2saat SL sıkılaştırıldı [{symbol}]: SL={new_sl:.4f}")
-                    except Exception as exc:
-                        logger.error(f"KORUMA SL modify hatası [{symbol}]: {exc}")
+                    if self._sltp.update_trailing_sl(trade, new_sl):
+                        logger.info(f"KORUMA 2saat SL sıkılaştırıldı [{symbol}]: SL={new_sl:.4f}")
 
     def _mode_trend(
         self,
@@ -3084,25 +3093,13 @@ class Ogul:
         # Sadece sıkılaştırma (monoton)
         if trade.direction == "BUY":
             if swing_sl > trade.trailing_sl:
-                try:
-                    result = self.mt5.modify_position(trade.ticket, sl=swing_sl)
-                    if result:
-                        trade.trailing_sl = swing_sl
-                        trade.sl = swing_sl
-                        logger.debug(f"TREND trailing [{symbol}]: SL={swing_sl:.4f} (swing)")
-                except Exception as exc:
-                    logger.error(f"TREND trailing modify hatası [{symbol}]: {exc}")
+                if self._sltp.update_trailing_sl(trade, swing_sl):
+                    logger.debug(f"TREND trailing [{symbol}]: SL={swing_sl:.4f} (swing)")
         else:
             update = trade.trailing_sl <= 0 or swing_sl < trade.trailing_sl
             if update:
-                try:
-                    result = self.mt5.modify_position(trade.ticket, sl=swing_sl)
-                    if result:
-                        trade.trailing_sl = swing_sl
-                        trade.sl = swing_sl
-                        logger.debug(f"TREND trailing [{symbol}]: SL={swing_sl:.4f} (swing)")
-                except Exception as exc:
-                    logger.error(f"TREND trailing modify hatası [{symbol}]: {exc}")
+                if self._sltp.update_trailing_sl(trade, swing_sl):
+                    logger.debug(f"TREND trailing [{symbol}]: SL={swing_sl:.4f} (swing)")
 
     def _mode_defend(
         self,
@@ -3125,27 +3122,15 @@ class Ogul:
             new_sl = ema_val - trail_mult * atr_val
             new_sl = _clamp_trailing_distance("BUY", current_price, new_sl)
             if new_sl > trade.trailing_sl:
-                try:
-                    result = self.mt5.modify_position(trade.ticket, sl=new_sl)
-                    if result:
-                        trade.trailing_sl = new_sl
-                        trade.sl = new_sl
-                        logger.debug(f"SAVUNMA trailing [{symbol}]: SL={new_sl:.4f} (ema)")
-                except Exception as exc:
-                    logger.error(f"SAVUNMA trailing modify hatası [{symbol}]: {exc}")
+                if self._sltp.update_trailing_sl(trade, new_sl):
+                    logger.debug(f"SAVUNMA trailing [{symbol}]: SL={new_sl:.4f} (ema)")
         else:
             new_sl = ema_val + trail_mult * atr_val
             new_sl = _clamp_trailing_distance("SELL", current_price, new_sl)
             update = trade.trailing_sl <= 0 or new_sl < trade.trailing_sl
             if update:
-                try:
-                    result = self.mt5.modify_position(trade.ticket, sl=new_sl)
-                    if result:
-                        trade.trailing_sl = new_sl
-                        trade.sl = new_sl
-                        logger.debug(f"SAVUNMA trailing [{symbol}]: SL={new_sl:.4f} (ema)")
-                except Exception as exc:
-                    logger.error(f"SAVUNMA trailing modify hatası [{symbol}]: {exc}")
+                if self._sltp.update_trailing_sl(trade, new_sl):
+                    logger.debug(f"SAVUNMA trailing [{symbol}]: SL={new_sl:.4f} (ema)")
 
     # Piramitleme ve maliyetlendirme test sürecinde devre dışı (lot=1).
     # Yedek: docs/ogul_calculate_lot_backup.md
@@ -3617,68 +3602,19 @@ class Ogul:
         # Trailing stop güncelleme — likidite bazlı çarpan
         liq_class = self._get_liq_class(symbol)
         trail_mult = TRAILING_ATR_BY_CLASS.get(liq_class, TF_TRAILING_ATR_MULT)
-        # Başarısız modify cooldown: 5 döngü boyunca tekrar deneme
-        _modify_fails = getattr(trade, "_modify_fail_count", 0)
-        if _modify_fails >= 3:
-            _cooldown = getattr(trade, "_modify_cooldown", 0)
-            if _cooldown > 0:
-                trade._modify_cooldown = _cooldown - 1
-                return
-            else:
-                trade._modify_fail_count = 0  # Cooldown bitti, tekrar dene
 
         if trade.direction == "BUY":
             new_sl = current_price - trail_mult * atr_val
             new_sl = _clamp_trailing_distance("BUY", current_price, new_sl)
             if new_sl > trade.trailing_sl:
-                try:
-                    mod_result = self.mt5.modify_position(
-                        trade.ticket, sl=new_sl,
-                    )
-                except Exception as exc:
-                    logger.error(f"modify_position hatası [{symbol}] ticket={trade.ticket}: {exc}")
-                    mod_result = None
-                if mod_result:
-                    trade.trailing_sl = new_sl
-                    trade.sl = new_sl
-                    trade._modify_fail_count = 0
-                    logger.debug(
-                        f"Trailing SL güncellendi [{symbol}]: {new_sl:.4f}"
-                    )
-                else:
-                    trade._modify_fail_count = getattr(trade, "_modify_fail_count", 0) + 1
-                    if trade._modify_fail_count >= 3:
-                        trade._modify_cooldown = 10  # 10 döngü bekle
-                        logger.warning(
-                            f"Trailing SL modify 3x başarısız [{symbol}], "
-                            f"10 döngü cooldown uygulanıyor"
-                        )
+                if self._sltp.update_trailing_sl(trade, new_sl):
+                    logger.debug(f"Trailing SL güncellendi [{symbol}]: {new_sl:.4f}")
         else:  # SELL
             new_sl = current_price + trail_mult * atr_val
             new_sl = _clamp_trailing_distance("SELL", current_price, new_sl)
             if new_sl < trade.trailing_sl:
-                try:
-                    mod_result = self.mt5.modify_position(
-                        trade.ticket, sl=new_sl,
-                    )
-                except Exception as exc:
-                    logger.error(f"modify_position hatası [{symbol}] ticket={trade.ticket}: {exc}")
-                    mod_result = None
-                if mod_result:
-                    trade.trailing_sl = new_sl
-                    trade.sl = new_sl
-                    trade._modify_fail_count = 0
-                    logger.debug(
-                        f"Trailing SL güncellendi [{symbol}]: {new_sl:.4f}"
-                    )
-                else:
-                    trade._modify_fail_count = getattr(trade, "_modify_fail_count", 0) + 1
-                    if trade._modify_fail_count >= 3:
-                        trade._modify_cooldown = 10
-                        logger.warning(
-                            f"Trailing SL modify 3x başarısız [{symbol}], "
-                            f"10 döngü cooldown uygulanıyor"
-                        )
+                if self._sltp.update_trailing_sl(trade, new_sl):
+                    logger.debug(f"Trailing SL güncellendi [{symbol}]: {new_sl:.4f}")
 
     def _manage_mean_reversion(
         self,
@@ -3722,19 +3658,7 @@ class Ogul:
 
             # TP mesafesinin %50'sine ulaştıysa breakeven
             if tp_distance > 0 and current_profit >= tp_distance * 0.5:
-                try:
-                    mod_result = self.mt5.modify_position(
-                        trade.ticket, sl=entry,
-                    )
-                except Exception as exc:
-                    logger.error(
-                        f"MR breakeven hatası [{symbol}] "
-                        f"ticket={trade.ticket}: {exc}"
-                    )
-                    mod_result = None
-                if mod_result:
-                    trade.sl = entry
-                    trade.trailing_sl = entry
+                if self._sltp.update_trailing_sl(trade, entry):
                     logger.info(
                         f"MR breakeven [{symbol}]: SL→entry={entry:.4f} "
                         f"(kâr={current_profit:.4f}, "
@@ -3827,16 +3751,7 @@ class Ogul:
             new_sl = current_price - trail_mult * atr_val
             new_sl = _clamp_trailing_distance("BUY", current_price, new_sl)
             if new_sl > trade.trailing_sl:
-                try:
-                    mod_result = self.mt5.modify_position(
-                        trade.ticket, sl=new_sl,
-                    )
-                except Exception as exc:
-                    logger.error(f"modify_position hatası [{symbol}] ticket={trade.ticket}: {exc}")
-                    mod_result = None
-                if mod_result:
-                    trade.trailing_sl = new_sl
-                    trade.sl = new_sl
+                if self._sltp.update_trailing_sl(trade, new_sl):
                     logger.debug(
                         f"Breakout trailing SL [{symbol}] "
                         f"(liq={liq_class}, mult={trail_mult}): {new_sl:.4f}"
@@ -3845,16 +3760,7 @@ class Ogul:
             new_sl = current_price + trail_mult * atr_val
             new_sl = _clamp_trailing_distance("SELL", current_price, new_sl)
             if new_sl < trade.trailing_sl:
-                try:
-                    mod_result = self.mt5.modify_position(
-                        trade.ticket, sl=new_sl,
-                    )
-                except Exception as exc:
-                    logger.error(f"modify_position hatası [{symbol}] ticket={trade.ticket}: {exc}")
-                    mod_result = None
-                if mod_result:
-                    trade.trailing_sl = new_sl
-                    trade.sl = new_sl
+                if self._sltp.update_trailing_sl(trade, new_sl):
                     logger.debug(
                         f"Breakout trailing SL [{symbol}] "
                         f"(liq={liq_class}, mult={trail_mult}): {new_sl:.4f}"
@@ -3885,6 +3791,15 @@ class Ogul:
             # Sadece dolu pozisyonları senkronize et
             if trade.state != TradeState.FILLED:
                 continue
+
+            # ── Stop Limit SL tetiklenme kontrolü (v5.9.2) ───────────
+            # Emir bekleyen listesinden kaybolmuşsa → SL tetiklendi
+            if self._sltp.check_sl_triggered(trade):
+                logger.info(
+                    f"Stop Limit SL tetiklendi [{symbol}]: "
+                    f"ticket={trade.ticket} — pozisyon kapanmış olabilir"
+                )
+
             if symbol not in open_symbols:
                 logger.info(
                     f"Pozisyon harici kapanmış [{symbol}]: ticket={trade.ticket}"
@@ -3907,6 +3822,12 @@ class Ogul:
         now = datetime.now()
         trade.state = TradeState.CLOSED
         trade.closed_at = now
+
+        # ── Stop Limit SL emirlerini iptal et (v5.9.2) ───────────────
+        try:
+            self._sltp.cancel_orders(trade)
+        except Exception as exc:
+            logger.error(f"Stop Limit SL iptal hatası [{symbol}]: {exc}")
 
         # Son fiyatı al
         try:
@@ -4205,6 +4126,15 @@ class Ogul:
                 trade.opened_at = opened_at
 
             self.active_trades[symbol] = trade
+
+            # ── Stop Limit SL emrini kurtarma/yeniden oluşturma (v5.9.2) ──
+            try:
+                self._sltp.restore_sl_order(trade)
+            except Exception as exc:
+                logger.error(
+                    f"Stop Limit SL restore hatası [{symbol}]: {exc}"
+                )
+
             restored_count += 1
 
             if db_trade:

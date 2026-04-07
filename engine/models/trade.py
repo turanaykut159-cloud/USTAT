@@ -76,3 +76,5 @@ class Trade:
     max_hold_warned: bool = False    # max süre uyarısı verildi mi
     # ── Yetim pozisyon (v5.9.2-fix) ─────────────────────────────
     orphan: bool = False             # DB eşleşmesi yok ama MT5'te var — duplicate engeli
+    # ── Stop Limit SL/TP (v5.9.2 — GCM VİOP netting fix) ────────
+    sl_order_ticket: int = 0         # OĞUL SL Stop Limit bekleyen emir ticket'ı
