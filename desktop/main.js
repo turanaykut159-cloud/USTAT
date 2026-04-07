@@ -101,19 +101,25 @@ let tray = null;
 let isAlwaysOnTop = true;
 
 // ── Tek instance kilidi ──────────────────────────────────────────
-const gotTheLock = app.requestSingleInstanceLock();
-elog(`requestSingleInstanceLock: ${gotTheLock}`);
-if (!gotTheLock) {
-  elog('Baska bir USTAT instance calisiyor, cikis yapiliyor.');
-  app.quit();
+// API mode'da start_ustat.py kendi kilidini yönetir, Electron kilidi atla
+const isApiMode = process.env.USTAT_API_MODE === '1';
+if (!isApiMode) {
+  const gotTheLock = app.requestSingleInstanceLock();
+  elog(`requestSingleInstanceLock: ${gotTheLock}`);
+  if (!gotTheLock) {
+    elog('Baska bir USTAT instance calisiyor, cikis yapiliyor.');
+    app.quit();
+  } else {
+    app.on('second-instance', () => {
+      if (mainWindow) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.show();
+        mainWindow.focus();
+      }
+    });
+  }
 } else {
-  app.on('second-instance', () => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.show();
-      mainWindow.focus();
-    }
-  });
+  elog('API mode: tek instance kilidi start_ustat.py tarafından yönetiliyor');
 }
 
 // ── Ana pencere ──────────────────────────────────────────────────
@@ -131,7 +137,12 @@ function createWindow() {
     backgroundColor: BG_COLOR,
     alwaysOnTop: isAlwaysOnTop,
     show: false,                    // İçerik hazır olunca göster
-    frame: false,                    // v5.9: Özel başlık çubuğu (profesyonel görünüm)
+    titleBarStyle: 'hidden',        // v5.9: Gizli başlık çubuğu (ÜSTAT Finans sistemi)
+    titleBarOverlay: {              // Native min/max/close butonları
+      color: '#0d1117',
+      symbolColor: '#94a3b8',
+      height: 40,
+    },
     autoHideMenuBar: true,          // Menü çubuğunu gizle
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -149,6 +160,11 @@ function createWindow() {
   const isDev = process.env.NODE_ENV === 'development';
   elog(`isDev: ${isDev}, NODE_ENV: ${process.env.NODE_ENV}`);
 
+  // USTAT_API_MODE: start_ustat.py tarafından Electron başlatıldığında set edilir.
+  // Bu modda API sunucusu zaten çalışıyor, oradan yükle.
+  const apiMode = process.env.USTAT_API_MODE === '1';
+  const apiPort = parseInt(process.env.USTAT_API_PORT || '8000', 10);
+
   if (isDev) {
     // Splash screen HEMEN yükle (Vite bekleme yok → pencere anında açılır)
     elog('Splash screen yukleniyor (data: URL)');
@@ -156,6 +172,9 @@ function createWindow() {
     if (process.argv.includes('--devtools')) {
       mainWindow.webContents.openDevTools({ mode: 'detach' });
     }
+  } else if (apiMode) {
+    elog(`Production (API mode): http://127.0.0.1:${apiPort} yukleniyor`);
+    mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(SPLASH_HTML)}`);
   } else {
     elog('Production: dist/index.html yukleniyor');
     mainWindow.loadFile(path.join(__dirname, 'dist', 'index.html'));
@@ -195,6 +214,14 @@ function createWindow() {
         mainWindow.loadURL(`http://localhost:${DEV_PORT}`);
       }
     });
+  } else if (apiMode) {
+    elog(`pollForVite (API mode) baslatiliyor port ${apiPort}...`);
+    pollForVite(apiPort, () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        elog(`API hazir, uygulama yukleniyor (http://127.0.0.1:${apiPort})`);
+        mainWindow.loadURL(`http://127.0.0.1:${apiPort}`);
+      }
+    });
   }
 
   // Pencere başlığını zorla
@@ -203,9 +230,13 @@ function createWindow() {
   });
   mainWindow.setTitle(APP_TITLE);
 
-  // Kapatma → gizle (tray'de kalsın)
+  // Kapatma davranışı
   mainWindow.on('close', (e) => {
-    if (!app.isQuitting) {
+    if (isApiMode) {
+      // API mode: pencere kapanınca uygulama kapansın (start_ustat.py yönetir)
+      app.isQuitting = true;
+    } else if (!app.isQuitting) {
+      // Standalone: gizle (tray'de kalsın)
       e.preventDefault();
       mainWindow.hide();
     }
@@ -385,6 +416,7 @@ function createTray() {
 }
 
 function updateTrayMenu() {
+  if (!tray || tray.isDestroyed()) return;  // Tray henüz oluşmamış veya yok edilmiş
   const contextMenu = Menu.buildFromTemplate([
     {
       label: 'Göster',
@@ -561,10 +593,12 @@ function setupIPC() {
 // ── Uygulama yaşam döngüsü ──────────────────────────────────────
 elog('app.whenReady bekleniyor...');
 app.whenReady().then(() => {
-  elog('app.whenReady tamamlandi, IPC + pencere + tray olusturuluyor');
+  elog(`app.whenReady tamamlandi, API_MODE=${isApiMode}`);
   setupIPC();
   createWindow();
-  createTray();
+  if (!isApiMode) {
+    createTray();  // API mode'da start_ustat.py kendi tray'ini yönetir
+  }
   elog('Baslangic tamamlandi');
 });
 

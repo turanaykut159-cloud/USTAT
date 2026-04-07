@@ -210,12 +210,18 @@ Her 10 saniyede aşağıdaki adımlar SABİT SIRAYLA çalışır:
 ```
 Masaüstü kısayolu → wscript.exe start_ustat.vbs
     → start_ustat.py (Admin yetkisi)
-        → Port temizleme (8000, 5173)
-        → API başlat (uvicorn, port 8000) + Engine thread
-        → Vite başlat (port 5173)
-        → Electron başlat (localhost:5173 yükler)
-        → Watchdog döngüsü (heartbeat izle, crash'te yeniden başlat)
+        → Single instance kilidi (Named Mutex + port + lock file)
+        → Alt process başlat (multiprocessing):
+            → API + Engine başlat (uvicorn, port 8000)
+            → Electron başlat (USTAT_API_MODE=1, localhost:8000 yükler)
+            → Electron kapanınca → API/Engine güvenle durdur
+        → System tray (pystray) başlat
+        → Alt process izle (crash'te yeniden başlat)
 ```
+
+**NOT:** Production modda UI, Electron ile açılır (titleBarStyle: 'hidden' + titleBarOverlay).
+Electron, Windows native pencere yönetimi kullanır (çoklu monitör, maximize, snap desteği).
+pywebview KULLANILMAZ (v5.9.1 itibariyle kaldırıldı).
 
 **PID dosyaları:** `api.pid` (API process), `watchdog.pid` (watchdog singleton), `engine.heartbeat` (motor kalp atışı)
 
@@ -260,13 +266,14 @@ SIGNAL → PENDING → SENT → FILLED → CLOSED
 
 ## BÖLÜM 3: ÇALIŞMA PRENSİPLERİ (ZORUNLU)
 
-### 3.1 Beş Altın Kural
+### 3.1 Altı Altın Kural
 
 1. **ÖNCE ANLA:** Değişiklik yapmadan önce ilgili kodu TAMAMEN oku ve anla. "Herhalde şöyle çalışıyordur" KABUL EDİLEMEZ.
 2. **SONRA ARAŞTIR:** Sorunun kökünü kodda bul. Log dosyalarını oku (`logs/ustat_YYYY-MM-DD.log`). Ekran görüntüsüne GÜVENME.
-3. **ETKİYİ ÖLÇ:** Değişikliğin başka neleri etkilediğini belirle. Çağrı zinciri, tüketici zinciri, veri akışı.
-4. **TEST ET:** Sadece "çalışıyor gibi görünüyor" YETMEZ. Log'dan doğrula.
-5. **SON ADIM UYGULA:** Tüm kontroller tamam ise uygulamayı yap.
+3. **ÇALIŞMA ZAMANINI DOĞRULA:** Değişiklik yapacağın dosyanın GERÇEKTEN çalışan dosya olduğunu kanıtla. Uygulamanın hangi modda (Electron/pywebview/Chrome), hangi process ile, hangi dosyayı kullanarak çalıştığını LOG veya PROCESS kontrolüyle doğrula. Yanlış dosyayı düzeltmek = sıfır iş. **Kontrol yöntemi:** `startup.log` oku, çalışan process'leri kontrol et, hangi portta ne dinliyor doğrula.
+4. **ETKİYİ ÖLÇ:** Değişikliğin başka neleri etkilediğini belirle. Çağrı zinciri, tüketici zinciri, veri akışı.
+5. **TEST ET:** Sadece "çalışıyor gibi görünüyor" YETMEZ. Log'dan doğrula.
+6. **SON ADIM UYGULA:** Tüm kontroller tamam ise uygulamayı yap.
 
 ### 3.2 Kesin Yasaklar
 
@@ -281,12 +288,13 @@ SIGNAL → PENDING → SENT → FILLED → CLOSED
 - Çağrı sırasını değiştirmek YASAK (BABA → OĞUL → H-Engine → ÜSTAT SABİT)
 - "Geçici olarak devre dışı bırakma" YASAK — geçici bile olsa
 
-### 3.3 Değişiklik Öncesi Zorunlu 4 Adım
+### 3.3 Değişiklik Öncesi Zorunlu 5 Adım
 
 Her değişiklikten ÖNCE bu adımlar tamamlanır. Atlama YASAK.
 
 | Adım | Gereklilik |
 |------|-----------|
+| **0. Çalışma Zamanı Doğrulama** | Değiştireceğin dosyanın GERÇEKTEN çalışan dosya olduğunu kanıtla. `startup.log` oku, process kontrol et, hangi runtime aktif (Electron vs pywebview vs Chrome) doğrula. **Yanlış dosyayı düzeltmek = sıfır iş.** |
 | **1. Kök Sebep Kanıtı** | Sorunun kaynağını log/çıktı/test ile kanıtla. Varsayım değil, kanıt. |
 | **2. Etki Analizi** | Çağrı zinciri, tüketici zinciri, veri akışı, Kırmızı Bölge dokunusu var mı? |
 | **3. Kullanıcı Onayı** | Planı açıkla, AÇIK ONAY al ("evet", "yap", "tamam"). Sessizlik onay DEĞİLDİR. |
@@ -316,7 +324,7 @@ Her değişiklikten ÖNCE bu adımlar tamamlanır. Atlama YASAK.
 
 Tam metin: `USTAT_ANAYASA.md` (v2.0). Aşağıda özet.
 
-### 4.1 Kırmızı Bölge (8 Dokunulmaz Dosya)
+### 4.1 Kırmızı Bölge (10 Dokunulmaz Dosya)
 
 Bu dosyalarda değişiklik için ÇİFT DOĞRULAMA gerekir: Plan → Onay → Uygulama → Rapor → Doğrulama
 
@@ -330,13 +338,15 @@ Bu dosyalarda değişiklik için ÇİFT DOĞRULAMA gerekir: Plan → Onay → Uy
 | 6 | `engine/database.py` | Trade kayıtları, risk state persistence, P&L takibi |
 | 7 | `engine/data_pipeline.py` | Piyasa verisi besleme, tüm modüllerin veri kaynağı |
 | 8 | `config/default.json` | Risk parametreleri, strateji sabitleri, tüm eşik değerleri |
+| 9 | `start_ustat.py` | Başlatma zinciri, watchdog, graceful shutdown — startup performansı koruması |
+| 10 | `api/server.py` | API lifespan, Engine oluşturma sırası, route kayıt — startup performansı koruması |
 
 **Kırmızı Bölge Özel Kuralları:**
 - Tek seferde tek değişiklik — aynı anda birden fazla fonksiyon DEĞİŞTİRİLEMEZ
 - Fonksiyon silme YASAK
 - Sabit değer değiştirilmeden önce mevcut ve yeni değer yan yana gösterilir, kullanıcı farkı onaylar
 
-### 4.2 Sarı Bölge (9 Dikkatle Değiştirilebilir Dosya)
+### 4.2 Sarı Bölge (7 Dikkatle Değiştirilebilir Dosya)
 
 Bölüm 3.3'teki standart adımlar (kök neden + etki analizi + onay) yeterlidir.
 
@@ -345,18 +355,16 @@ Bölüm 3.3'teki standart adımlar (kök neden + etki analizi + onay) yeterlidir
 | 1 | `engine/h_engine.py` | Hibrit motor — kendi SL/TP ve pozisyon yönetimi var |
 | 2 | `engine/config.py` | Konfigürasyon yükleme — yanlış yükleme tüm parametreleri bozar |
 | 3 | `engine/logger.py` | Loglama — bozulursa hata tespiti imkansızlaşır |
-| 4 | `api/server.py` | API ana dosya — route sırası ve middleware |
-| 5 | `api/routes/killswitch.py` | Kill-switch API endpoint — frontend tetikleme mekanizması |
-| 6 | `api/routes/positions.py` | Açık pozisyon API — yanlış veri frontend'i yanıltır |
-| 7 | `start_ustat.py` | Başlatıcı + watchdog |
-| 8 | `desktop/main.js` | Electron ana process — safeQuit, killApiProcess, OTP akışı |
-| 9 | `desktop/mt5Manager.js` | MT5 OTP otomasyon |
+| 4 | `api/routes/killswitch.py` | Kill-switch API endpoint — frontend tetikleme mekanizması |
+| 5 | `api/routes/positions.py` | Açık pozisyon API — yanlış veri frontend'i yanıltır |
+| 6 | `desktop/main.js` | Electron ana process — safeQuit, killApiProcess, OTP akışı, tray yönetimi |
+| 7 | `desktop/mt5Manager.js` | MT5 OTP otomasyon |
 
 ### 4.3 Yeşil Bölge
 
 Yukarıdaki listelerde OLMAYAN tüm dosyalar. Standart dikkatle değiştirilebilir, İŞLEMİ BİTİR prosedürü yeterlidir.
 
-### 4.4 Siyah Kapı (24 Değiştirilemez Fonksiyon)
+### 4.4 Siyah Kapı (30 Değiştirilemez Fonksiyon)
 
 Bu fonksiyonların MANTIĞI değiştirilemez. İzin verilen: kanıtlı bug fix, performans iyileştirmesi (mantık ve çıktı değişmeden), güvenlik katmanı ekleme (mevcut korumayı azaltmadan).
 
@@ -404,7 +412,18 @@ Bu fonksiyonların MANTIĞI değiştirilemez. İzin verilen: kanıtlı bug fix, 
 | 23 | `_heartbeat_mt5()` | MT5 kurtarma (3 deneme, sonra kapanır) |
 | 24 | `_main_loop()` | 10 saniye döngü + hata izolasyonu |
 
-### 4.5 Değiştirilemez 10 Kural
+**Startup/Shutdown Koruması (6 fonksiyon)**
+
+| # | Fonksiyon | Dosya | Görev |
+|---|-----------|-------|-------|
+| 25 | `run_webview_process()` | start_ustat.py | API thread → port bekleme → Electron başlatma → kapanış zinciri |
+| 26 | `_start_api()` | start_ustat.py | Uvicorn başlatma — config değişikliği startup performansını BOZAR |
+| 27 | `_shutdown_api()` | start_ustat.py | Graceful shutdown — engine.stop() zincirini tetikler |
+| 28 | `lifespan()` | api/server.py | Engine nesne oluşturma sırası — constructor sırası DEĞİŞTİRİLEMEZ |
+| 29 | `main()` | start_ustat.py | ProcessGuard + Mutex + subprocess — tek instance koruması |
+| 30 | `createWindow()` | desktop/main.js | Electron pencere oluşturma + API bekleme + crash handler |
+
+### 4.5 Değiştirilemez 14 Kural
 
 | # | Kural | Açıklama |
 |---|-------|----------|
@@ -418,6 +437,10 @@ Bu fonksiyonların MANTIĞI değiştirilemez. İzin verilen: kanıtlı bug fix, 
 | 8 | **Circuit Breaker** | 5 ardışık MT5 timeout → 30sn tüm MT5 çağrıları engellenir |
 | 9 | **Fail-Safe** | Güvenlik modülü sessizce devre dışı kalırsa sistem "kilitli" duruma düşer. Şüphede dur |
 | 10 | **Günlük Kayıp** | ≥%3 → tüm pozisyonlar kapatılır. ≥%2.5 → yeni işlem açılmaz |
+| 11 | **Başlatma Zinciri** | `start_ustat.py → ProcessGuard → Mutex → API thread (uvicorn) → port_open bekleme → Electron → wait` — sıra DEĞİŞTİRİLEMEZ |
+| 12 | **Lifespan Sırası** | `Config → Database → MT5Bridge → DataPipeline → Ustat → Baba → Ogul → Engine` — constructor sırası DEĞİŞTİRİLEMEZ |
+| 13 | **Kapanış Sırası** | Electron ÖNCE kapanır → lifespan engine.stop() → MT5 disconnect → DB close. Tersine çevirmek renderer crash'e neden olur |
+| 14 | **Startup Performans** | API port hazır süresi ≤5sn olmalı. Gecikme tespit edilirse (≥10sn) kök neden araştırılır. TIME_WAIT socket temizliği start_ustat.py ProcessGuard'da yapılır |
 
 ---
 

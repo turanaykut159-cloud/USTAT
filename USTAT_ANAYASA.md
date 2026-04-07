@@ -56,6 +56,8 @@ Aşağıdaki dosyalar uygulamanın can damarıdır. Bu dosyalardaki herhangi bir
 | 6 | `engine/database.py` | Trade kayıtları, risk state persistence, P&L takibi |
 | 7 | `engine/data_pipeline.py` | Piyasa verisi besleme, tüm modüllerin veri kaynağı |
 | 8 | `config/default.json` | Risk parametreleri, strateji sabitleri, tüm eşik değerleri |
+| 9 | `start_ustat.py` | Başlatma zinciri, watchdog, graceful shutdown — startup performansı koruması |
+| 10 | `api/server.py` | API lifespan, Engine oluşturma sırası, route kayıt — startup performansı koruması |
 
 ### 2.2 — Kırmızı Bölge Özel Kuralları
 
@@ -117,6 +119,17 @@ Aşağıdaki fonksiyonlar uygulamanın "hayatta kalma refleksleri"dir. Bu fonksi
 | 23 | `_heartbeat_mt5()` | MT5 bağlantı kurtarma. 3 deneme sonrası engine durur. Bu davranış DEĞİŞTİRİLEMEZ. |
 | 24 | `_main_loop()` | 10 saniye döngü + hata izolasyonu + heartbeat yazma. Döngü yapısı DEĞİŞTİRİLEMEZ. |
 
+### 3.5 — Startup/Shutdown Koruması (start_ustat.py + api/server.py + desktop/main.js)
+
+| # | Fonksiyon | Dosya | Koruma Nedeni |
+|---|-----------|-------|---------------|
+| 25 | `run_webview_process()` | start_ustat.py | API thread → port bekleme → Electron başlatma → kapanış zinciri. Sıra DEĞİŞTİRİLEMEZ. |
+| 26 | `_start_api()` | start_ustat.py | Uvicorn başlatma. Config/parametre değişikliği startup performansını bozar. |
+| 27 | `_shutdown_api()` | start_ustat.py | Graceful shutdown zinciri: uvicorn stop → lifespan exit → engine.stop() → MT5 disconnect → DB close. |
+| 28 | `lifespan()` | api/server.py | Engine nesne oluşturma sırası: Config→DB→MT5→Pipeline→Ustat→Baba→Ogul→Engine. Sıra DEĞİŞTİRİLEMEZ. |
+| 29 | `main()` | start_ustat.py | ProcessGuard + Named Mutex + subprocess yönetimi. Tek instance koruması. |
+| 30 | `createWindow()` | desktop/main.js | Electron pencere oluşturma + API hazır bekleme + crash recovery. |
+
 ---
 
 ## BÖLÜM 4 — DEĞİŞTİRİLEMEZ KURALLAR
@@ -156,6 +169,18 @@ Herhangi bir güvenlik modülü sessizce devre dışı kalırsa sistem "açık" 
 ### 4.10 — Günlük Kayıp Kuralı
 Günlük kayıp ≥%3 → tüm pozisyonlar kapatılır. Günlük kayıp ≥%2.5 → yeni işlem açılmaz. Bu eşikler DEĞİŞTİRİLEMEZ.
 
+### 4.11 — Başlatma Zinciri Kuralı
+`start_ustat.py → ProcessGuard → Mutex → API thread (uvicorn) → port_open bekleme → Electron → wait`. Bu sıra DEĞİŞTİRİLEMEZ. API, Electron'dan ÖNCE hazır olmalıdır.
+
+### 4.12 — Lifespan Oluşturma Sırası Kuralı
+`Config → Database → MT5Bridge → DataPipeline → Ustat → Baba → Ogul → Engine`. Bu constructor sırası DEĞİŞTİRİLEMEZ. Bağımlılık zinciri bozulursa Engine başlatılamaz.
+
+### 4.13 — Kapanış Sırası Kuralı
+Electron ÖNCE kapanır → lifespan engine.stop() tetiklenir → MT5 disconnect → DB close → port serbest. Bu sıra DEĞİŞTİRİLEMEZ. Tersine çevirmek renderer crash'e ve TIME_WAIT birikimesine neden olur.
+
+### 4.14 — Startup Performans Koruması
+API port hazır süresi ≤5sn olmalıdır. Gecikme ≥10sn tespit edilirse kök neden araştırılır. TIME_WAIT socket temizliği ProcessGuard'da yapılır. Bu performans hedefi düşürülemez.
+
 ---
 
 ## BÖLÜM 5 — SARILAR (DİKKATLE DEĞİŞTİRİLEBİLİR)
@@ -167,12 +192,10 @@ Bu dosyalar Kırmızı Bölge'de değil ama dikkatli müdahale gerektirir:
 | 1 | `engine/h_engine.py` | Hibrit motor — kendi SL/TP ve pozisyon yönetimi var |
 | 2 | `engine/config.py` | Konfigürasyon yükleme — yanlış yükleme tüm parametreleri bozar |
 | 3 | `engine/logger.py` | Loglama — bozulursa hata tespiti imkansızlaşır |
-| 4 | `api/server.py` | API ana dosya — route sırası ve middleware |
-| 5 | `api/routes/killswitch.py` | Kill-switch API endpoint — frontend tetikleme mekanizması |
-| 6 | `api/routes/positions.py` | Açık pozisyon API — yanlış veri frontend'i yanıltır |
-| 7 | `start_ustat.py` | Başlatıcı + watchdog — bugünkü sorunun kaynağı |
-| 8 | `desktop/main.js` | Electron ana process — safeQuit, killApiProcess, OTP akışı |
-| 9 | `desktop/mt5Manager.js` | MT5 OTP otomasyon — admin Python zinciri |
+| 4 | `api/routes/killswitch.py` | Kill-switch API endpoint — frontend tetikleme mekanizması |
+| 5 | `api/routes/positions.py` | Açık pozisyon API — yanlış veri frontend'i yanıltır |
+| 6 | `desktop/main.js` | Electron ana process — safeQuit, killApiProcess, OTP akışı, tray yönetimi |
+| 7 | `desktop/mt5Manager.js` | MT5 OTP otomasyon — admin Python zinciri |
 
 Sarı dosyalarda Bölüm 1'deki standart adımlar (kök neden + etki analizi + onay) yeterlidir.
 
