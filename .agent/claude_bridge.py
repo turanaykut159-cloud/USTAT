@@ -1,12 +1,12 @@
 """
-Claude Köprü v4.0 — Linux VM'den Windows Ajanına komut gönder ve sonuç al.
+Claude Köprü v4.1 — Linux VM'den Windows Ajanına komut gönder ve sonuç al.
 
-Yenilikler (v4.0):
-  - Log Yönetim Sistemi v3.0 (FUSE cache bypass)
-  - 30+ komut tipi
+Yenilikler (v4.1):
+  - Claude-Cowork Entegrasyonu (v3.1 ajan)
+  - 49 komut tipi (11 yeni)
+  - Pencere yönetimi, pano, sistem bilgisi, ağ, servisler
   - Retry mekanizması (3 deneme)
   - Otomatik canlandırma
-  - Genişletilmiş CLI arayüzü
 
 Kullanım (bash ile):
   python .agent/claude_bridge.py ping
@@ -47,6 +47,21 @@ Kullanım (bash ile):
   python .agent/claude_bridge.py fresh_dir_stat [path] [--pattern *.py] [--sort size|mtime]
   python .agent/claude_bridge.py fresh_file_search <path> <pattern> [--regex] [--context N]
   python .agent/claude_bridge.py fresh_grep <pattern> [--glob *.py] [--path dir/]
+
+  # v4.1 — Claude-Cowork Entegrasyonu (pencere, pano, sistem)
+  python .agent/claude_bridge.py quick_look
+  python .agent/claude_bridge.py window_list [filter]
+  python .agent/claude_bridge.py window_focus --title "pencere başlığı"
+  python .agent/claude_bridge.py clipboard_read
+  python .agent/claude_bridge.py clipboard_write "metin"
+  python .agent/claude_bridge.py system_info
+  python .agent/claude_bridge.py process_detail --name python.exe
+  python .agent/claude_bridge.py process_detail --pid 1234
+  python .agent/claude_bridge.py net_connections [port]
+  python .agent/claude_bridge.py env_vars [name]
+  python .agent/claude_bridge.py installed_software [filter]
+  python .agent/claude_bridge.py service_list [filter] [--status running]
+  python .agent/claude_bridge.py scheduled_tasks [filter]
 """
 
 import json
@@ -498,6 +513,72 @@ def main():
                 kwargs["recursive"] = True; i += 1
             else:
                 i += 1
+
+    # v4.1 — Claude-Cowork Entegrasyonu
+    elif cmd_type == "quick_look":
+        pass  # Parametre yok
+
+    elif cmd_type == "window_list":
+        if len(sys.argv) > 2:
+            kwargs["filter"] = sys.argv[2]
+
+    elif cmd_type == "window_focus":
+        args = sys.argv[2:]
+        i = 0
+        while i < len(args):
+            if args[i] == "--title" and i + 1 < len(args):
+                kwargs["title"] = args[i + 1]; i += 2
+            elif args[i] == "--hwnd" and i + 1 < len(args):
+                kwargs["hwnd"] = int(args[i + 1]); i += 2
+            else:
+                # İlk argüman title olarak kabul et
+                kwargs["title"] = args[i]; i += 1
+
+    elif cmd_type == "clipboard_read":
+        pass  # Parametre yok
+
+    elif cmd_type == "clipboard_write":
+        if len(sys.argv) > 2:
+            kwargs["text"] = " ".join(sys.argv[2:])
+
+    elif cmd_type == "system_info":
+        pass  # Parametre yok
+
+    elif cmd_type == "process_detail":
+        args = sys.argv[2:]
+        i = 0
+        while i < len(args):
+            if args[i] == "--name" and i + 1 < len(args):
+                kwargs["name"] = args[i + 1]; i += 2
+            elif args[i] == "--pid" and i + 1 < len(args):
+                kwargs["pid"] = int(args[i + 1]); i += 2
+            else:
+                kwargs["name"] = args[i]; i += 1
+
+    elif cmd_type == "net_connections":
+        if len(sys.argv) > 2:
+            kwargs["port"] = int(sys.argv[2])
+
+    elif cmd_type == "env_vars":
+        if len(sys.argv) > 2:
+            kwargs["name"] = sys.argv[2]
+
+    elif cmd_type == "installed_software":
+        if len(sys.argv) > 2:
+            kwargs["filter"] = sys.argv[2]
+
+    elif cmd_type == "service_list":
+        args = sys.argv[2:]
+        i = 0
+        while i < len(args):
+            if args[i] == "--status" and i + 1 < len(args):
+                kwargs["status"] = args[i + 1]; i += 2
+            else:
+                kwargs["filter"] = args[i]; i += 1
+
+    elif cmd_type == "scheduled_tasks":
+        if len(sys.argv) > 2:
+            kwargs["filter"] = sys.argv[2]
 
     # Gönder ve bekle
     print(f"→ Komut gönderiliyor: {cmd_type}...")

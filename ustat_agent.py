@@ -98,7 +98,7 @@ DESKTOP_DIR = USTAT_DIR / "desktop"
 DB_PATH = USTAT_DIR / "database" / "trades.db"
 CONFIG_PATH = USTAT_DIR / "config.json"
 
-AGENT_VERSION = "3.0.0"
+AGENT_VERSION = "3.1.0"
 
 # Zamanlama
 POLL_INTERVAL = 1.0            # komut tarama aralığı (saniye)
@@ -367,29 +367,53 @@ class StateManager:
             self.state.engine_running = False
 
     def _check_desktop(self):
-        """Electron/Vite çalışıyor mu?"""
+        """Electron masaüstü uygulaması çalışıyor mu?
+
+        v3.1 FIX: Eski kod port 5173 (Vite dev server) kontrol ediyordu.
+        Production modda Vite çalışmaz → hep False dönerdi.
+        Şimdi electron.exe process varlığını kontrol ediyor.
+        """
         try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(2)
-            result = sock.connect_ex(("127.0.0.1", KNOWN_PORTS["Vite"]))
-            self.state.desktop_running = (result == 0)
-            sock.close()
+            for proc in psutil.process_iter(["name"]):
+                if proc.info["name"] and proc.info["name"].lower() == "electron.exe":
+                    self.state.desktop_running = True
+                    return
+            self.state.desktop_running = False
         except Exception:
             self.state.desktop_running = False
 
     def _check_database(self):
-        """Veritabanı erişilebilir mi?"""
+        """Veritabanı erişilebilir mi?
+
+        v3.1 FIX: Eski kod ENGINE yazma kilidi sırasında timeout alıyordu.
+        Şimdi:
+          1. READ-ONLY bağlantı (uri=file:...?mode=ro) → yazma kilidi beklemez
+          2. WAL modu kontrolü → okuma/yazma çakışmasını engeller
+          3. Hafif ping sorgusu (SELECT 1) + trade sayısı ayrı try/except
+        """
         try:
-            if DB_PATH.exists():
-                conn = sqlite3.connect(str(DB_PATH), timeout=3)
+            if not DB_PATH.exists():
+                self.state.db_accessible = False
+                return
+
+            uri = f"file:{DB_PATH}?mode=ro"
+            conn = sqlite3.connect(uri, uri=True, timeout=2)
+            conn.execute("PRAGMA query_only = ON")
+
+            # Hafif ping — erişilebilirlik testi
+            conn.execute("SELECT 1")
+            self.state.db_accessible = True
+
+            # Trade sayıları — başarısız olursa erişim durumunu bozmaz
+            try:
                 cursor = conn.execute("SELECT COUNT(*) FROM trades WHERE status='OPEN'")
                 self.state.open_positions = cursor.fetchone()[0]
                 cursor = conn.execute("SELECT COUNT(*) FROM trades")
                 self.state.active_trades_count = cursor.fetchone()[0]
-                conn.close()
-                self.state.db_accessible = True
-            else:
-                self.state.db_accessible = False
+            except Exception:
+                pass  # Tablo kilitli olabilir, ama DB erişilebilir
+
+            conn.close()
         except Exception:
             self.state.db_accessible = False
 
@@ -2469,6 +2493,569 @@ def handle_fresh_grep(cmd: dict) -> tuple:
 
 
 # ═══════════════════════════════════════════════════════════════
+# v3.1 — CLAUDE-COWORK ENTEGRASYONU
+# Claude'un Windows'ta yapamadığı her şeyi ajan yapar:
+#   ● Pencere yönetimi (liste, başlık, boyut, öne getir)
+#   ● Pano (clipboard) okuma/yazma
+#   ● Detaylı process metrikleri (CPU, RAM, disk I/O)
+#   ● Ortam değişkenleri okuma
+#   ● Servis/görev listesi
+#   ● Ağ bağlantıları
+#   ● Sistem bilgisi (OS, CPU, RAM, uptime)
+# ═══════════════════════════════════════════════════════════════
+
+
+def handle_window_list(cmd):
+    """Tüm açık pencereleri listele (HWND, başlık, PID, boyut).
+
+    Claude'un gözü: Hangi pencereler açık, hangi uygulama nerede.
+    Params: filter (str, opsiyonel) — başlıkta aranacak kelime
+    """
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+
+        # Doğru callback imzası: BOOL CALLBACK EnumWindowsProc(HWND, LPARAM)
+        WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+        filter_text = cmd.get("filter", "").lower()
+        windows = []
+
+        def enum_callback(hwnd, lParam):
+            if not user32.IsWindowVisible(hwnd):
+                return True
+            length = user32.GetWindowTextLengthW(hwnd)
+            if length == 0:
+                return True
+
+            buf = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, buf, length + 1)
+            title = buf.value
+
+            if filter_text and filter_text not in title.lower():
+                return True
+
+            # PID al
+            pid = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+
+            # Boyut al
+            rect = wintypes.RECT()
+            user32.GetWindowRect(hwnd, ctypes.byref(rect))
+
+            # Process adı
+            proc_name = ""
+            try:
+                proc_name = psutil.Process(pid.value).name()
+            except Exception:
+                pass
+
+            windows.append({
+                "hwnd": hwnd,
+                "title": title,
+                "pid": pid.value,
+                "process": proc_name,
+                "x": rect.left,
+                "y": rect.top,
+                "width": rect.right - rect.left,
+                "height": rect.bottom - rect.top,
+            })
+            return True
+
+        user32.EnumWindows(WNDENUMPROC(enum_callback), 0)
+        output = json.dumps(windows, ensure_ascii=False, indent=2)
+        return True, f"{len(windows)} pencere bulundu:\n{output}", ""
+    except Exception as e:
+        return False, "", f"window_list hatasi: {e}"
+
+
+def handle_window_focus(cmd):
+    """Belirtilen pencereyi öne getir (focus ver).
+
+    Claude'un eli: İstenen uygulamayı öne çıkar.
+    Params: hwnd (int) veya title (str) — pencere tanımlayıcı
+    """
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+
+        hwnd = cmd.get("hwnd")
+        title = cmd.get("title", "")
+
+        if not hwnd and title:
+            # Başlıktan bul
+            from ctypes import wintypes
+            hwnd = user32.FindWindowW(None, title)
+            if not hwnd:
+                # Kısmi eşleme dene
+                WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+                found_hwnd = None
+
+                def find_callback(h, lp):
+                    nonlocal found_hwnd
+                    length = user32.GetWindowTextLengthW(h)
+                    if length == 0:
+                        return True
+                    buf = ctypes.create_unicode_buffer(length + 1)
+                    user32.GetWindowTextW(h, buf, length + 1)
+                    if title.lower() in buf.value.lower():
+                        found_hwnd = h
+                        return False  # Dur
+                    return True
+
+                user32.EnumWindows(WNDENUMPROC(find_callback), 0)
+                hwnd = found_hwnd
+
+        if not hwnd:
+            return False, "", f"Pencere bulunamadi: {title}"
+
+        # Minimize ise geri getir
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+
+        user32.SetForegroundWindow(hwnd)
+        return True, f"Pencere öne getirildi (HWND: {hwnd})", ""
+    except Exception as e:
+        return False, "", f"window_focus hatasi: {e}"
+
+
+def handle_clipboard_read(cmd):
+    """Windows panosunu oku.
+
+    Claude'un gözü: Kullanıcının kopyaladığı içeriği oku.
+    """
+    try:
+        import ctypes
+
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+
+        user32.OpenClipboard(0)
+        try:
+            # CF_UNICODETEXT = 13
+            handle = user32.GetClipboardData(13)
+            if not handle:
+                return True, "(pano boş)", ""
+            text = ctypes.c_wchar_p(handle).value
+            return True, text or "(pano boş)", ""
+        finally:
+            user32.CloseClipboard()
+    except Exception as e:
+        return False, "", f"clipboard_read hatasi: {e}"
+
+
+def handle_clipboard_write(cmd):
+    """Windows panosuna yaz.
+
+    Claude'un eli: Metin panoya kopyala.
+    Params: text (str) — panoya yazılacak metin
+    """
+    try:
+        text = cmd.get("text", "")
+        if not text:
+            return False, "", "text parametresi gerekli"
+
+        import ctypes
+
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+
+        user32.OpenClipboard(0)
+        try:
+            user32.EmptyClipboard()
+            # CF_UNICODETEXT = 13
+            data = text.encode("utf-16-le") + b"\x00\x00"
+            h_mem = kernel32.GlobalAlloc(0x0042, len(data))  # GMEM_MOVEABLE | GMEM_ZEROINIT
+            ptr = kernel32.GlobalLock(h_mem)
+            ctypes.memmove(ptr, data, len(data))
+            kernel32.GlobalUnlock(h_mem)
+            user32.SetClipboardData(13, h_mem)
+            return True, f"Panoya yazıldı ({len(text)} karakter)", ""
+        finally:
+            user32.CloseClipboard()
+    except Exception as e:
+        return False, "", f"clipboard_write hatasi: {e}"
+
+
+def handle_system_info(cmd):
+    """Detaylı sistem bilgisi — OS, CPU, RAM, uptime, ağ.
+
+    Claude'un beyni: Bilgisayarın kapasitesini ve durumunu öğren.
+    """
+    try:
+        import platform as plat
+
+        cpu_freq = psutil.cpu_freq()
+        mem = psutil.virtual_memory()
+        boot = datetime.fromtimestamp(psutil.boot_time())
+        uptime = datetime.now() - boot
+
+        info = {
+            "os": f"{plat.system()} {plat.release()} ({plat.version()})",
+            "machine": plat.machine(),
+            "processor": plat.processor(),
+            "python": plat.python_version(),
+            "cpu_cores_physical": psutil.cpu_count(logical=False),
+            "cpu_cores_logical": psutil.cpu_count(logical=True),
+            "cpu_freq_mhz": round(cpu_freq.current) if cpu_freq else None,
+            "cpu_usage_pct": psutil.cpu_percent(interval=1),
+            "ram_total_gb": round(mem.total / (1024**3), 1),
+            "ram_used_gb": round(mem.used / (1024**3), 1),
+            "ram_available_gb": round(mem.available / (1024**3), 1),
+            "ram_usage_pct": mem.percent,
+            "boot_time": boot.isoformat(),
+            "uptime_hours": round(uptime.total_seconds() / 3600, 1),
+        }
+
+        # Disk bilgisi
+        disks = []
+        for part in psutil.disk_partitions(all=False):
+            try:
+                usage = psutil.disk_usage(part.mountpoint)
+                disks.append({
+                    "drive": part.device,
+                    "mountpoint": part.mountpoint,
+                    "fs_type": part.fstype,
+                    "total_gb": round(usage.total / (1024**3), 1),
+                    "used_gb": round(usage.used / (1024**3), 1),
+                    "free_gb": round(usage.free / (1024**3), 1),
+                    "usage_pct": usage.percent,
+                })
+            except Exception:
+                pass
+        info["disks"] = disks
+
+        # Ağ arayüzleri
+        nets = []
+        addrs = psutil.net_if_addrs()
+        for name, addr_list in addrs.items():
+            for addr in addr_list:
+                if addr.family == socket.AF_INET:
+                    nets.append({"interface": name, "ip": addr.address})
+        info["network"] = nets
+
+        output = json.dumps(info, ensure_ascii=False, indent=2)
+        return True, output, ""
+    except Exception as e:
+        return False, "", f"system_info hatasi: {e}"
+
+
+def handle_process_detail(cmd):
+    """Belirli bir process'in detaylı bilgisi — CPU, RAM, thread, dosya, bağlantı.
+
+    Claude'un gözü: Tek bir process'i derinlemesine analiz et.
+    Params: pid (int) veya name (str)
+    """
+    try:
+        pid = cmd.get("pid")
+        name = cmd.get("name", "")
+
+        if not pid and name:
+            for proc in psutil.process_iter(["name", "pid"]):
+                if proc.info["name"] and name.lower() in proc.info["name"].lower():
+                    pid = proc.info["pid"]
+                    break
+
+        if not pid:
+            return False, "", f"Process bulunamadı: {name or pid}"
+
+        p = psutil.Process(pid)
+        with p.oneshot():
+            info = {
+                "pid": p.pid,
+                "name": p.name(),
+                "status": p.status(),
+                "cpu_percent": p.cpu_percent(interval=0.5),
+                "memory_mb": round(p.memory_info().rss / (1024**2), 1),
+                "memory_pct": round(p.memory_percent(), 2),
+                "threads": p.num_threads(),
+                "create_time": datetime.fromtimestamp(p.create_time()).isoformat(),
+                "cmdline": " ".join(p.cmdline()[:5]),  # İlk 5 arg
+                "cwd": str(p.cwd()) if hasattr(p, "cwd") else "",
+            }
+
+            # Açık dosyalar (limitli)
+            try:
+                files = p.open_files()[:10]
+                info["open_files"] = [f.path for f in files]
+            except Exception:
+                info["open_files"] = []
+
+            # Ağ bağlantıları
+            try:
+                conns = p.net_connections()[:10]
+                info["connections"] = [
+                    {"local": f"{c.laddr.ip}:{c.laddr.port}" if c.laddr else "",
+                     "remote": f"{c.raddr.ip}:{c.raddr.port}" if c.raddr else "",
+                     "status": c.status}
+                    for c in conns
+                ]
+            except Exception:
+                info["connections"] = []
+
+        output = json.dumps(info, ensure_ascii=False, indent=2)
+        return True, output, ""
+    except psutil.NoSuchProcess:
+        return False, "", f"PID {pid} bulunamadı (process sonlanmış olabilir)"
+    except Exception as e:
+        return False, "", f"process_detail hatasi: {e}"
+
+
+def handle_net_connections(cmd):
+    """Aktif ağ bağlantılarını listele.
+
+    Claude'un gözü: Hangi portlar dinleniyor, hangi bağlantılar aktif.
+    Params: port (int, opsiyonel) — belirli porta filtrele
+    """
+    try:
+        port_filter = cmd.get("port")
+        conns = psutil.net_connections(kind="inet")
+
+        results = []
+        for c in conns:
+            if port_filter:
+                if (c.laddr and c.laddr.port == port_filter) or \
+                   (c.raddr and c.raddr.port == port_filter):
+                    pass
+                else:
+                    continue
+
+            entry = {
+                "local": f"{c.laddr.ip}:{c.laddr.port}" if c.laddr else "",
+                "remote": f"{c.raddr.ip}:{c.raddr.port}" if c.raddr else "",
+                "status": c.status,
+                "pid": c.pid,
+            }
+            # Process adı
+            try:
+                entry["process"] = psutil.Process(c.pid).name() if c.pid else ""
+            except Exception:
+                entry["process"] = ""
+
+            results.append(entry)
+
+        # LISTEN olanları üste, sonra ESTABLISHED
+        results.sort(key=lambda x: (0 if x["status"] == "LISTEN" else 1, x["local"]))
+        output = json.dumps(results[:100], ensure_ascii=False, indent=2)
+        return True, f"{len(results)} bağlantı:\n{output}", ""
+    except Exception as e:
+        return False, "", f"net_connections hatasi: {e}"
+
+
+def handle_env_vars(cmd):
+    """Ortam değişkenlerini oku.
+
+    Claude'un beyni: PATH, PYTHON, JAVA_HOME vb. öğren.
+    Params: name (str, opsiyonel) — tek değişken adı; yoksa hepsini döndür
+    """
+    try:
+        name = cmd.get("name", "")
+        if name:
+            value = os.environ.get(name, None)
+            if value is None:
+                return True, f"{name} tanımlı değil", ""
+            return True, f"{name}={value}", ""
+
+        # Hepsini döndür (sıralı)
+        env = {k: v for k, v in sorted(os.environ.items())}
+        output = json.dumps(env, ensure_ascii=False, indent=2)
+        return True, f"{len(env)} ortam değişkeni:\n{output}", ""
+    except Exception as e:
+        return False, "", f"env_vars hatasi: {e}"
+
+
+def handle_installed_software(cmd):
+    """Yüklü yazılımları listele (Windows Registry).
+
+    Claude'un beyni: Bilgisayarda ne kurulu öğren.
+    Params: filter (str, opsiyonel) — ada göre filtrele
+    """
+    try:
+        import winreg
+
+        filter_text = cmd.get("filter", "").lower()
+        software = []
+
+        for hive_path in [
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+            r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
+        ]:
+            try:
+                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, hive_path)
+                for i in range(winreg.QueryInfoKey(key)[0]):
+                    try:
+                        subkey_name = winreg.EnumKey(key, i)
+                        subkey = winreg.OpenKey(key, subkey_name)
+                        try:
+                            name = winreg.QueryValueEx(subkey, "DisplayName")[0]
+                            version = ""
+                            try:
+                                version = winreg.QueryValueEx(subkey, "DisplayVersion")[0]
+                            except Exception:
+                                pass
+
+                            if filter_text and filter_text not in name.lower():
+                                continue
+
+                            software.append({"name": name, "version": version})
+                        except Exception:
+                            pass
+                        finally:
+                            winreg.CloseKey(subkey)
+                    except Exception:
+                        pass
+                winreg.CloseKey(key)
+            except Exception:
+                pass
+
+        software.sort(key=lambda x: x["name"].lower())
+        output = json.dumps(software, ensure_ascii=False, indent=2)
+        return True, f"{len(software)} yazılım:\n{output}", ""
+    except Exception as e:
+        return False, "", f"installed_software hatasi: {e}"
+
+
+def handle_service_list(cmd):
+    """Windows servislerini listele.
+
+    Claude'un gözü: Çalışan/durmuş servisleri gör.
+    Params: filter (str, opsiyonel) — ada göre filtrele
+             status (str, opsiyonel) — running/stopped
+    """
+    try:
+        filter_text = cmd.get("filter", "").lower()
+        status_filter = cmd.get("status", "").lower()
+
+        services = []
+        for svc in psutil.win_service_iter():
+            try:
+                info = svc.as_dict()
+                name = info.get("name", "")
+                display = info.get("display_name", "")
+                status = info.get("status", "")
+
+                if filter_text and filter_text not in name.lower() and filter_text not in display.lower():
+                    continue
+                if status_filter and status_filter != status.lower():
+                    continue
+
+                services.append({
+                    "name": name,
+                    "display_name": display,
+                    "status": status,
+                    "start_type": info.get("start_type", ""),
+                    "pid": info.get("pid", None),
+                })
+            except Exception:
+                pass
+
+        output = json.dumps(services, ensure_ascii=False, indent=2)
+        return True, f"{len(services)} servis:\n{output}", ""
+    except Exception as e:
+        return False, "", f"service_list hatasi: {e}"
+
+
+def handle_scheduled_tasks(cmd):
+    """Windows zamanlanmış görevleri listele.
+
+    Params: filter (str, opsiyonel) — ada göre filtrele
+    """
+    try:
+        filter_text = cmd.get("filter", "").lower()
+        result = subprocess.run(
+            ["schtasks", "/Query", "/FO", "CSV", "/NH"],
+            capture_output=True, text=True, timeout=15,
+            startupinfo=_hidden_si(),
+            creationflags=0x08000000,
+        )
+
+        tasks = []
+        for line in result.stdout.strip().split("\n"):
+            parts = line.strip().strip('"').split('","')
+            if len(parts) >= 3:
+                name = parts[0].strip('"')
+                if filter_text and filter_text not in name.lower():
+                    continue
+                tasks.append({
+                    "name": name,
+                    "next_run": parts[1].strip('"') if len(parts) > 1 else "",
+                    "status": parts[2].strip('"') if len(parts) > 2 else "",
+                })
+
+        output = json.dumps(tasks[:50], ensure_ascii=False, indent=2)
+        return True, f"{len(tasks)} görev:\n{output}", ""
+    except Exception as e:
+        return False, "", f"scheduled_tasks hatasi: {e}"
+
+
+def handle_quick_look(cmd):
+    """ÜSTAT'ın tüm durumunu tek seferde özetle — Claude için hızlı bakış.
+
+    Claude'un hızlı durumu: Tek komutla her şeyi öğren.
+    API, Engine, MT5, Desktop, DB, pozisyonlar, son loglar, alerts — hepsi bir arada.
+    """
+    try:
+        parts = []
+
+        # 1. Sistem durumu
+        state = _state_mgr.state
+        _state_mgr.update()
+        s = _state_mgr.state
+
+        status_lines = [
+            "══ ÜSTAT QUICK LOOK ══",
+            f"API:      {'✅' if s.api_alive else '❌'}  Engine: {'✅' if s.engine_running else '❌'}  "
+            f"MT5: {'✅' if s.mt5_connected else '❌'}  Desktop: {'✅' if s.desktop_running else '❌'}  "
+            f"DB: {'✅' if s.db_accessible else '❌'}",
+            f"Pozisyon: {s.open_positions}  İşlem: {s.active_trades_count}  "
+            f"Disk: {s.disk_free_gb}GB boş",
+        ]
+        parts.append("\n".join(status_lines))
+
+        # 2. Son engine log (son 5 satır)
+        try:
+            today = datetime.now().strftime("%Y-%m-%d")
+            log_path = USTAT_DIR / "logs" / f"ustat_{today}.log"
+            if log_path.exists():
+                with open(log_path, "rb") as f:
+                    f.seek(0, 2)
+                    size = f.tell()
+                    read_size = min(size, 2000)
+                    f.seek(max(0, size - read_size))
+                    data = f.read().decode("utf-8", errors="replace")
+                    lines = data.strip().split("\n")
+                    last_lines = lines[-5:]
+                    parts.append("── Son Engine Log ──\n" + "\n".join(last_lines))
+        except Exception:
+            parts.append("── Son Engine Log ── (okunamadı)")
+
+        # 3. Çözülmemiş alertler
+        try:
+            unresolved = _alert_mgr.get_unresolved()
+            if unresolved:
+                alert_lines = [f"  [{a['severity']}] {a['component']}: {a['message']}" for a in unresolved[:5]]
+                parts.append(f"── Alertler ({len(unresolved)} çözülmemiş) ──\n" + "\n".join(alert_lines))
+            else:
+                parts.append("── Alertler ── Yok ✅")
+        except Exception:
+            pass
+
+        # 4. CPU/RAM anlık
+        try:
+            cpu = psutil.cpu_percent(interval=0.3)
+            mem = psutil.virtual_memory()
+            parts.append(f"── Sistem ── CPU: %{cpu}  RAM: %{mem.percent} ({round(mem.available/(1024**3),1)}GB boş)")
+        except Exception:
+            pass
+
+        return True, "\n\n".join(parts), ""
+    except Exception as e:
+        return False, "", f"quick_look hatasi: {e}"
+
+
+# ═══════════════════════════════════════════════════════════════
 # KOMUT DAĞITICI
 # ═══════════════════════════════════════════════════════════════
 
@@ -2512,6 +3099,19 @@ HANDLERS = {
     "fresh_dir_stat": handle_fresh_dir_stat,
     "fresh_file_search": handle_fresh_file_search,
     "fresh_grep": handle_fresh_grep,
+    # v3.1 — Claude-Cowork Entegrasyonu (11 yeni komut)
+    "window_list": handle_window_list,
+    "window_focus": handle_window_focus,
+    "clipboard_read": handle_clipboard_read,
+    "clipboard_write": handle_clipboard_write,
+    "system_info": handle_system_info,
+    "process_detail": handle_process_detail,
+    "net_connections": handle_net_connections,
+    "env_vars": handle_env_vars,
+    "installed_software": handle_installed_software,
+    "service_list": handle_service_list,
+    "scheduled_tasks": handle_scheduled_tasks,
+    "quick_look": handle_quick_look,
 }
 
 
