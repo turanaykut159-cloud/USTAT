@@ -155,6 +155,7 @@ class HEngine:
         primnet_cfg = hybrid_cfg.get("primnet", {})
         self._primnet_trailing: float = primnet_cfg.get("trailing_prim", 1.5)
         self._primnet_target: float = primnet_cfg.get("target_prim", 9.5)
+        self._primnet_step: float = primnet_cfg.get("step_prim", 0.5)
         self._use_stop_limit: bool = primnet_cfg.get("use_stop_limit", False)
         # Stop Limit emirde stop ile limit arasındaki mesafe (prim cinsinden)
         self._stop_limit_gap_prim: float = primnet_cfg.get("stop_limit_gap_prim", 0.3)
@@ -167,7 +168,7 @@ class HEngine:
             f"SL/TP fallback={self._sl_atr_mult}×ATR/{self._tp_atr_mult}×ATR, "
             f"SL/TP modu={sltp_mode}, trailing modu={stop_limit_mode}, "
             f"PRİMNET (trailing={self._primnet_trailing}, "
-            f"hedef=±{self._primnet_target})"
+            f"adım={self._primnet_step}, hedef=±{self._primnet_target})"
         )
 
     # ═════════════════════════════════════════════════════════════════
@@ -1511,6 +1512,15 @@ class HEngine:
 
         Trailing mesafe HER ZAMAN SABİT (1.5 prim).
         Stop sadece kâr yönünde hareket eder, asla geri gelmez.
+        Stop primi 0.50 prim adımlarına (step_prim) yuvarlanır:
+          BUY  → floor (aşağı yuvarla — güvenli taraf)
+          SELL → ceil  (yukarı yuvarla — güvenli taraf)
+
+        Örnek (SELL, giriş +0.3, step=0.5):
+          current_prim = -0.35 → stop_raw = +1.15
+          → ceil(1.15 / 0.5) × 0.5 = +1.5 (güvenli yöne yuvarla)
+          Sonraki adım: current = -0.70 → stop_raw = +0.80
+          → ceil(0.80 / 0.5) × 0.5 = +1.0 (tam adıma düşer)
 
         Args:
             hp: Hibrit pozisyon.
@@ -1519,6 +1529,8 @@ class HEngine:
         Returns:
             Yeni SL fiyatı, hesaplanamazsa None.
         """
+        import math
+
         ref_price = self._get_reference_price(hp.symbol)
         if ref_price is None:
             logger.warning(
@@ -1548,12 +1560,31 @@ class HEngine:
 
         # Trailing mesafe SABİT (faz ayrımı yok)
         trailing_dist = self._primnet_trailing
+        step = self._primnet_step  # 0.50 prim adım büyüklüğü
 
-        # Stop prim hesapla
+        # Stop prim hesapla (RAW)
         if hp.direction == "BUY":
-            stop_prim = current_prim - trailing_dist
+            stop_prim_raw = current_prim - trailing_dist
         else:
-            stop_prim = current_prim + trailing_dist
+            stop_prim_raw = current_prim + trailing_dist
+
+        # 0.50 prim adımına yuvarla — ızgara giriş priminden başlar:
+        #   Izgara: entry_prim + N × step (ör. +0.3, +0.8, +1.3, +1.8, ...)
+        #   BUY  → floor: stop aşağı yuvarlanır (eski seviyede kal = güvenli)
+        #   SELL → ceil:  stop yukarı yuvarlanır (eski seviyede kal = güvenli)
+        #   Fiyat tam adım yapana kadar stop hareket etmez.
+        if step > 0:
+            # Giriş priminin ızgara üzerindeki ofsetini hesapla
+            offset = entry_prim % step
+            adjusted = round(stop_prim_raw - offset, 10)
+            ratio = round(adjusted / step, 10)
+            if hp.direction == "BUY":
+                stop_prim = math.floor(ratio) * step + offset
+            else:
+                stop_prim = math.ceil(ratio) * step + offset
+            stop_prim = round(stop_prim, 2)
+        else:
+            stop_prim = stop_prim_raw
 
         new_sl = self._prim_to_price(stop_prim, ref_price)
 
@@ -1561,7 +1592,8 @@ class HEngine:
             f"PRİMNET [{hp.symbol}] t={hp.ticket}: "
             f"giriş_prim={entry_prim:.2f} güncel_prim={current_prim:.2f} "
             f"kâr_prim={profit_prim:.2f} trailing={trailing_dist} "
-            f"stop_prim={stop_prim:.2f} → SL={new_sl:.4f}"
+            f"stop_raw={stop_prim_raw:.2f} stop_step={stop_prim:.2f} "
+            f"→ SL={new_sl:.4f}"
         )
 
         return new_sl

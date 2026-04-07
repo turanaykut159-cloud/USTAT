@@ -100,6 +100,7 @@
 ### Fixed
 - #121 — PRİMNET trailing stop KİLİT mekanizması: send_stop() başarısız olduğunda hp.current_sl güncellenmiyordu → trailing geri gidiyordu. Artık her durumda bellek+DB güncelleniyor, software SL güvenlik ağı olarak çalışıyor (734999e)
 - #121 — PRİMNET çift emir temizliği: _cancel_stop_limit_orders artık ticket + comment deseni ile arama yapıyor → restart sonrası kalan orphan emirler de temizleniyor (734999e)
+- #121 — PRİMNET 0.50 prim adım filtresi: trailing stop artık giriş priminden başlayan 0.50'lik ızgaraya yuvarlanıyor (config step_prim=0.5). Floating point hatası round(,10) ile giderildi
 - #120 — Stop Limit → plain STOP/LIMIT migrasyonu: Stop Limit emirleri tetiklendiğinde limit fiyatı yüzünden dolmuyordu (SL) veya [Invalid price] hatası veriyordu (TP). Plain STOP (SL için — market dolum garantili) ve plain LIMIT (TP için — doğru fiyat yönü) ile değiştirildi
 
 ### Changed
