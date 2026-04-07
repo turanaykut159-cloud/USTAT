@@ -1777,19 +1777,25 @@ class Baba:
         return False
 
     def _update_consecutive_losses(self) -> None:
-        """Üst üste kayıp sayacını DB'den güncelle.
+        """Üst üste kayıp sayacını DB'den güncelle — SADECE OĞUL trade'leri.
 
         Madde 1.6: Sadece son cooldown bitişinden sonraki trade'leri sayar.
         Bu, cooldown → tekrar aynı trade'leri sayma → tekrar cooldown
         sonsuz döngüsünü önler.
+
+        v5.9.2: Motor izolasyonu — H-Engine (source="hybrid") ve ManuelMotor
+        (source="app"/"mt5_direct") kayıpları OĞUL'un ardışık kayıp sayacını
+        ETKİLEMEZ. Her motor kendi işlem limitlerinden sorumludur.
         """
         # Cooldown sonrası veya baseline sonrası (hangisi yeniyse)
         since = self._risk_state.get("last_cooldown_end") or _baseline_to_iso(self._risk_baseline_date)
-        trades = self._db.get_trades(limit=10, since=since)
+        # limit=30: motor filtresi sonrası yeterli OĞUL trade'i kalsın
+        trades = self._db.get_trades(limit=30, since=since)
         closed = [
             t for t in trades
             if t.get("pnl") is not None
             and t.get("exit_time") is not None
+            and t.get("source", "") in ("", "auto", None)  # Sadece OĞUL trade'leri
         ]
 
         count = 0

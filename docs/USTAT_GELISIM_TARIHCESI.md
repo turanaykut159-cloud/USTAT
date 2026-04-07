@@ -55,7 +55,7 @@
 
 ---
 
-## [5.9.0] — 2026-03-28 / 2026-04-06
+## [5.9.0] — 2026-03-28 / 2026-04-07
 
 ### Added
 - #112 — ProcessGuard hayalet koruma modülü: PID registry, tree-kill, orphan Electron/MT5 tespiti, port/socket temizliği — kapanışta kalan zombie process/port/socket sorununu çözer
@@ -93,6 +93,7 @@
 - #83 — 10.003 kombinasyonlu stres testi: BABA/OĞUL/H-Engine/MT5/Manuel/Top5/DB/Entegrasyon (a36f3d0)
 
 ### Changed
+- #118 — Motor izolasyonu: OĞUL ardışık kayıp sayacı motor bazlı ayrıştırma — H-Engine/ManuelMotor kayıpları OĞUL cooldown'ını tetiklemez, OĞUL trade kaydına `source: "auto"` eklendi (baba.py, ogul.py)
 - #117 — PRİMNET Stop Limit emir sistemi: TRADE_ACTION_SLTP (modify_position) yerine Buy/Sell Stop Limit bekleyen emirler ile trailing stop ve hedef yönetimi — GCM VİOP netting modunda "Invalid order" (retcode 10035) sorununu çözer
 - #117 — mt5_bridge.py'ye 3 yeni fonksiyon: send_stop_limit, modify_stop_limit, cancel_stop_limit + get_pending_orders STOP_LIMIT tip tanıma
 - #117 — H-Engine tam yaşam döngüsü: devir→trailing→hedef→kapanış→gece geçişi→restart kurtarma Stop Limit emirlerle

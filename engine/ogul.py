@@ -1823,6 +1823,7 @@ class Ogul:
             "entry_price": trade.entry_price,
             "lot": lot,
             "regime": regime.regime_type.value,
+            "source": "auto",
         })
         trade.db_id = db_id
 
