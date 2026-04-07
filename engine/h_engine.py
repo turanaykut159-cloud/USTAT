@@ -1196,11 +1196,15 @@ class HEngine:
             else:
                 logger.error(
                     f"Trailing Stop gönderilemedi: {hp.symbol} {order_direction} "
-                    f"price={stop_price:.4f}"
+                    f"price={stop_price:.4f} — software SL ile devam edilecek"
                 )
-                return
+                # MT5 emri gönderilemedi AMA bellekte SL güncellenir:
+                # Software SL (_check_software_sltp) güvenlik ağı olarak
+                # bu seviyeyi kullanacak. KİLİT bozulmaz.
 
-        # Bellek + DB güncelle
+        # Bellek + DB güncelle (send_stop başarısız olsa bile!)
+        # Bu sayede software SL her zaman doğru seviyede kalır
+        # ve trailing KİLİT mekanizması bozulmaz.
         hp.current_sl = new_sl
         hp.trailing_active = True
 
@@ -1894,8 +1898,9 @@ class HEngine:
     def _cancel_stop_limit_orders(self, hp: HybridPosition) -> None:
         """Pozisyona ait bekleyen emirleri (STOP/LIMIT) iptal et.
 
-        Trailing ve hedef emirleri kontrol eder, hâlâ bekleyenleri iptal eder.
-        Ticket'ları sıfırlar.
+        Önce ticket ile iptal dener. Ticket eski/geçersizse comment
+        deseni ile MT5'teki tüm eşleşen emirleri bulur ve iptal eder.
+        Bu sayede restart sonrası kalan eski emirler de temizlenir.
 
         Args:
             hp: Hibrit pozisyon.
@@ -1903,11 +1908,14 @@ class HEngine:
         if not self._use_stop_limit:
             return
 
-        for attr_name, label in [
-            ("trailing_order_ticket", "trailing"),
-            ("target_order_ticket", "hedef"),
+        for attr_name, label, comment_prefix in [
+            ("trailing_order_ticket", "trailing", f"PRIMNET_TRAIL_{hp.ticket}"),
+            ("target_order_ticket", "hedef", f"PRIMNET_TGT_{hp.ticket}"),
         ]:
             order_ticket = getattr(hp, attr_name, 0)
+            cancelled = False
+
+            # 1) Ticket ile iptal dene
             if order_ticket > 0:
                 result = self.mt5.cancel_pending_order(order_ticket)
                 if result is not None:
@@ -1915,12 +1923,34 @@ class HEngine:
                         f"Bekleyen {label} emri iptal edildi: "
                         f"order={order_ticket} {hp.symbol}"
                     )
+                    cancelled = True
                 else:
                     logger.warning(
-                        f"Bekleyen {label} emri iptal edilemedi: "
-                        f"order={order_ticket} {hp.symbol}"
+                        f"Bekleyen {label} emri ticket ile iptal edilemedi: "
+                        f"order={order_ticket} {hp.symbol} — comment ile aranacak"
                     )
-                setattr(hp, attr_name, 0)
+
+            # 2) Comment deseni ile MT5'teki TÜM eşleşen emirleri bul ve iptal et
+            #    (eski ticket kalmış olabilir, restart sonrası iki emir oluşmuş olabilir)
+            pending = self.mt5.get_pending_orders(hp.symbol)
+            if pending:
+                for order in pending:
+                    o_ticket = order.get("ticket", 0)
+                    o_comment = order.get("comment", "")
+                    if o_comment == comment_prefix and o_ticket != order_ticket:
+                        result = self.mt5.cancel_pending_order(o_ticket)
+                        if result is not None:
+                            logger.info(
+                                f"Eski {label} emri comment ile bulunup iptal edildi: "
+                                f"order={o_ticket} {hp.symbol} comment='{o_comment}'"
+                            )
+                        else:
+                            logger.warning(
+                                f"Eski {label} emri comment ile bulunamadı/iptal edilemedi: "
+                                f"order={o_ticket} {hp.symbol}"
+                            )
+
+            setattr(hp, attr_name, 0)
 
     def _restore_stop_limit_tickets(self) -> None:
         """Restart sonrası bekleyen Stop Limit emirlerini hibrit pozisyonlarla eşleştir.
