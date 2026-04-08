@@ -62,9 +62,14 @@
 - #131 — SortableCard bileşenine className prop desteği eklendi — Dashboard grid düzeni için gerekli CSS class geçişi
 
 ### Fixed
+- #134 — Veri yönetim sistemi çakışma düzeltmesi: `_run_daily_cleanup()` events ve risk_snapshots'ı aggregation yapmadan siliyordu → `daily_risk_summary` veri kaybına yol açıyordu. Cleanup artık sadece bars temizliyor, events/snapshots tamamen `run_retention()` tarafından yönetiliyor (main.py)
+- #135 — Temizlik/retention/bakım tarihleri restart sonrası kayboluyordu (`None`'a dönüyordu → aynı gün tekrar çalışma riski). Tarihler artık `app_state` tablosuna persist ediliyor ve `_restore_state()` ile geri yükleniyor (main.py)
+- #136 — Retention hiç çalışmıyordu (saat ≥18 koşulu + piyasa 18:15'te kapanma → pencere çok dar). Koşul 17:00'ye alındı (main.py)
+- #137 — NABIZ çakışma algılama kodu (`nabiz.py`) yanlış sabit değerler kullanıyordu (events=60, snapshots=90) — gerçek cleanup config'den okuyor. Çakışma algılama mantığı güncellendi, retention kapalıysa uyarı veriyor
 - #130 — OĞUL SE3 rejim-strateji filtresi: SE3 sinyal motoru regime.allowed_strategies kontrolünü atlatıyordu — RANGE rejiminde trend_follow sinyalleri üretilip zarar eden işlemler açılıyordu. Confluence döngüsüne rejim kapısı eklendi (ogul.py)
 
 ### Changed
+- #138 — NABIZ retention tarihleri artık DB fallback ile okunuyor — engine bellekte yoksa `app_state` tablosundan okunuyor (nabiz.py)
 - #133 — CLAUDE.md Bölüm 7 ADIM 1 güncellendi: Electron production build zorunluluğu detaylı açıklandı — kaynak dosya düzenlemek yetmez, `npm run build` + shortcut güncelleme + restart gerekir
 
 ### Security

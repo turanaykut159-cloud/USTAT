@@ -368,6 +368,11 @@ class Engine:
             report.append(f"Backup: HATA — {exc}")
 
         self._last_weekly_maintenance = today
+        # v5.9.3: Persist — restart sonrası tekrar çalışmasını önle
+        try:
+            self.db.set_state("last_weekly_maintenance", today.isoformat())
+        except Exception:
+            pass
         summary = " | ".join(report)
         logger.info(f"Haftalık bakım tamamlandı: {summary}")
 
@@ -591,10 +596,11 @@ class Engine:
                 today = date.today()
                 retention_enabled = self.config.get("retention.enabled", False)
                 if retention_enabled and self._last_retention_date != today:
-                    # Sadece piyasa kapanışından sonra çalıştır (18:00+)
+                    # v5.9.3: Piyasa kapanışına yakın çalıştır (17:00+)
+                    # Eski: 18:00 → uygulama 18:15'te kapanınca retention hiç çalışmıyordu
                     from datetime import datetime as _dt
                     current_hour = _dt.now().hour
-                    if current_hour >= 18:
+                    if current_hour >= 17:
                         try:
                             retention_cfg = {
                                 "risk_snapshots_days": self.config.get("retention.risk_snapshots_days", 30),
@@ -608,6 +614,11 @@ class Engine:
                             }
                             report = self.db.run_retention(retention_cfg)
                             self._last_retention_date = today
+                            # v5.9.3: Persist — restart sonrası tekrar çalışmasını önle
+                            try:
+                                self.db.set_state("last_retention_date", today.isoformat())
+                            except Exception:
+                                pass
                             logger.info(f"Günlük retention tamamlandı: {report}")
                         except Exception as ret_exc:
                             logger.error(f"Retention hatası: {ret_exc}")
@@ -1270,20 +1281,25 @@ class Engine:
     # ── FAZ 2.8: Günlük DB temizliği ─────────────────────────────────
 
     def _run_daily_cleanup(self) -> None:
-        """Eski DB kayıtlarını günde 1 kez temizle."""
+        """Eski DB kayıtlarını günde 1 kez temizle.
+
+        v5.9.3: events ve risk_snapshots temizliği run_retention()'a devredildi.
+        Cleanup artık SADECE bars temizliği + trade arşivleme + WAL bakımı yapar.
+        Sebep: Cleanup aggregation yapmadan siliyordu → daily_risk_summary veri kaybı.
+        """
         today = date.today()
         if self._last_cleanup_date == today:
             return
         self._last_cleanup_date = today
+        # v5.9.3: Persist — restart sonrası tekrar çalışmasını önle
+        try:
+            self.db.set_state("last_cleanup_date", today.isoformat())
+        except Exception:
+            pass  # DB hatası cleanup'ı engellememeli
 
         now = datetime.now()
-        # Config'den retention süreleri oku (hard-coded fallback ile)
         bars_days = self.config.get("retention.bars_days", 30)
-        events_days = self.config.get("retention.events_error_days", 90)
-        snaps_days = self.config.get("retention.risk_snapshots_days", 30)
         bars_cutoff = (now - timedelta(days=bars_days)).isoformat()
-        events_cutoff = (now - timedelta(days=events_days)).isoformat()
-        snaps_cutoff = (now - timedelta(days=snaps_days)).isoformat()
 
         try:
             from engine.mt5_bridge import WATCHED_SYMBOLS
@@ -1291,14 +1307,9 @@ class Engine:
             for sym in WATCHED_SYMBOLS:
                 for tf in ("M1", "M5", "M15", "H1"):
                     bars_del += self.db.delete_bars(sym, tf, bars_cutoff)
-            events_del = self.db.delete_events(events_cutoff)
-            snaps_del = self.db.delete_risk_snapshots(snaps_cutoff)
 
-            if bars_del or events_del or snaps_del:
-                logger.info(
-                    f"DB temizlik: bars={bars_del}, events={events_del}, "
-                    f"snapshots={snaps_del}"
-                )
+            if bars_del:
+                logger.info(f"DB temizlik: bars={bars_del}")
 
             # v5.8/CEO-FAZ2: Trade arşivleme + WAL checkpoint
             # 90 günden eski kapanmış trade'leri archive.db'ye taşı
@@ -1442,6 +1453,26 @@ class Engine:
             )
         else:
             logger.info("Tüm bileşenler başarıyla geri yüklendi.")
+
+        # ── v5.9.3: Veri yönetim tarihlerini geri yükle ─────────────
+        # Restart sonrası aynı gün tekrar cleanup/retention çalışmasını önler
+        try:
+            cleanup_str = self.db.get_state("last_cleanup_date")
+            if cleanup_str:
+                self._last_cleanup_date = date.fromisoformat(cleanup_str)
+                logger.debug(f"Cleanup tarihi geri yüklendi: {cleanup_str}")
+
+            retention_str = self.db.get_state("last_retention_date")
+            if retention_str:
+                self._last_retention_date = date.fromisoformat(retention_str)
+                logger.debug(f"Retention tarihi geri yüklendi: {retention_str}")
+
+            maintenance_str = self.db.get_state("last_weekly_maintenance")
+            if maintenance_str:
+                self._last_weekly_maintenance = date.fromisoformat(maintenance_str)
+                logger.debug(f"Haftalık bakım tarihi geri yüklendi: {maintenance_str}")
+        except Exception as exc:
+            logger.warning(f"Veri yönetim tarihleri geri yüklenemedi: {exc}")
 
 
 # ═════════════════════════════════════════════════════════════════════

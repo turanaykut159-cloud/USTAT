@@ -178,9 +178,26 @@ def _build_retention_info(engine) -> dict:
             "trade_archive_days": config.get("retention.trade_archive_days", 180),
         }
 
-    # Son calisma tarihleri (in-memory)
+    # Son calisma tarihleri (in-memory, v5.9.3: DB fallback)
     last_ret = getattr(engine, "_last_retention_date", None)
     last_clean = getattr(engine, "_last_cleanup_date", None)
+
+    # v5.9.3: Engine bellekte yoksa DB'den oku (restart sonrasi)
+    if not last_ret or not last_clean:
+        db = get_db()
+        if db:
+            try:
+                if not last_ret:
+                    db_ret = db.get_state("last_retention_date")
+                    if db_ret:
+                        last_ret = db_ret
+                if not last_clean:
+                    db_clean = db.get_state("last_cleanup_date")
+                    if db_clean:
+                        last_clean = db_clean
+            except Exception:
+                pass
+
     info["last_retention_date"] = str(last_ret) if last_ret else None
     info["last_cleanup_date"] = str(last_clean) if last_clean else None
 
@@ -188,51 +205,24 @@ def _build_retention_info(engine) -> dict:
 
 
 def _build_cleanup_conflict_info(engine) -> dict:
-    """Cift temizlik sistemi cakisma durumunu DINAMIK kontrol et.
+    """Veri yonetim sistemi tutarlilik kontrolu.
 
-    _run_daily_cleanup (main.py) sabit gunlerle silerken,
-    run_retention (database.py) config'den okuyor. Ikisi ayni
-    tabloyu farkli surelerle temizliyorsa cakisma var demektir.
+    v5.9.3: Cleanup artik sadece bars temizliyor.
+    events ve risk_snapshots tamamen run_retention() tarafindan yonetiliyor.
+    Bu fonksiyon artik retention config tutarliligi ve eksik kapsam kontrolu yapar.
     """
-    # _run_daily_cleanup sabit degerleri (engine/main.py'den)
-    CLEANUP_BARS_DAYS = 30
-    CLEANUP_EVENTS_DAYS = 60
-    CLEANUP_SNAPSHOTS_DAYS = 90
-
-    # Retention config'den dinamik degerler
     config = getattr(engine, "config", None) if engine else None
-    ret_snap_days = config.get("retention.risk_snapshots_days", 30) if config else 30
-    ret_events_info = config.get("retention.events_info_days", 14) if config else 14
-    ret_events_warn = config.get("retention.events_warning_days", 30) if config else 30
-    ret_events_err = config.get("retention.events_error_days", 90) if config else 90
+    retention_enabled = config.get("retention.enabled", False) if config else False
 
-    # Cakisma kontrolu: cleanup suresi ile retention suresi farkli mi?
     affected = []
 
-    # events: cleanup 60 gun, retention INFO=14 / WARN=30 / ERR=90
-    if CLEANUP_EVENTS_DAYS != ret_events_err:
+    # Retention kapali ama cleanup bars siliyor — uyari ver
+    if not retention_enabled:
         affected.append({
-            "table": "events",
-            "cleanup_days": CLEANUP_EVENTS_DAYS,
-            "retention_days": f"{ret_events_info} (INFO) / {ret_events_warn} (WARNING) / {ret_events_err} (ERROR)",
-            "risk": (
-                "cleanup, INFO/WARNING icin retention'dan once siliyor"
-                if CLEANUP_EVENTS_DAYS < ret_events_err
-                else "farkli sureler — tutarsizlik"
-            ),
-        })
-
-    # risk_snapshots: cleanup 90 gun, retention config'den
-    if CLEANUP_SNAPSHOTS_DAYS != ret_snap_days:
-        affected.append({
-            "table": "risk_snapshots",
-            "cleanup_days": CLEANUP_SNAPSHOTS_DAYS,
-            "retention_days": ret_snap_days,
-            "risk": (
-                "cleanup aggregation yapmadan siliyor — veri kaybi"
-                if CLEANUP_SNAPSHOTS_DAYS > ret_snap_days
-                else "farkli sureler — tutarsizlik"
-            ),
+            "table": "events + risk_snapshots + top5_history + ...",
+            "cleanup_days": "-",
+            "retention_days": "KAPALI",
+            "risk": "retention devre disi — veriler suresiz buyuyor",
         })
 
     has_conflict = len(affected) > 0
