@@ -433,7 +433,7 @@ Bu fonksiyonların MANTIĞI değiştirilemez. İzin verilen: kanıtlı bug fix, 
 | 29 | `main()` | start_ustat.py | ProcessGuard + Mutex + subprocess — tek instance koruması |
 | 30 | `createWindow()` | desktop/main.js | Electron pencere oluşturma + API bekleme + crash handler |
 
-### 4.5 Değiştirilemez 15 Kural
+### 4.5 Değiştirilemez 16 Kural
 
 | # | Kural | Açıklama |
 |---|-------|----------|
@@ -452,6 +452,7 @@ Bu fonksiyonların MANTIĞI değiştirilemez. İzin verilen: kanıtlı bug fix, 
 | 13 | **Kapanış Sırası** | Electron ÖNCE kapanır → lifespan engine.stop() → MT5 disconnect → DB close. Tersine çevirmek renderer crash'e neden olur |
 | 14 | **Startup Performans** | API port hazır süresi ≤5sn olmalı. Gecikme tespit edilirse (≥10sn) kök neden araştırılır. TIME_WAIT socket temizliği start_ustat.py ProcessGuard'da yapılır |
 | 15 | **MT5 Başlatma Sorumluluğu** | MT5 terminal açma sorumluluğu SADECE Electron'dadır (mt5Manager.js → launchMT5). Engine hiçbir koşulda MT5'i başlatamaz. `connect(launch=False)` modunda `mt5.initialize()` çağrılmadan ÖNCE `terminal64.exe` process kontrolü yapılır. Process yoksa bağlantı atlanır. Bu koruma DEĞİŞTİRİLEMEZ |
+| 16 | **mt5.initialize() Evrensel Koruma** | Projede `mt5.initialize()` çağrılan HER noktada process kontrolü zorunludur. Yeni `mt5.initialize()` çağrısı eklemek YASAKTIR — tüm MT5 bağlantısı `mt5_bridge.py connect()` üzerinden yapılır. Korunan noktalar: connect(), _verify(), health_check.py |
 
 ---
 

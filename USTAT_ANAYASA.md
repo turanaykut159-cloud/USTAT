@@ -198,6 +198,23 @@ MT5 terminal (terminal64.exe) açma sorumluluğu SADECE Electron'dadır (mt5Mana
 
 Bu koruma DEĞİŞTİRİLEMEZ.
 
+### 4.16 — mt5.initialize() Evrensel Process Kontrolü Kuralı
+Projede `mt5.initialize()` çağrılan HER NOKTADA, çağrıdan ÖNCE `terminal64.exe` process kontrolü yapılmalıdır. MT5 process çalışmıyorsa `initialize()` ÇAĞRILMAZ.
+
+**Korunan noktalar (2026-04-08 derin tarama):**
+
+| # | Dosya | Fonksiyon | Durum |
+|---|-------|-----------|-------|
+| 1 | `engine/mt5_bridge.py` | `connect()` | Korumalı (Siyah Kapı #31) |
+| 2 | `api/routes/mt5_verify.py` | `_verify()` | Korumalı (#129) |
+| 3 | `health_check.py` | ana blok | Korumalı (#129) |
+
+**Yeni mt5.initialize() çağrısı EKLEMEK YASAKTIR.** Tüm MT5 bağlantı işlemleri `mt5_bridge.py connect()` üzerinden yapılmalıdır. Doğrudan `mt5.initialize()` çağrısı yeni bir dosyaya veya fonksiyona eklenemez.
+
+Bu kural ihlal edilirse derin tarama tekrarlanır ve yeni çağrı noktası ya kaldırılır ya da process kontrolü eklenir.
+
+Bu kural DEĞİŞTİRİLEMEZ.
+
 ---
 
 ## BÖLÜM 5 — SARILAR (DİKKATLE DEĞİŞTİRİLEBİLİR)
@@ -350,6 +367,7 @@ ANAYASA'da yapılan her değişiklik aşağıdaki bilgilerle kayıt altına alı
 | 1 | 2026-03-14 | v1.0 | 1-8 | Kritik dosyaların yanlışlıkla bozulması riski | Kırmızı Bölge + Siyah Kapı koruma sistemi kuruldu | Turan Aykut |
 | 2 | 2026-03-21 | v2.0 | 9-15 | CEO taramasında yönetişim, büyüme, acil durum, koordinasyon eksikleri tespit edildi | CEO yönetim katmanı, geliştirme pipeline, test zorunluluğu, acil durum playbook, ajan koordinasyonu eklendi | Turan Aykut |
 | 3 | 2026-04-08 | v2.1 | 3.3, 4 | MT5 auto-launch bug: Engine connect(launch=False) mt5.initialize() çağrarak MT5'i otomatik açıyordu. 10/10 test ile doğrulandı. | Siyah Kapı #31 (connect), Kural 4.15 (MT5 Başlatma Sorumluluğu) eklendi. Process kontrolü koruma bloğu eklendi. | Turan Aykut |
+| 4 | 2026-04-08 | v2.2 | 4 | 11 vektörlü derin tarama: mt5_verify.py ve health_check.py'de korumasız mt5.initialize() çağrıları tespit edildi. | Kural 4.16 (mt5.initialize() Evrensel Koruma) eklendi. Tüm mt5.initialize() noktaları process kontrolü altına alındı. Yeni çağrı eklemek YASAKLANDI. | Turan Aykut |
 
 ---
 
