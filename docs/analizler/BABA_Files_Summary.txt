@@ -1,0 +1,229 @@
+COMPREHENSIVE BABA MOTOR FILE LISTING - ÜSTAT V5.9
+====================================================
+
+PRIMARY BABA FILE:
+  /sessions/inspiring-kind-archimedes/mnt/USTAT/engine/baba.py
+  - 3,032 lines
+  - Main Baba class with all risk management logic
+  - Version: v13.0+ (integrated v14 parameters)
+
+SUPPORTING DATA MODEL FILES:
+  /sessions/inspiring-kind-archimedes/mnt/USTAT/engine/models/risk.py
+  - RiskParams dataclass (16 parameters)
+  - RiskVerdict dataclass (return type for risk checks)
+  - FakeAnalysis & FakeLayerResult (4-layer fake signal)
+
+  /sessions/inspiring-kind-archimedes/mnt/USTAT/engine/models/regime.py
+  - RegimeType enum (TREND, RANGE, VOLATILE, OLAY)
+  - Regime dataclass (regime classification output)
+  - EarlyWarning dataclass (anomaly detection)
+  - RISK_MULTIPLIERS mapping
+  - REGIME_STRATEGIES mapping
+
+CONFIGURATION FILE:
+  /sessions/inspiring-kind-archimedes/mnt/USTAT/config/default.json
+  - 164 lines
+  - Engine cycle interval: 10 seconds
+  - Risk parameters (daily loss 1.8%, weekly 4%, monthly 7%, hard DD 15%)
+  - Margin reserve: 20%
+  - Max daily trades: 5 (v14: 8, config shows 5)
+  - Cooldown: 4 hours (v14: 2 hours, config shows 4)
+  - Baseline date: 2026-04-01 00:01 (for loss calculation reset)
+
+KEY METHODS IN baba.py:
+
+CYCLE & ENTRY POINTS:
+  - run_cycle(pipeline) → Regime                    [Line 391]
+  - check_risk_limits(risk_params) → RiskVerdict   [Line 1330]
+  - check_correlation_limits(symbol, dir, params) → RiskVerdict  [Line 1882]
+  - calculate_position_size(symbol, params, atr, equity) → float [Line 1052]
+
+REGIME DETECTION:
+  - detect_regime() → Regime                        [Line 559]
+  - _classify_symbol(symbol) → dict | None         [Line 701]
+  - _check_trend(...) → bool                        [Line 773]
+  - _check_olay() → dict | None                     [Line 818]
+
+EARLY WARNINGS:
+  - check_early_warnings() → list[EarlyWarning]    [Line 876]
+  - _check_spread_spike(symbol, liq) → EarlyWarning | None  [Line 934]
+  - _check_price_shock(symbol, liq) → EarlyWarning | None   [Line 967]
+  - _check_volume_spike(symbol) → EarlyWarning | None       [Line 998]
+  - _check_usdtry_shock() → EarlyWarning | None            [Line 1033]
+
+LOSS MANAGEMENT:
+  - check_drawdown_limits(params) → bool                    [Line 1149]
+  - _check_period_resets() → None                           [Line 1228]
+  - _check_weekly_loss(params) → str | None                [Line 1565]
+  - _check_monthly_loss(params) → bool                      [Line 1621]
+  - _check_hard_drawdown(params) → str | None              [Line 1672]
+  - _check_floating_loss(params) → bool                     [Line 1701]
+  - _check_master_floating() → bool                         [Line 1742]
+  - _update_consecutive_losses() → None                     [Line 1779]
+  - _start_cooldown(params) → None                          [Line 1803]
+  - _is_in_cooldown() → bool                                [Line 1822]
+
+POSITION SIZING:
+  - increment_daily_trade_count(trade_type) → None         [Line 1842]
+
+KILL-SWITCH:
+  - kill_switch_level property                    [Line 1864]
+  - _activate_kill_switch(level, reason, msg) → None       [Line 2098]
+  - _clear_kill_switch(reason) → None                       [Line 2144]
+  - acknowledge_kill_switch(user) → bool                    [Line 2163]
+  - activate_kill_switch_l1(symbol, reason) → None         [Line 2277]
+  - activate_kill_switch_l3_manual(user) → None            [Line 2299]
+  - is_symbol_killed(symbol) → bool                         [Line 2315]
+  - _close_all_positions(reason) → list[int]               [Line 2326]
+  - _try_close_position(ticket, reason) → bool             [Line 2453]
+
+FAKE SIGNAL ANALYSIS:
+  - analyze_fake_signals() → list[FakeAnalysis]            [Line 2540]
+  - _analyze_fake_signal(symbol, dir, ticket) → FakeAnalysis [Line 2661]
+  - _fake_check_volume(symbol) → FakeLayerResult           [Line 2700]
+  - _fake_check_spread(symbol) → FakeLayerResult           [Line 2742]
+  - _fake_check_multi_tf(symbol, dir) → FakeLayerResult    [Line 2789]
+  - _fake_check_momentum(symbol, dir) → FakeLayerResult    [Line 2849]
+
+CORRELATION:
+  - check_correlation_limits(symbol, dir, params) → RiskVerdict  [Line 1882]
+  - _calculate_index_weight_score(positions, new_symbol, dir, lot) → float [Line 1951]
+
+STATE MANAGEMENT:
+  - _persist_risk_state() → None                  [Line 440]
+  - _restore_risk_state() → None                  [Line 467]
+  - _process_ustat_notifications() → None        [Line 516]
+
+MONITORING:
+  - receive_feedback(attribution) → None         [Line 1988]
+  - report_unprotected_position(symbol, ticket) → None [Line 2205]
+  - clear_unprotected_positions(user) → list[dict] [Line 2227]
+  - clear_failed_tickets(user) → list[int]       [Line 2252]
+
+INTERNAL UTILITIES:
+  - _update_spread_history(pipeline) → None
+  - _update_usdtry_history() → None
+  - _current_spread_multiple(symbol) → float
+  - _get_liquidity_class(symbol) → str {A|B|C}
+  - _evaluate_kill_switch_triggers() → None
+  - _reset_daily(today) → None
+  - _reset_weekly(week_tuple) → None
+  - _reset_monthly(month_tuple) → None
+
+CONSTANTS DEFINED IN baba.py:
+
+REGIME THRESHOLDS:
+  ADX_TREND_THRESHOLD = 25.0
+  ADX_RANGE_THRESHOLD = 20.0
+  EMA_DIRECTION_BARS = 5
+  EMA_DIRECTION_MIN = 4
+  BB_WIDTH_RATIO = 0.8
+  ATR_VOLATILE_MULT = 2.5 (v14: increased from 2.0)
+  SPREAD_VOLATILE_MULT = 4.0 (v14: increased from 3.0)
+  PRICE_MOVE_PCT = 2.5 (v14: increased from 2.0)
+  VOLATILE_VOTE_PCT = 0.40 (v14: increased from 0.30)
+
+OLAY THRESHOLDS:
+  USDTRY_SHOCK_PCT = 2.0
+  EXPIRY_DAYS = 0 (vade kısıtlaması kaldırıldı)
+  OLAY_BLOCK_START = 12:00
+  OLAY_BLOCK_END = 15:30
+
+EARLY WARNING SPREADS:
+  SPREAD_SPIKE_MULT = {"A": 3.0, "B": 4.0, "C": 5.0}
+  PRICE_SHOCK_PCT = {"A": 1.5, "B": 2.0, "C": 3.0}
+  VOLUME_SPIKE_MULT = 5.0
+  USDTRY_5M_SHOCK_PCT = 0.5
+
+INDICATOR PERIODS:
+  EMA_FAST = 9
+  EMA_SLOW = 21
+  ADX_PERIOD = 14
+  ATR_PERIOD = 14
+  BB_PERIOD = 20
+  BB_STD = 2.0
+
+FAKE SIGNAL THRESHOLDS:
+  FAKE_SCORE_THRESHOLD = 6 (max score)
+  FAKE_VOLUME_RATIO_MIN = 0.7
+  FAKE_SPREAD_MULT = {"A": 2.5, "B": 3.5, "C": 5.0}
+  FAKE_RSI_OVERBOUGHT = 80.0
+  FAKE_RSI_OVERSOLD = 20.0
+  FAKE_WEIGHT_VOLUME = 1
+  FAKE_WEIGHT_SPREAD = 2
+  FAKE_WEIGHT_MULTI_TF = 1
+  FAKE_WEIGHT_MOMENTUM = 2
+
+LOSS LIMITS:
+  MAX_WEEKLY_LOSS_PCT = 0.04 (4%)
+  MAX_MONTHLY_LOSS_PCT = 0.07 (7%)
+  HARD_DRAWDOWN_PCT = 0.15 (15%)
+  CONSECUTIVE_LOSS_LIMIT = 3
+  COOLDOWN_HOURS = 4
+  MAX_FLOATING_LOSS_PCT = 0.015 (1.5% - OĞUL specific)
+  MAX_DAILY_TRADES = 5
+  MAX_RISK_PER_TRADE_HARD = 0.02 (2%)
+
+CORRELATION LIMITS:
+  MAX_SAME_DIRECTION = 3
+  MAX_SAME_SECTOR_DIRECTION = 2
+  MAX_INDEX_WEIGHT_SCORE = 0.25
+
+SECTOR MAPPING (15 symbols):
+  "F_THYAO" → "havacilik" (aviation)
+  "F_AKBNK" → "banka" (banking)
+  "F_ASELS" → "teknoloji" (technology)
+  "F_TCELL" → "teknoloji" (technology)
+  "F_HALKB" → "banka" (banking)
+  "F_PGSUS" → "havacilik" (aviation)
+  "F_GUBRF" → "kimya" (chemistry)
+  "F_EKGYO" → "gayrimenkul" (real estate)
+  "F_SOKM"  → "perakende" (retail)
+  "F_TKFEN" → "holding" (holding company)
+  "F_OYAKC" → "sanayi" (industry)
+  "F_BRSAN" → "sanayi" (industry)
+  "F_AKSEN" → "enerji" (energy)
+  "F_ASTOR" → "enerji" (energy)
+  "F_KONTR" → "diger" (other)
+
+XU030 INDEX WEIGHTS:
+  F_THYAO: 12%, F_AKBNK: 8%, F_ASELS: 7%, F_TCELL: 5%,
+  F_HALKB: 3%, F_PGSUS: 4%, F_GUBRF: 2%, F_EKGYO: 3%,
+  F_SOKM: 2%, F_TKFEN: 3%, F_OYAKC: 1%, F_BRSAN: 1%,
+  F_AKSEN: 2%, F_ASTOR: 1%, F_KONTR: 0%
+
+CENTRAL BANK MEETING DATES:
+  2025-2026: 24 TCMB PPK dates + 8 FED FOMC dates (lines 219-238)
+
+VIOP EXPIRY DATES:
+  24 expiry dates 2025-2026, with special handling for Bayram (lines 243-255)
+
+DATA CLASSES DEFINED IN models/risk.py:
+  - RiskParams: 16 fields (max_position_size, loss limits, correlation limits)
+  - RiskVerdict: 7 fields (can_trade, lot_multiplier, reason, kill_switch_level)
+  - FakeLayerResult: 4 fields (name, triggered, weight, score)
+  - FakeAnalysis: 3 fields + 4 layer results (symbol, direction, ticket)
+
+DATA CLASSES DEFINED IN models/regime.py:
+  - Regime: 8 fields (regime_type, confidence, multipliers, indicators, details)
+  - EarlyWarning: 7 fields (type, symbol, severity, value, threshold, class, msg)
+
+THREADING & SAFETY:
+  - _ks_lock: threading.Lock() for kill-switch atomicity
+  - _rs_lock: threading.Lock() for risk-state read/write
+  - deque for spread/USDTRY history (thread-safe auto-truncation)
+  - Fail-safe: Any MT5 exception → can_trade=False
+
+INTEGRATION WITH:
+  - OĞUL (automated motor): receives risk verdicts, position sizing
+  - ManuelMotor (manual trades): immune to fake signals, trades counted
+  - DataPipeline: receives bars for analysis
+  - MT5Bridge: positions, account info, symbol data
+  - NewsNridge: optional event triggers
+
+PERSISTENCE:
+  - Risk state JSON serialized with type tags (date, datetime, tuple)
+  - Events logged: REGIME_CHANGE, EARLY_WARNING, FAKE_SIGNAL, DRAWDOWN_LIMIT, KILL_SWITCH
+  - Baseline date for loss calculation: config-driven
+
+This represents the COMPLETE BABA motor specification for ÜSTAT V5.9.

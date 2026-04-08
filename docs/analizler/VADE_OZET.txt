@@ -1,0 +1,155 @@
+═══════════════════════════════════════════════════════════════════════════════
+ÜSTAT v5.9 — VİOP VADE MEKANIZMASI ÖZET (1 Nisan 2026)
+═══════════════════════════════════════════════════════════════════════════════
+
+1. VADE SİSTEMİ NEDIR?
+   • Her ayın son iş günü (VİOP piyasası kapalı hale gelir)
+   • ÜSTAT kontratları eski vade (MMYY) → yeni vade (MMYY) geçişini otomatikleştirir
+   • 15 adet istenen kontrat (F_THYAO, F_AKBNK, ... F_KONTR)
+   • Tarihler: engine/baba.py Satır 243-254 (VIOP_EXPIRY_DATES seti)
+
+2. ROLLOVER MEKANIZMASI (OTOMATIKSIZ!)
+   ┌─────────────────────────────────────────────────────────────────────┐
+   │ ADIM 1: Günlük kontrolün (main.py Satır 735-743) başında:           │
+   │         → _resolve_symbols() çalışır (günde 1 kez)                  │
+   │                                                                       │
+   │ ADIM 2: Vade günü tespiti (_next_expiry_suffix):                    │
+   │         Bugün VIOP_EXPIRY_DATES içinde mi? → HAYIR = None           │
+   │         Bugün VIOP_EXPIRY_DATES içinde mi? → EVET = "0426" (next)   │
+   │                                                                       │
+   │ ADIM 3: Sembol eşleme güncelleme:                                   │
+   │         YÖNTEM 1 (VADE GÜNÜ): Hedef suffix ile eşle                 │
+   │         • Örn. Mart 31, 2026 (vade günü) → suffix="0426"            │
+   │         • F_THYAO0426 aranır MT5'te                                 │
+   │         • BULUNURSA: F_THYAO → F_THYAO0426 eşlenir                 │
+   │                                                                       │
+   │         YÖNTEM 2 (NORMAL GÜN): İlk aktif kontratı seç              │
+   │         • Hedef bulunamadı → alfabetik ilk aktif seçilir           │
+   │         • Örn. F_THYAO → F_THYAO0326                               │
+   │                                                                       │
+   │ ADIM 4: Atomik güncelleme (_map_lock):                              │
+   │         _symbol_map ve _reverse_map birlikte güncellenir            │
+   │         → Thread-safe (eş zamanlı okuma/yazma çakışması yok)        │
+   └─────────────────────────────────────────────────────────────────────┘
+
+3. SEMBOL ÇEVİRME SISTEMI
+
+   Gelen siparişler:
+   ├─ Base isim: "F_THYAO" (engine'de kullanılan)
+   ├─ _to_mt5(): "F_THYAO" → "F_THYAO0326" (MT5'e gönderilen)
+   │            Thread-safe (_map_lock)
+   │
+   ├─ MT5 yanıtı: "F_THYAO0326" (pozisyon, veri)
+   ├─ _to_base(): "F_THYAO0326" → "F_THYAO" (engine'de kullanılan)
+   │            2 adım:
+   │            1. _reverse_map kontrol ("F_THYAO0326" → "F_THYAO")
+   │            2. Fallback: prefix eşleşme ("F_THYAO" ile başla) ✓
+   │
+   └─ Sonuç: Vade değişiminden engine'de farkında olmaksızın çalışır
+
+4. GÜNLÜK ÇAĞRIDA NE OLUR?
+
+   Normal Gün (Mart 15-30):
+   • _resolve_symbols() → Target suffix = None (Vade günü değil)
+   • İlk aktif kontrat seçilir (Mart vadeı)
+   • F_THYAO → F_THYAO0326
+
+   VADE GÜNÜ (Mart 31, Pazartesi):
+   • _resolve_symbols() → Target suffix = "0426" (Nisan)
+   • Target aranır (F_THYAO0426)
+   • BULUNDU → F_THYAO → F_THYAO0426
+   • Eşleme güncellendi ✓
+
+   Sonraki Gün (Nisan 1):
+   • _resolve_symbols() → Target suffix = None (Vade günü değil)
+   • Artık F_THYAO → F_THYAO0426 (eski eşleme korunur)
+
+5. VADE GÜNÜ ÖNCESİ, GÜNÜ, SONRASI
+
+   ┌────────────────┬──────────────┬────────────────┬────────────────┐
+   │ ZAMAN          │ MART 29      │ MART 31        │ NİSAN 1        │
+   │                │ (CUMARTESİ)  │ (PAZARTESI)    │ (SALI)         │
+   ├────────────────┼──────────────┼────────────────┼────────────────┤
+   │ Eşleme         │ F_THYAO0326  │ F_THYAO0326 →  │ F_THYAO0426    │
+   │                │              │ F_THYAO0426    │                │
+   ├────────────────┼──────────────┼────────────────┼────────────────┤
+   │ İşlem Açma     │ Serbest      │ Serbest ✓      │ Serbest        │
+   │                │              │ (OLAY=0)       │                │
+   ├────────────────┼──────────────┼────────────────┼────────────────┤
+   │ OLAY Rejimi    │ Yok          │ KAPALI         │ Yok            │
+   │                │              │ (EXPIRY_DAYS=0)│                │
+   ├────────────────┼──────────────┼────────────────┼────────────────┤
+   │ Top-5 Filtre   │ Normal       │ Normal         │ Normal         │
+   │                │              │ (EXPIRY_*=0)   │                │
+   ├────────────────┼──────────────┼────────────────┼────────────────┤
+   │ Veri           │ F_THYAO0326  │ F_THYAO0326 →  │ F_THYAO0426    │
+   │                │              │ F_THYAO0426    │                │
+   ├────────────────┼──────────────┼────────────────┼────────────────┤
+   │ Pozisyon Açık  │ F_THYAO0326  │ F_THYAO0326 +  │ İki vade olabilir:
+   │                │              │ F_THYAO0426    │ - F_THYAO0326 (eski)
+   │                │              │                │ - F_THYAO0426 (yeni)
+   ├────────────────┼──────────────┼────────────────┼────────────────┤
+   │ EOD 17:45      │ Kapatılır    │ Kapatılır      │ Kapatılır      │
+   │                │              │ ÖNEMLİ!        │                │
+   └────────────────┴──────────────┴────────────────┴────────────────┘
+
+6. GÜÇLÜ YÖNLER (BAŞARILI)
+
+   ✓ Otomatik vade geçişi — Elle müdahale gerekmez
+   ✓ Sembol eşlemesi thread-safe — Eş zamanlı çakışma yok
+   ✓ Günlük re-resolve garantili — Tarih değiştiğinde otomatik
+   ✓ Fallback mekanizması — Eski vade açık olsa bile tanınır
+   ✓ Atomik güncelleme — Map'ler birlikte güncellenir
+
+7. ZAYIF YÖNLER (RİSK!)
+
+   ✗ OLAY Rejimi KAPATILMIŞ (baba.py Satır 93: EXPIRY_DAYS = 0)
+     → Vade günü işlem AÇILABILIYOR (yüksek volatilite koruması yok)
+
+   ✗ Top-5 filtreleri KAPATILMIŞ (top5_selection.py Satır 83-85: =0)
+     → Vade günü kontratlar normal seçilir (kısıtlama yok)
+
+   ✗ Eski vade pozisyonları otomatik kapatılmıyor
+     → Vade günü 2 vade aynı anda açık olabilir (marjin karışıklığı)
+
+   ✗ Sistem crash vade günü = kalıcı hasar
+     → _resolve_symbols() çalışmazsa, eski vadeye işlem yapılır
+     → Vade sonu 17:45'de sözleşme sona erer (MT5'te "açık" olur)
+
+8. VADE GÜNÜ KAÇIRSA NE OLUR?
+
+   Senaryo: 31 Mart 2026 saat 09:45, sistem CRASH
+
+   ├─ _resolve_symbols() ÇALIŞMADI
+   ├─ Eşleme: F_THYAO → F_THYAO0326 (eski kalır)
+   ├─ 14:00: Yeni sinyal "F_THYAO" → "F_THYAO0326" emir ← HATA!
+   ├─ 17:30: Vade sonu yakın, ama "F_THYAO0326" açık
+   ├─ 17:45: VİOP kapanış, sözleşme sona erer
+   ├─ Ertesi gün: "F_THYAO0326" MT5'te açık gösterilir ← İLİKİLENEMEZ
+   └─ Sonuç: Manuel müdahale gerekir, marjin kilitli
+
+9. KRİTİK KODSAL REFERANSLAR
+
+   Vade günü tespiti:    mt5_bridge.py Satır 268-295 (_next_expiry_suffix)
+   Rollover mekanizması: mt5_bridge.py Satır 297-434 (_resolve_symbols)
+   Günlük çağrı:         main.py Satır 735-743
+   OLAY rejimi:          baba.py Satır 835-841 (KAPALI: EXPIRY_DAYS=0)
+   Top-5 filtre:         top5_selection.py Satır 286-291 (KAPALI: =0)
+   Sembol çevirme:       mt5_bridge.py Satır 436-460 (_to_mt5, _to_base)
+   Emir gönderimi:       mt5_bridge.py Satır 827 (çevirme yapılır)
+   Veri alımı:           mt5_bridge.py Satır 720, 751 (çevirme yapılır)
+   Pozisyon tanıması:    mt5_bridge.py Satır 1676 (fallback ile)
+
+10. ÖNERİLER
+
+    ACIL (Yaşamsal Risk):
+    1. EXPIRY_DAYS = 1 yapın (vade günü OLAY rejimi aktif et)
+    2. Eski vade otomatik kapanış fonksiyonu ekleyin
+    3. Vade günü hard restart ekleyin (09:40)
+
+    ÖNEMLİ (Güvenilirlik):
+    4. Dashboard'a vade çakışması alert'i ekleyin
+    5. EOD 17:30'ye alalım (17:45 yerine, vade günü)
+    6. Sistem restart garantisi (watchdog)
+
+═══════════════════════════════════════════════════════════════════════════════

@@ -1,0 +1,110 @@
+F_AKBNK TICKET 8050481884 - CRITICAL LOG QUOTES
+================================================
+
+PHASE 1: POSITION OPENING (April 6, 15:36-15:42)
+================================================
+
+2026-04-06 15:36:01.209 | DEBUG    | engine.database:insert_event:1163 - Event [INFO] TRADE_OPENED: İşlem açıldı: F_AKBNK SELL (strateji: )
+2026-04-06 15:36:53.683 | DEBUG    | engine.database:insert_event:1163 - Event [INFO] TRADE_OPENED: İşlem açıldı: F_AKBNK SELL (strateji: )
+2026-04-06 15:37:19.862 | DEBUG    | engine.database:insert_event:1163 - Event [INFO] TRADE_OPENED: İşlem açıldı: F_AKBNK SELL (strateji: )
+2026-04-06 15:40:23.325 | DEBUG    | engine.database:insert_event:1163 - Event [INFO] TRADE_OPENED: İşlem açıldı: F_AKBNK SELL (strateji: )
+2026-04-06 15:41:06.752 | DEBUG    | engine.database:insert_event:1163 - Event [INFO] TRADE_OPENED: İşlem açıldı: F_AKBNK SELL (strateji: )
+2026-04-06 15:42:01.763 | DEBUG    | engine.database:insert_event:1163 - Event [INFO] TRADE_OPENED: İşlem açıldı: F_AKBNK SELL (strateji: )
+2026-04-06 15:42:21.766 | DEBUG    | engine.database:insert_event:1163 - Event [INFO] TRADE_OPENED: İşlem açıldı: F_AKBNK SELL (strateji: )
+
+
+PHASE 2: HYBRID TRANSFER (April 6, 15:44:16)
+=============================================
+
+2026-04-06 15:44:16.323 | INFO     | engine.h_engine:transfer_to_hybrid:401 - PRİMNET devir: F_AKBNK SELL giriş_prim=2.61 stop_prim=4.11 hedef_prim=-9.50 SL=73.5193 TP=63.9111 ref=70.6200
+
+2026-04-06 15:44:16.324 | INFO     | engine.mt5_bridge:modify_position:1805 - Modify SL/TP: ticket=8050481884 position=8050481884 pos.symbol=F_AKBNK0426 SL=73.5200 TP=0.0000
+
+2026-04-06 15:44:16.825 | WARNING  | engine.mt5_bridge:modify_position:1827 - Modify deneme 1/5 başarısız [8050481884]: retcode=10027, comment=AutoTrading disabled by client
+
+2026-04-06 15:44:16.825 | WARNING  | engine.mt5_bridge:modify_position:1827 - Modify deneme 2/5 başarısız [8050481884]: retcode=10027, comment=AutoTrading disabled by client
+
+2026-04-06 15:44:16.825 | WARNING  | engine.mt5_bridge:modify_position:1827 - Modify deneme 3/5 başarısız [8050481884]: retcode=10027, comment=AutoTrading disabled by client
+
+2026-04-06 15:44:16.825 | WARNING  | engine.mt5_bridge:modify_position:1827 - Modify deneme 4/5 başarısız [8050481884]: retcode=10027, comment=AutoTrading disabled by client
+
+2026-04-06 15:44:16.825 | WARNING  | engine.mt5_bridge:modify_position:1827 - Modify deneme 5/5 başarısız [8050481884]: retcode=10027, comment=AutoTrading disabled by client
+
+2026-04-06 15:44:18.330 | INFO     | engine.h_engine:transfer_to_hybrid:439 - Software SL/TP modu + güvenlik ağı SL: ticket=8050481884 F_AKBNK native_SL=73.5193 (gap koruması)
+
+2026-04-06 15:44:18.331 | INFO     | engine.h_engine:transfer_to_hybrid:447 - Software SL/TP modu: ticket=8050481884 F_AKBNK SL=73.5193 TP=63.9111 (software yönetim aktif)
+
+2026-04-06 15:44:18.332 | INFO     | engine.h_engine:transfer_to_hybrid:525 - Hibrit devir başarılı: ticket=8050481884 F_AKBNK SELL SL=73.5193 TP=63.9111 ATR=0.3320
+
+
+PHASE 3: APRIL 7 MORNING RESET (April 7, 10:08:39)
+===================================================
+
+2026-04-07 10:08:39.088 | INFO     | engine.h_engine:_primnet_daily_reset:1809 - PRİMNET yenileme [F_AKBNK] t=8050481884: yeni SL (73.1293) eskiden kötü — eski SL korundu
+
+2026-04-07 10:08:39.250 | INFO     | engine.h_engine:_primnet_daily_reset:1902 - PRİMNET yenileme: ticket=8050481884 F_AKBNK SELL ref=0.0000→72.2100 SL=73.1293→73.1293 TP=63.9111→65.3501 giriş_prim=0.35 trailing=1.5
+
+
+PHASE 4: TRAILING STOP CALCULATIONS (April 7, 10:08:49 onwards)
+===============================================================
+
+2026-04-07 10:08:49.949 | DEBUG    | engine.h_engine:_calc_primnet_trailing_sl:1570 - PRİMNET [F_AKBNK] t=8050481884: giriş_prim=0.35 güncel_prim=-0.90 kâr_prim=1.25 trailing=1.5 stop_prim=0.60 → SL=72.6432
+
+2026-04-07 10:08:54.553 | DEBUG    | engine.h_engine:_calc_primnet_trailing_sl:1570 - PRİMNET [F_AKBNK] t=8050481884: giriş_prim=0.35 güncel_prim=-0.93 kâr_prim=1.27 trailing=1.5 stop_prim=0.57 → SL=72.6232
+
+2026-04-07 10:09:04.147 | DEBUG    | engine.h_engine:_calc_primnet_trailing_sl:1570 - PRİMNET [F_AKBNK] t=8050481884: giriş_prim=0.35 güncel_prim=-0.91 kâr_prim=1.26 trailing=1.5 stop_prim=0.59 → SL=72.6332
+
+2026-04-07 10:09:14.112 | DEBUG    | engine.h_engine:_calc_primnet_trailing_sl:1570 - PRİMNET [F_AKBNK] t=8050481884: giriş_prim=0.35 güncel_prim=-0.90 kâr_prim=1.25 trailing=1.5 stop_prim=0.60 → SL=72.6432
+
+2026-04-07 10:09:24.275 | DEBUG    | engine.h_engine:_calc_primnet_trailing_sl:1570 - PRİMNET [F_AKBNK] t=8050481884: giriş_prim=0.35 güncel_prim=-0.86 kâr_prim=1.20 trailing=1.5 stop_prim=0.64 → SL=72.6732
+
+2026-04-07 10:09:34.281 | DEBUG    | engine.h_engine:_calc_primnet_trailing_sl:1570 - PRİMNET [F_AKBNK] t=8050481884: giriş_prim=0.35 güncel_prim=-0.82 kâr_prim=1.16 trailing=1.5 stop_prim=0.68 → SL=72.7032
+
+2026-04-07 10:09:44.217 | DEBUG    | engine.h_engine:_calc_primnet_trailing_sl:1570 - PRİMNET [F_AKBNK] t=8050481884: giriş_prim=0.35 güncel_prim=-0.76 kâr_prim=1.11 trailing=1.5 stop_prim=0.74 → SL=72.7431
+
+2026-04-07 10:09:54.546 | DEBUG    | engine.h_engine:_calc_primnet_trailing_sl:1570 - PRİMNET [F_AKBNK] t=8050481884: giriş_prim=0.35 güncel_prim=-0.69 kâr_prim=1.04 trailing=1.5 stop_prim=0.81 → SL=72.7931
+
+2026-04-07 10:10:04.548 | DEBUG    | engine.h_engine:_calc_primnet_trailing_sl:1570 - PRİMNET [F_AKBNK] t=8050481884: giriş_prim=0.35 güncel_prim=-0.69 kâr_prim=1.04 trailing=1.5 stop_prim=0.81 → SL=72.7931
+
+[... continues with similar pattern through 10:18:14 ...]
+
+
+PHASE 5: MORNING RESET - CRITICAL (April 7, 11:56:01)
+=====================================================
+
+2026-04-07 11:56:01.738 | INFO     | engine.h_engine:_primnet_daily_reset:1884 - PRİMNET yenileme: ticket=8050481884 F_AKBNK SELL ref=0.0000→72.2100 SL=72.2332→72.2332 TP=65.3501→65.3501 giriş_prim=0.35 trailing=1.5
+
+*** CRITICAL: SL DRASTICALLY TIGHTENED FROM 73.1293 to 72.2332 (gap protection only) ***
+*** This is ONLY 0.023 points above the reference price! ***
+
+
+PHASE 6: POSITION CLOSURE (April 7, 11:56:51-11:56:52)
+======================================================
+
+2026-04-07 11:56:51.751 | INFO     | engine.h_engine:_check_software_sltp:844 - Software SOFTWARE_SL: ticket=8050481884 F_AKBNK SELL fiyat=72.2400 seviye=72.2332 — kapatılıyor (deneme 1/3)
+
+2026-04-07 11:56:52.065 | INFO     | engine.h_engine:_cancel_stop_limit_orders:1914 - Bekleyen hedef emri iptal edildi: order=8050490497 F_AKBNK
+
+2026-04-07 11:56:52.066 | INFO     | engine.database:close_hybrid_position:1407 - Hibrit pozisyon kapatıldı: ticket=8050481884 neden=SOFTWARE_SL pnl=-3.00
+
+2026-04-07 11:56:52.066 | INFO     | engine.h_engine:_finalize_close:2042 - Hibrit pozisyon kapatıldı: ticket=8050481884 F_AKBNK neden=SOFTWARE_SL pnl=-3.00
+
+2026-04-07 11:56:52.067 | INFO     | engine.h_engine:_check_software_sltp:868 - Software SOFTWARE_SL başarılı: ticket=8050481884 F_AKBNK PnL=-3.00
+
+
+SUMMARY TABLE
+=============
+
+Entry Reference Price:      70.6200 TRY
+April 6 SL (Initial):       73.5193 TRY (gap protection)
+April 7 AM Reset SL:        73.1293 TRY (tightened by 0.39 points)
+April 7 11:56 Final SL:     72.2332 TRY (DRASTICALLY TIGHTENED by 0.89 points)
+Exit/Closure Price:         72.2400 TRY (SOFTWARE_SL triggered)
+P&L:                        -3.00 TRY
+
+Entry Loss:                 -1.62 TRY/lot (from 70.62 to 72.24)
+Slippage/Fees:              -1.38 TRY (difference between calculated and actual)
+
+Price Never Hit 71.16 During Visible Trading Hours
+Position Open Duration:     ~20 hours (Apr 6 15:42 - Apr 7 11:56:52)
+Loss Trigger Event:         SOFTWARE_SL at 72.2332 (not market SL)
