@@ -58,6 +58,7 @@
 ## [5.9.0] — 2026-03-28 / 2026-04-08
 
 ### Added
+- #139 — Kill-Switch bilgi modalı: Risk Yönetimi sayfasında Kill-Switch kartına tıklanınca seviye, neden, tetiklenme zamanı ve engelli kontratları gösteren modal pencere açılıyor (RiskManagement.jsx, api/routes/risk.py, api/schemas.py)
 - #132 — Dashboard sürükle-bırak kart sıralaması: @dnd-kit ile tüm Dashboard bölümleri (8 kart) bağımsız olarak sürüklenip yeniden sıralanabiliyor. 4 stat kartı ayrı ayrı, büyük bölümler tam genişlik grid düzeninde. localStorage ile kalıcı sıralama
 - #131 — SortableCard bileşenine className prop desteği eklendi — Dashboard grid düzeni için gerekli CSS class geçişi
 
@@ -70,6 +71,9 @@
 
 ### Changed
 - #138 — NABIZ retention tarihleri artık DB fallback ile okunuyor — engine bellekte yoksa `app_state` tablosundan okunuyor (nabiz.py)
+
+### Fixed
+- #139 — NABIZ üst kartlarında status ternary sırası hatalıydı: `>500 ? warn : >1000 ? err` → `err` koşuluna hiçbir zaman ulaşılamıyordu. Sıra düzeltildi: `>1000 ? err : >500 ? warn` (Nabiz.jsx, VERİTABANI + LOG DOSYALARI kartları)
 - #133 — CLAUDE.md Bölüm 7 ADIM 1 güncellendi: Electron production build zorunluluğu detaylı açıklandı — kaynak dosya düzenlemek yetmez, `npm run build` + shortcut güncelleme + restart gerekir
 
 ### Security

@@ -219,6 +219,7 @@ class RiskResponse(BaseModel):
     can_trade: bool = True
     lot_multiplier: float = 1.0
     kill_switch_level: int = 0
+    kill_switch_details: dict = {}  # {reason, message, triggered_at, symbols}
     blocked_symbols: list[str] = []
     risk_reason: str = ""
 

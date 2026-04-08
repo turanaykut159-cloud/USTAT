@@ -93,6 +93,7 @@ async def get_risk():
 
         # Kill-switch
         resp.kill_switch_level = baba._kill_switch_level
+        resp.kill_switch_details = dict(baba._kill_switch_details) if baba._kill_switch_details else {}
         resp.blocked_symbols = list(baba._killed_symbols)
 
         # Risk state sayaçlar

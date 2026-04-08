@@ -1,17 +1,154 @@
 /**
- * ÜSTAT v5.7 — Risk Yönetimi sayfası.
+ * ÜSTAT v5.9 — Risk Yönetimi sayfası.
  *
  * Layout:
  *   Üst:   Durum banner (işlem izni, kill-switch, rejim)
  *   Orta:  Drawdown göstergeleri (günlük/haftalık/aylık/hard — progress bar)
  *   Alt:   Sayaçlar (günlük işlem, üst üste kayıp, cooldown, pozisyon)
  *
- * Veri kaynağı: GET /api/risk (5sn poll)
+ * Veri kaynağı: GET /api/risk (10sn poll)
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { getRisk } from '../services/api';
 import { formatMoney } from '../utils/formatters';
+
+// ── Kill-Switch Neden Etiketleri ────────────────────────────────
+const KS_REASON_MAP = {
+  olay_regime: 'OLAY rejimi algılandı',
+  daily_loss: 'Günlük kayıp limiti aşıldı',
+  consecutive_loss: 'Üst üste kayıp limiti',
+  weekly_loss: 'Haftalık kayıp limiti',
+  monthly_loss: 'Aylık kayıp limiti',
+  hard_drawdown: 'Hard drawdown (%15) tetiklendi',
+  floating_loss: 'Floating kayıp limiti aşıldı',
+  manual: 'Manuel olarak etkinleştirildi',
+  news_alert: 'Olumsuz haber algılandı',
+  margin_call: 'Marjin yetersiz',
+  restored_from_db: 'Veritabanından geri yüklendi (önceki oturumdan)',
+  daily_loss_3pct: 'Günlük -%3 kayıp tetiklendi',
+};
+
+function formatKsReason(reason) {
+  if (!reason) return 'Bilinmiyor';
+  return KS_REASON_MAP[reason] || reason;
+}
+
+// ── Kill-Switch Bilgi Modalı ────────────────────────────────────
+
+const KillSwitchInfoModal = React.memo(function KillSwitchInfoModal({
+  open, onClose, level, details, blockedSymbols, riskReason,
+}) {
+  useEffect(() => {
+    if (!open) return;
+    const handleKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  const levelLabels = {
+    0: { text: 'Yok — Sistem Normal', cls: 'ks-ok' },
+    1: { text: 'L1 — Kontrat Dur', cls: 'ks-warn' },
+    2: { text: 'L2 — Sistem Pause', cls: 'ks-error' },
+    3: { text: 'L3 — Tam Kapanış', cls: 'ks-critical' },
+  };
+  const levelDescriptions = {
+    0: 'Tüm sistemler normal çalışıyor. İşlem izni açık.',
+    1: 'Belirli kontratlar için işlem durdu. Diğer kontratlar normal.',
+    2: 'Tüm yeni işlemler durduruldu. Mevcut pozisyonlar korunuyor.',
+    3: 'ACİL DURUM — Tüm pozisyonlar kapatıldı. Sistem tamamen durdu.',
+  };
+
+  const lbl = levelLabels[level] || levelLabels[0];
+  const reason = details?.reason || '';
+  const message = details?.message || '';
+  const triggeredAt = details?.triggered_at || '';
+  const symbols = details?.symbols || blockedSymbols || [];
+
+  return (
+    <div
+      className="confirm-modal-overlay"
+      role="dialog"
+      aria-modal="true"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className="confirm-modal-card" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+        <h2 className="confirm-modal-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 20 }}>{level >= 2 ? '🔴' : level === 1 ? '🟡' : '🟢'}</span>
+          Kill-Switch Durumu
+        </h2>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 }}>
+          {/* Seviye */}
+          <div style={{ background: 'var(--bg-elevated, #1a1f2e)', borderRadius: 6, padding: '10px 14px' }}>
+            <div style={{ fontSize: 11, color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: 4 }}>Seviye</div>
+            <div style={{ fontSize: 18, fontWeight: 700 }} className={lbl.cls}>{lbl.text}</div>
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>{levelDescriptions[level]}</div>
+          </div>
+
+          {/* Neden */}
+          {(reason || riskReason) && (
+            <div style={{ background: 'var(--bg-elevated, #1a1f2e)', borderRadius: 6, padding: '10px 14px' }}>
+              <div style={{ fontSize: 11, color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: 4 }}>Neden</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>{formatKsReason(reason)}</div>
+              {message && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>{message}</div>}
+              {!reason && riskReason && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>{riskReason}</div>}
+            </div>
+          )}
+
+          {/* Tetiklenme zamanı */}
+          {triggeredAt && (
+            <div style={{ background: 'var(--bg-elevated, #1a1f2e)', borderRadius: 6, padding: '10px 14px' }}>
+              <div style={{ fontSize: 11, color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: 4 }}>Tetiklenme Zamanı</div>
+              <div style={{ fontSize: 14, color: 'var(--text-primary)' }}>
+                {new Date(triggeredAt).toLocaleString('tr-TR')}
+              </div>
+            </div>
+          )}
+
+          {/* Engelli semboller */}
+          {symbols.length > 0 && (
+            <div style={{ background: 'var(--bg-elevated, #1a1f2e)', borderRadius: 6, padding: '10px 14px' }}>
+              <div style={{ fontSize: 11, color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: 4 }}>Engelli Kontratlar</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {symbols.map((s) => (
+                  <span key={s} style={{
+                    background: 'rgba(255,82,82,0.15)', color: 'var(--loss)',
+                    padding: '2px 8px', borderRadius: 4, fontSize: 12, fontWeight: 600,
+                  }}>{s}</span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Level 0 ise kısa bilgi */}
+          {level === 0 && !reason && (
+            <div style={{ background: 'var(--bg-elevated, #1a1f2e)', borderRadius: 6, padding: '10px 14px' }}>
+              <div style={{ fontSize: 11, color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: 4 }}>Bilgi</div>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                Kill-switch aktif değil. Sistem normal çalışıyor. Risk limitleri aşıldığında veya OLAY rejimi algılandığında otomatik devreye girer.
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="confirm-modal-actions">
+          <button
+            type="button"
+            className="confirm-modal-btn confirm-modal-btn-confirm"
+            style={{ background: '#f5a623', color: '#1a1f2e', fontWeight: 700 }}
+            onClick={onClose}
+            autoFocus
+          >
+            Tamam
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+});
 
 // ── Yardımcılar ──────────────────────────────────────────────────
 
@@ -71,6 +208,7 @@ const REGIME_LABELS = {
 export default function RiskManagement() {
   const [risk, setRisk] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [ksModalOpen, setKsModalOpen] = useState(false);
 
   const fetchData = useCallback(async () => {
     const data = await getRisk();
@@ -111,7 +249,12 @@ export default function RiskManagement() {
           )}
         </div>
 
-        <div className={`risk-status-card risk-status--ks-${risk.kill_switch_level}`}>
+        <div
+          className={`risk-status-card risk-status--ks-${risk.kill_switch_level}`}
+          style={{ cursor: 'pointer' }}
+          title="Detay görmek için tıkla"
+          onClick={() => setKsModalOpen(true)}
+        >
           <span className="risk-status-label">Kill-Switch</span>
           <span className={`risk-status-value ${ks.cls}`}>{ks.text}</span>
           {risk.blocked_symbols?.length > 0 && (
@@ -236,6 +379,16 @@ export default function RiskManagement() {
           </div>
         </div>
       </div>
+
+      {/* ═══ KILL-SWITCH BİLGİ MODALI ═════════════════════════════ */}
+      <KillSwitchInfoModal
+        open={ksModalOpen}
+        onClose={() => setKsModalOpen(false)}
+        level={risk.kill_switch_level}
+        details={risk.kill_switch_details}
+        blockedSymbols={risk.blocked_symbols}
+        riskReason={risk.risk_reason}
+      />
     </div>
   );
 }
