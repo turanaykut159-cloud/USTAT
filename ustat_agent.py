@@ -98,7 +98,7 @@ DESKTOP_DIR = USTAT_DIR / "desktop"
 DB_PATH = USTAT_DIR / "database" / "trades.db"
 CONFIG_PATH = USTAT_DIR / "config.json"
 
-AGENT_VERSION = "3.1.0"
+AGENT_VERSION = "3.2.0"
 
 # Zamanlama
 POLL_INTERVAL = 1.0            # komut tarama aralığı (saniye)
@@ -880,72 +880,85 @@ def handle_shell(cmd: dict) -> tuple[bool, str, str]:
 def handle_start_app(cmd: dict) -> tuple[bool, str, str]:
     """ÜSTAT uygulamasını başlat.
 
-    schtasks /IT ile kullanıcı oturumunda interaktif olarak çalıştırır.
-    API'nin ayağa kalkmasını bekler (max 20sn).
+    subprocess.Popen ile kullanıcı oturumunda interaktif olarak çalıştırır.
+    python.exe kullanır (pythonw.exe stdout/stderr=None sorunu nedeniyle YASAK).
+    API'nin ayağa kalkmasını bekler (max 40sn).
+
+    Eski yöntem (schtasks /IT) kaldırıldı — nedenleri:
+    - pythonw.exe stdout/stderr=None → uvicorn sessizce çöker
+    - Session 0 izolasyon sorunları
+    - Interactive token zamanlama boşlukları
+    - Task Scheduler kendi gecikmeleri (2+ dakika timeout)
     """
     try:
+        # ── Ön kontrol 1: API portu açık mı? ─────────────────────
+        # Port açıksa ÜSTAT zaten aktif — ikinci instance başlatma!
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1)
+            if sock.connect_ex(("127.0.0.1", KNOWN_PORTS["API"])) == 0:
+                sock.close()
+                return True, "ÜSTAT zaten çalışıyor (API aktif). Yeni instance başlatılmadı.", ""
+            sock.close()
+        except Exception:
+            pass
+
+        # ── Ön kontrol 2: Electron zaten çalışıyor mu? ───────────
+        # API henüz başlamamış ama Electron başlamış olabilir.
+        try:
+            for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+                pname = (proc.info.get("name") or "").lower()
+                if "electron" in pname:
+                    cmdline = proc.info.get("cmdline") or []
+                    cmdline_str = " ".join(cmdline).lower()
+                    if "ustat" in cmdline_str or "desktop" in cmdline_str:
+                        log(f"Electron zaten çalışıyor (PID {proc.info['pid']}), start_app atlanıyor", "WARN")
+                        return True, f"ÜSTAT Electron zaten çalışıyor (PID {proc.info['pid']}). Yeni instance başlatılmadı.", ""
+        except Exception:
+            pass
+
         start_script = USTAT_DIR / "start_ustat.py"
         if not start_script.exists():
             return False, "", "start_ustat.py bulunamadı"
 
-        python_exe = r"C:\Users\pc\AppData\Local\Programs\Python\Python314\pythonw.exe"
-        task_name = "USTAT_InteractiveLaunch"
+        # python.exe kullan — pythonw.exe stdout/stderr=None yapar,
+        # uvicorn ve logging sessizce çöker, API başlamaz.
+        python_exe = r"C:\Users\pc\AppData\Local\Programs\Python\Python314\python.exe"
+        if not Path(python_exe).exists():
+            return False, "", f"Python bulunamadı: {python_exe}"
 
-        # 1. Eski task varsa temizle
-        subprocess.run(
-            ["schtasks", "/delete", "/tn", task_name, "/f"],
-            capture_output=True, timeout=10,
+        # Doğrudan subprocess.Popen ile başlat
+        # CREATE_NO_WINDOW: konsol penceresi açılmasın (pythonw.exe yerine python.exe kullandığımız için)
+        # CREATE_NEW_PROCESS_GROUP: ajan kapansa bile ÜSTAT çalışmaya devam etsin
+        log_path = USTAT_DIR / "startup_agent.log"
+        _CREATE_NO_WINDOW = 0x08000000
+        proc = subprocess.Popen(
+            [python_exe, str(start_script)],
+            cwd=str(USTAT_DIR),
+            stdout=open(log_path, "a", encoding="utf-8"),
+            stderr=subprocess.STDOUT,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | _CREATE_NO_WINDOW,
         )
+        log(f"ÜSTAT başlatıldı (PID {proc.pid})", "INFO")
 
-        # 2. Interaktif oturumda çalışacak task oluştur
-        result = subprocess.run(
-            [
-                "schtasks", "/create",
-                "/tn", task_name,
-                "/tr", f'{python_exe} {start_script}',
-                "/sc", "once",
-                "/st", "00:00",
-                "/RU", "pc",        # Kullanıcı oturumu
-                "/IT",              # Interactive Token — kullanıcı masaüstünde çalışır
-                "/f",               # Force overwrite
-            ],
-            capture_output=True, text=True, timeout=10,
-        )
-        if result.returncode != 0:
-            return False, "", f"schtasks create başarısız: {result.stderr}"
-
-        # 3. Task'ı hemen çalıştır
-        result = subprocess.run(
-            ["schtasks", "/run", "/tn", task_name],
-            capture_output=True, text=True, timeout=10,
-        )
-        if result.returncode != 0:
-            return False, "", f"schtasks run başarısız: {result.stderr}"
-
-        # 4. API'nin ayağa kalkmasını bekle (max 20sn)
-        for i in range(10):
+        # API'nin ayağa kalkmasını bekle (max 40sn)
+        for i in range(20):
             time.sleep(2)
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(2)
                 if sock.connect_ex(("127.0.0.1", KNOWN_PORTS["API"])) == 0:
                     sock.close()
-                    # 5. Temizlik — geçici task'ı sil
-                    subprocess.run(
-                        ["schtasks", "/delete", "/tn", task_name, "/f"],
-                        capture_output=True, timeout=10,
-                    )
-                    return True, f"ÜSTAT başlatıldı (interaktif oturum, API aktif)", ""
+                    return True, f"ÜSTAT başlatıldı (PID {proc.pid}, API aktif)", ""
                 sock.close()
             except Exception:
                 pass
 
-        # API henüz yanıt vermese de task çalıştı
-        subprocess.run(
-            ["schtasks", "/delete", "/tn", task_name, "/f"],
-            capture_output=True, timeout=10,
-        )
-        return True, "ÜSTAT başlatıldı ama API henüz yanıt vermiyor. Biraz bekleyin.", ""
+        # API henüz yanıt vermese de process çalışıyor mu kontrol et
+        if proc.poll() is None:
+            return True, f"ÜSTAT başlatıldı (PID {proc.pid}) ama API henüz yanıt vermiyor. Biraz bekleyin.", ""
+        else:
+            return False, "", f"ÜSTAT process'i çöktü (exit code: {proc.returncode})"
     except Exception as e:
         return False, "", str(e)
 
@@ -3123,19 +3136,29 @@ def process_command(cmd_file: Path):
     """Tek bir komutu işle — retry ve hata yönetimi ile."""
     global _commands_processed
 
-    cmd = read_command(cmd_file)
-    if cmd is None:
-        cmd_file.unlink(missing_ok=True)
+    # ── Atomik Kilitleme ───────────────────────────────────────
+    # Komut dosyasını .processing uzantısıyla rename et.
+    # İlk rename'i başaran instance işler, diğerleri atlar.
+    lock_file = cmd_file.with_suffix(".processing")
+    try:
+        cmd_file.rename(lock_file)
+    except (FileNotFoundError, OSError, PermissionError):
+        # Başka instance zaten aldı veya dosya silindi → atla
         return
 
-    cmd_id = cmd.get("id", cmd_file.stem)
+    cmd = read_command(lock_file)
+    if cmd is None:
+        lock_file.unlink(missing_ok=True)
+        return
+
+    cmd_id = cmd.get("id", lock_file.stem.replace(".processing", ""))
     cmd_type = cmd.get("type", "")
     created = cmd.get("created", "")
 
     # Sonuç zaten var mı?
     result_file = RESULT_DIR / f"{cmd_id}.json"
     if result_file.exists():
-        cmd_file.unlink(missing_ok=True)
+        lock_file.unlink(missing_ok=True)
         return
 
     # Çok eski komutlar atla
@@ -3146,14 +3169,14 @@ def process_command(cmd_file: Path):
             if age > MAX_COMMAND_AGE:
                 log(f"Eski komut atlandı: {cmd_id} ({int(age)}s)", "WARN")
                 write_result(cmd_id, False, "", f"Komut çok eski ({int(age)}s > {MAX_COMMAND_AGE}s)")
-                cmd_file.unlink(missing_ok=True)
+                lock_file.unlink(missing_ok=True)
                 return
         except Exception:
             pass
 
     # Özel dahili komutlar (_revive vb.)
     if cmd_type.startswith("_"):
-        cmd_file.unlink(missing_ok=True)
+        lock_file.unlink(missing_ok=True)
         return
 
     handler = HANDLERS.get(cmd_type)
@@ -3163,7 +3186,7 @@ def process_command(cmd_file: Path):
             cmd_id, False, "",
             f"Bilinmeyen komut tipi: {cmd_type}\nDesteklenen: {', '.join(sorted(HANDLERS.keys()))}",
         )
-        cmd_file.unlink(missing_ok=True)
+        lock_file.unlink(missing_ok=True)
         return
 
     log(f"Komut işleniyor: [{cmd_type}] {cmd_id}")
@@ -3205,8 +3228,8 @@ def process_command(cmd_file: Path):
                 log(f"  Retry {attempt + 1}/{max_retry}: [{cmd_type}] {cmd_id} — {e}", "WARN")
                 time.sleep(1)
 
-    # Komutu sil
-    cmd_file.unlink(missing_ok=True)
+    # Komutu sil (lock_file = atomik rename sonrası .processing dosyası)
+    lock_file.unlink(missing_ok=True)
     _commands_processed += 1
 
 
@@ -3324,12 +3347,29 @@ def main():
 
     ensure_dirs()
 
+    # ── Singleton Koruması ─────────────────────────────────────
+    # PID dosyasındaki process hâlâ canlıysa → çık, duplicate instance engelle.
+    if PID_FILE.exists():
+        try:
+            old_pid = int(PID_FILE.read_text(encoding="utf-8").strip())
+            if old_pid != os.getpid() and psutil.pid_exists(old_pid):
+                try:
+                    old_proc = psutil.Process(old_pid)
+                    if old_proc.is_running() and "agent" in old_proc.cmdline()[-1].lower():
+                        safe_print(f"  ⛔ Ajan zaten çalışıyor (PID {old_pid}). Yeni instance başlatılmadı.")
+                        log(f"Singleton: Zaten çalışan ajan bulundu (PID {old_pid}), çıkılıyor.", "WARN")
+                        return
+                except (psutil.NoSuchProcess, psutil.AccessDenied, IndexError):
+                    pass  # Eski process ölmüş veya erişilemez → devam et
+        except (ValueError, OSError):
+            pass  # PID dosyası bozuk → devam et
+
     # v5.9: Windows başlangıcına otomatik kayıt — DEVRE DIŞI (v5.9.1)
     # Kullanıcı kararı: Uygulama sadece masaüstü kısayolundan açılacak.
     # Windows açılışında otomatik başlatma istenmiyor.
     # _auto_install_startup()
 
-    # PID dosyası
+    # PID dosyası (bu instance'ı kaydet)
     PID_FILE.write_text(str(os.getpid()), encoding="utf-8")
 
     safe_print("")

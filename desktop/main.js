@@ -101,25 +101,22 @@ let tray = null;
 let isAlwaysOnTop = true;
 
 // ── Tek instance kilidi ──────────────────────────────────────────
-// API mode'da start_ustat.py kendi kilidini yönetir, Electron kilidi atla
+// HER ZAMAN aktif — API mode dahil. Birden fazla Electron penceresi YASAK.
 const isApiMode = process.env.USTAT_API_MODE === '1';
-if (!isApiMode) {
-  const gotTheLock = app.requestSingleInstanceLock();
-  elog(`requestSingleInstanceLock: ${gotTheLock}`);
-  if (!gotTheLock) {
-    elog('Baska bir USTAT instance calisiyor, cikis yapiliyor.');
-    app.quit();
-  } else {
-    app.on('second-instance', () => {
-      if (mainWindow) {
-        if (mainWindow.isMinimized()) mainWindow.restore();
-        mainWindow.show();
-        mainWindow.focus();
-      }
-    });
-  }
+const gotTheLock = app.requestSingleInstanceLock();
+elog(`requestSingleInstanceLock: ${gotTheLock} (apiMode=${isApiMode})`);
+if (!gotTheLock) {
+  elog('Baska bir USTAT Electron instance calisiyor, cikis yapiliyor.');
+  app.quit();
 } else {
-  elog('API mode: tek instance kilidi start_ustat.py tarafından yönetiliyor');
+  app.on('second-instance', () => {
+    elog('İkinci instance algılandı — mevcut pencere öne getiriliyor');
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
 }
 
 // ── Ana pencere ──────────────────────────────────────────────────

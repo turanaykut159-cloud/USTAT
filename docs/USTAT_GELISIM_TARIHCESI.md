@@ -57,6 +57,15 @@
 
 ## [5.9.0] — 2026-03-28 / 2026-04-08
 
+### Security
+- #127 — Electron single-instance kilidi HER ZAMAN aktif: `requestSingleInstanceLock()` artık API modda da çalışıyor — birden fazla pencere açılması engellendi (desktop/main.js)
+- #126 — Ajan singleton koruması: PID dosyası + psutil kontrolü ile çoklu ajan instance engellendi. Atomik komut kilitleme (.processing rename) ile aynı komutun birden fazla kez işlenmesi önlendi (ustat_agent.py v3.2.0)
+- #125 — handle_start_app Electron process kontrolü: Uygulama başlatılmadan önce hem API portu hem Electron process'i kontrol ediliyor — çift başlatma engellendi
+
+### Fixed
+- #124 — API başlatma hatası kök neden: pythonw.exe stdout/stderr=None yapıyor → uvicorn sessizce çöküyordu. python.exe + CREATE_NO_WINDOW ile değiştirildi, start_ustat.py'ya stdout/stderr fallback koruması eklendi
+- #123 — Named Mutex namespace: `Local\` → `Global\` değiştirildi — admin/normal kullanıcı oturumları arası tek instance koruması sağlandı. TIME_WAIT socket süresi 120sn→30sn (TcpTimedWaitDelay registry)
+
 ### Fixed
 - #122 — OĞUL anında kapanış sorunu: `_send_order_inner` TRADE_ACTION_SLTP başarısız olduğunda pozisyonu hemen kapatıyordu (GCM VİOP exchange modda SLTP desteklenmiyor). Artık OgulSLTP mekanizmasına (plain STOP pending emir) bırakıyor, pozisyon korumalı yaşıyor. OgulSLTP de başarısız olursa Anayasa 4.4 kuralı `_execute_signal`'da uygulanıyor
 

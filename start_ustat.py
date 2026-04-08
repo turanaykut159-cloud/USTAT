@@ -27,6 +27,19 @@ import atexit
 import threading
 import multiprocessing
 
+# ── stdout/stderr koruması ────────────────────────────────────────
+# pythonw.exe ile başlatıldığında sys.stdout ve sys.stderr None olur.
+# Bu durumda uvicorn, logging ve tüm kütüphaneler sessizce çöker.
+# Koruma: None ise dosyaya yönlendir, API/Engine normal çalışsın.
+if sys.stdout is None or sys.stderr is None:
+    _ustat_base = os.path.dirname(os.path.abspath(__file__))
+    _fallback_log = os.path.join(_ustat_base, "startup_stdio.log")
+    _fallback_fh = open(_fallback_log, "a", encoding="utf-8")
+    if sys.stdout is None:
+        sys.stdout = _fallback_fh
+    if sys.stderr is None:
+        sys.stderr = _fallback_fh
+
 # ── Çalışma dizini ────────────────────────────────────────────────
 USTAT_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(USTAT_DIR)
@@ -653,6 +666,10 @@ def run_webview_process(parent_pid=None):
         slog(f"[APP] api.pid yazma hatası: {e}")
 
     # ── 2. Electron baslat ────────────────────────────────────────
+    # NOT: Duplicate Electron koruması Electron tarafında yapılır:
+    # main.js → app.requestSingleInstanceLock() — HER ZAMAN aktif.
+    # İkinci Electron başlarsa otomatik kapanır, mevcut pencere öne gelir.
+
     desktop_dir = os.path.join(ustat_dir, "desktop")
     electron_cmd = os.path.join(desktop_dir, "node_modules", ".bin", "electron.cmd")
 
@@ -896,7 +913,10 @@ def _start_process_monitor(icon_ref):
 
 
 LOCK_FILE = os.path.join(USTAT_DIR, "ustat.lock")
-MUTEX_NAME = "Local\\USTAT_SINGLE_INSTANCE_v59"
+# Global\ namespace: admin ve normal kullanıcı oturumları arasında paylaşılır.
+# Local\ kullanıldığında admin (runas) ve normal process birbirini görmüyor
+# → iki instance aynı anda açılabiliyor. Global\ bunu önler.
+MUTEX_NAME = "Global\\USTAT_SINGLE_INSTANCE_v59"
 _mutex_handle = None
 
 
