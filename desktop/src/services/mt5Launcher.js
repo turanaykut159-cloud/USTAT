@@ -56,7 +56,7 @@ function isBrowserMode() {
  */
 async function browserVerifyMT5() {
   try {
-    const resp = await fetch('http://localhost:8000/api/mt5/verify');
+    const resp = await fetch('/api/mt5/verify');
     if (!resp.ok) return { connected: false, message: `API yanıt hatası: ${resp.status}` };
     return await resp.json();
   } catch (err) {
@@ -75,8 +75,20 @@ async function browserVerifyMT5() {
 export async function checkSavedCredentials() {
   const api = getAPI();
 
-  // Chrome/tarayıcı modu: Electron yok, doğrudan API ile MT5 durumunu kontrol et
+  // Chrome/tarayıcı/pywebview modu: Electron yok, API ile kontrol et
   if (!api) {
+    // Önce kayıtlı credentials endpoint'ini dene (keyring)
+    try {
+      const credResp = await fetch('/api/mt5/saved-credentials');
+      if (credResp.ok) {
+        const credData = await credResp.json();
+        if (credData.hasSaved) {
+          return { ...credData, _browserMode: true };
+        }
+      }
+    } catch { /* endpoint yoksa eski yönteme devam */ }
+
+    // Fallback: MT5 bağlantı durumundan kontrol
     const result = await browserVerifyMT5();
     if (result.connected && result.account) {
       return {

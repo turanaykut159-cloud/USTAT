@@ -1,9 +1,11 @@
 """
-ÜSTAT AJAN v3.0 — Akıllı Otonom Ajan
+ÜSTAT AJAN v3.2 — Akıllı Otonom Ajan
 
 v1.0: Basit komut aktarıcı (shell → sonuç)
 v2.0: Düşünen, izleyen, kendini iyileştiren otonom varlık
 v3.0: FUSE Bypass + Log Management + State bug fix
+v3.1: Claude-Cowork Entegrasyonu (pencere, pano, process, ağ, sistem bilgisi)
+v3.2: Singleton koruması, atomik komut kilitleme, stabilite iyileştirmeleri
 
 Mimari:
   ┌─────────────────────────────────────────┐
@@ -3374,7 +3376,7 @@ def main():
 
     safe_print("")
     safe_print("  ╔══════════════════════════════════════════════════╗")
-    safe_print("  ║    ÜSTAT AJAN v3.0 — Akıllı Otonom Ajan         ║")
+    safe_print("  ║    ÜSTAT AJAN v3.2 — Akıllı Otonom Ajan         ║")
     safe_print("  ╠══════════════════════════════════════════════════╣")
     safe_print(f"  ║  PID      : {os.getpid():<37}║")
     safe_print(f"  ║  Klasör   : {str(USTAT_DIR):<37}║")
@@ -3470,7 +3472,7 @@ if _HAS_WIN32:
         Veya:     net start USTATAgent / net stop USTATAgent
         """
         _svc_name_ = "USTATAgent"
-        _svc_display_name_ = "ÜSTAT Ajan v3.0"
+        _svc_display_name_ = "ÜSTAT Ajan v3.2"
         _svc_description_ = (
             "ÜSTAT Trading Platform — Otonom arka plan ajanı. "
             "Claude ile Windows arasında köprü görevi görür. "

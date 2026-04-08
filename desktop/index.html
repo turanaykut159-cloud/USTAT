@@ -6,9 +6,11 @@
     <meta name="theme-color" content="#0d1117" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:8000 ws://localhost:8000; img-src 'self' data:;"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:8000 ws://localhost:8000 http://127.0.0.1:8000 ws://127.0.0.1:8000; img-src 'self' data:;"
     />
     <title>ÜSTAT v5.9</title>
+    <!-- pywebview → electronAPI köprüsü (React'ten ÖNCE yüklenmeli) -->
+    <script src="/pywebview-shim.js"></script>
     <style>
       /* Electron yükleme sırasında beyaz flash engeli */
       html, body {

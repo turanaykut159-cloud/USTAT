@@ -94,8 +94,24 @@ USTAT_HANDOVER/
 # Görev dosyaları (tamamlanmış)
 CLAUDE_CODE_GOREV_*.md
 
-# USTAT DEPO (proje dokümanları, git dışı)
+# Arşiv (eski versiyonlar, worktrees, yedekler)
+archive/
+
+# USTAT DEPO (eski — archive/ altına taşındı)
 USTAT DEPO/
+
+# V6 çalışma dosyaları (archive/ altına taşındı)
+USTAT PLUS V6.0-ÇALIŞMA/
+
+# Geçici scriptler
+scripts/
+
+# Runtime dosyaları
+engine.heartbeat
+ustat.lock
+shutdown.signal
+watchdog.pid
+startup.log
 
 # Geçici log/rapor dosyaları
 collector_log.txt

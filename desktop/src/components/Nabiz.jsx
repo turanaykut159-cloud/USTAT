@@ -138,14 +138,14 @@ export default function Nabiz() {
           value={formatBytes(db.file_size_mb || 0)}
           sub={`WAL: ${formatBytes(db.wal_size_mb || 0)} | ${formatNumber(db.total_rows)} satır`}
           color={COLORS.blue}
-          status={db.file_size_mb > 500 ? 'warn' : db.file_size_mb > 1000 ? 'err' : 'ok'}
+          status={db.file_size_mb > 1000 ? 'err' : db.file_size_mb > 500 ? 'warn' : 'ok'}
         />
         <SummaryCard
           label="LOG DOSYALARI"
           value={formatBytes(logs.total_size_mb || 0)}
           sub={`${(logs.files || []).length} dosya`}
           color={COLORS.purple}
-          status={logs.total_size_mb > 500 ? 'warn' : logs.total_size_mb > 2000 ? 'err' : 'ok'}
+          status={logs.total_size_mb > 2000 ? 'err' : logs.total_size_mb > 500 ? 'warn' : 'ok'}
         />
         <SummaryCard
           label="DİSK ALANI"
