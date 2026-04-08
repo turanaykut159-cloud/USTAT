@@ -116,3 +116,20 @@ startup.log
 # Geçici log/rapor dosyaları
 collector_log.txt
 rapor_*.txt
+agent_error.txt
+
+# Geçici çalışma dosyaları (proje kökünde)
+*.ex5
+Sandboxie-Plus.txt
+sandboxie_kopyasi.txt
+screenshots/
+
+# Kök dizindeki geçici MQL5 dosyaları (asıl yeri mql5/Services/)
+/UstatNewsService.mq5
+/UstatNewsService.ex5
+
+# Kök dizindeki geçici analiz/rapor dosyaları
+/F_AKBNK_primnet_*.xlsx
+/primnet_trailing_analiz.xlsx
+/PRIMNET_TAM_METIN.docx
+/USTAT_Plus_V6_Tam_Sistem_Kitabi.docx
