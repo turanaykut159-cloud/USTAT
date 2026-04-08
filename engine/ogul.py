@@ -1793,18 +1793,6 @@ class Ogul:
             )
             return
 
-        # Korumasız pozisyon kontrolü
-        if result.get("unprotected_position"):
-            logger.critical(
-                f"KORUMASIZ POZİSYON TESPİT EDİLDİ [{symbol}] — "
-                f"BABA'ya bildiriliyor"
-            )
-            if self.baba:
-                self.baba.report_unprotected_position(
-                    symbol=symbol,
-                    ticket=result.get("position_ticket", result.get("order", 0)),
-                )
-
         # Başarılı → FILLED (market emir anında dolar)
         trade.state = TradeState.FILLED
         trade.order_ticket = result.get("order", 0)
@@ -1814,21 +1802,56 @@ class Ogul:
         # Dolum fiyatını MT5'ten al
         self._update_fill_price(symbol, trade)
 
-        # ── Stop Limit SL yerleştir (GCM VİOP netting fix) ─────────
-        # send_order ADIM 2 (TRADE_ACTION_SLTP) başarısız olabilir.
-        # Ek güvenlik: OgulSLTP ile Stop Limit emir yerleştir.
+        # ── SL yerleştir (GCM VİOP: Stop pending emir ile) ─────────
+        # GCM VİOP exchange modda TRADE_ACTION_SLTP desteklenmiyor.
+        # OgulSLTP ile plain STOP emir yerleştiriyoruz.
+        # TRADE_ACTION_SLTP zaten başarılıysa (sl_tp_applied=True) atla.
         if not result.get("sl_tp_applied", False) and signal.sl > 0:
             sl_ok = self._sltp.set_initial_sl(trade, signal.sl)
             if sl_ok:
                 logger.info(
-                    f"Stop Limit SL yerleştirildi [{symbol}]: "
-                    f"SL={signal.sl:.4f} (TRADE_ACTION_SLTP bypass)"
+                    f"SL yerleştirildi [{symbol}]: "
+                    f"SL={signal.sl:.4f} (STOP pending emir)"
                 )
             else:
-                logger.error(
-                    f"Stop Limit SL de başarısız [{symbol}] — "
-                    f"korumasız pozisyon riski!"
+                # OgulSLTP de başarısız — Anayasa 4.4: Korumasız pozisyon YASAK
+                # Pozisyonu kapat ve BABA'ya bildir
+                logger.critical(
+                    f"SL YERLEŞTİRİLEMEDİ [{symbol}] — "
+                    f"TRADE_ACTION_SLTP ve STOP emir ikisi de başarısız. "
+                    f"Korumasız pozisyon YASAK — pozisyon kapatılıyor!"
                 )
+                position_ticket = trade.ticket
+                close_result = self.bridge.close_position(position_ticket)
+                if close_result is not None:
+                    logger.warning(
+                        f"Korumasız pozisyon kapatıldı [{symbol}]: "
+                        f"ticket={position_ticket}"
+                    )
+                    trade.state = TradeState.CLOSED
+                    trade.cancel_reason = "sl_placement_failed"
+                    self.active_trades.pop(symbol, None)
+                    self.db.insert_event(
+                        event_type="TRADE_CLOSE",
+                        message=(
+                            f"Korumasız pozisyon kapatıldı: {symbol} "
+                            f"ticket={position_ticket} — SL yerleştirilemedi"
+                        ),
+                        severity="CRITICAL",
+                    )
+                    return
+                else:
+                    # Kapatma da başarısız — KRİTİK: korumasız pozisyon açık!
+                    logger.critical(
+                        f"KORUMASIZ POZİSYON AÇIK [{symbol}] "
+                        f"ticket={position_ticket} — SL yerleştirilemedi "
+                        f"VE kapatılamadı! Manuel müdahale gerekli."
+                    )
+                    if self.baba:
+                        self.baba.report_unprotected_position(
+                            symbol=symbol,
+                            ticket=position_ticket,
+                        )
 
         # Günlük işlem sayacı
         if self.baba:

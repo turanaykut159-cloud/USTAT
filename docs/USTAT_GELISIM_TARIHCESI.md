@@ -55,7 +55,10 @@
 
 ---
 
-## [5.9.0] — 2026-03-28 / 2026-04-07
+## [5.9.0] — 2026-03-28 / 2026-04-08
+
+### Fixed
+- #122 — OĞUL anında kapanış sorunu: `_send_order_inner` TRADE_ACTION_SLTP başarısız olduğunda pozisyonu hemen kapatıyordu (GCM VİOP exchange modda SLTP desteklenmiyor). Artık OgulSLTP mekanizmasına (plain STOP pending emir) bırakıyor, pozisyon korumalı yaşıyor. OgulSLTP de başarısız olursa Anayasa 4.4 kuralı `_execute_signal`'da uygulanıyor
 
 ### Added
 - #112 — ProcessGuard hayalet koruma modülü: PID registry, tree-kill, orphan Electron/MT5 tespiti, port/socket temizliği — kapanışta kalan zombie process/port/socket sorununu çözer

@@ -1374,26 +1374,16 @@ class MT5Bridge:
                                 _time.sleep(0.3 * sltp_attempt)  # 0.3, 0.6, 0.9, 1.2s
 
                     if not sltp_applied:
-                        # 5 deneme de başarısız — pozisyonu kapat (korumasız bırakma)
-                        # Anayasa 4.4: Korumasız pozisyon YASAK
-                        logger.error(
-                            f"SL/TP {SLTP_MAX_RETRIES} denemede eklenemedi [{symbol}] "
-                            f"— pozisyon korumasız, kapatılıyor"
-                        )
-                        close_result = self.close_position(position_ticket)
-                        close_ok = (
-                            close_result is not None
-                            and close_result.get("success", False)
+                        # TRADE_ACTION_SLTP GCM VİOP exchange modda desteklenmiyor.
+                        # Pozisyonu KAPATMA — _execute_signal'daki OgulSLTP
+                        # mekanizması (Stop/Limit pending emirler) ile SL/TP konulacak.
+                        # OgulSLTP da başarısız olursa, koruma kuralı ORADA uygulanır.
+                        logger.warning(
+                            f"TRADE_ACTION_SLTP {SLTP_MAX_RETRIES} denemede "
+                            f"başarısız [{symbol}] — OgulSLTP'ye bırakılıyor "
+                            f"(Stop/Limit pending emir ile SL/TP konulacak)"
                         )
                         order_result["sl_tp_applied"] = False
-                        order_result["force_closed"] = close_ok
-                        if not close_ok:
-                            # Kapatma da başarısız — KRİTİK: korumasız pozisyon açık!
-                            logger.critical(
-                                f"KORUMASIZ POZİSYON AÇIK [{symbol}] ticket={position_ticket} "
-                                f"— SL/TP eklenemedi VE kapatılamadı! Manuel müdahale gerekli."
-                            )
-                            order_result["unprotected_position"] = True
 
                 # Health: başarılı emir kaydı
                 if self._health:
