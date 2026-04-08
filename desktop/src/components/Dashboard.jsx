@@ -16,6 +16,18 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  rectSortingStrategy,
+  arrayMove,
+} from '@dnd-kit/sortable';
+import {
   getTradeStats, getPerformance, getTrades, getStatus,
   getAccount, getPositions, closePosition, connectLiveWS,
   getHybridStatus, checkHybridTransfer, transferToHybrid,
@@ -24,6 +36,7 @@ import {
 import { formatMoney, formatPrice, pnlClass, elapsed } from '../utils/formatters';
 import ConfirmModal from './ConfirmModal';
 import PrimnetDetail from './PrimnetDetail';
+import SortableCard from './SortableCard';
 import NewsPanel from './NewsPanel';
 import './NewsPanel.css';
 
@@ -121,6 +134,56 @@ export default function Dashboard() {
 
   // Süre yenileme tetikleyici (30sn)
   const [, setTick] = useState(new Date());
+
+  // ── Sürükle-bırak kart sıralaması (@dnd-kit) ────────────────
+  const DEFAULT_CARD_ORDER = ['stat_daily', 'stat_winrate', 'stat_pnl', 'stat_pf', 'account', 'positions', 'trades', 'news'];
+  const DASH_STORAGE_KEY = 'ustat_dashboard_card_order';
+
+  const [cardOrder, setCardOrder] = useState(() => {
+    try {
+      const saved = localStorage.getItem(DASH_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // Tüm beklenen ID'ler mevcut mu kontrol et
+        if (Array.isArray(parsed) && parsed.length === DEFAULT_CARD_ORDER.length
+            && DEFAULT_CARD_ORDER.every(id => parsed.includes(id))) return parsed;
+      }
+    } catch { /* bozuk veri — varsayılana dön */ }
+    return DEFAULT_CARD_ORDER;
+  });
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+  );
+
+  const handleDragEnd = useCallback((event) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    setCardOrder((prev) => {
+      const oldIndex = prev.indexOf(active.id);
+      const newIndex = prev.indexOf(over.id);
+      if (oldIndex === -1 || newIndex === -1) return prev;
+      const reordered = arrayMove(prev, oldIndex, newIndex);
+      try { localStorage.setItem(DASH_STORAGE_KEY, JSON.stringify(reordered)); } catch {}
+      return reordered;
+    });
+  }, []);
+
+  const handleResetOrder = useCallback(() => {
+    setCardOrder(DEFAULT_CARD_ORDER);
+    try { localStorage.setItem(DASH_STORAGE_KEY, JSON.stringify(DEFAULT_CARD_ORDER)); } catch {}
+  }, []);
+
+  const CARD_LABELS = {
+    stat_daily: 'Günlük İşlem',
+    stat_winrate: 'Başarı Oranı',
+    stat_pnl: 'Net K/Z',
+    stat_pf: 'Profit Factor',
+    account: 'Hesap Durumu',
+    positions: 'Açık Pozisyonlar',
+    trades: 'Son İşlemler',
+    news: 'Haber Akışı',
+  };
 
   // ── Trade/Stats veri çekme (WS event-driven) ────────────────────
   const fetchTradeData = useCallback(async () => {
@@ -420,38 +483,85 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* ═══ ÜST: 4 Stat Kartı ════════════════════════════════════ */}
-      <div className="dash-stats-row">
-        <StatCard
-          label="Günlük İşlem"
-          sublabel="bugün"
-          value={status.daily_trade_count || 0}
-          total={stats.total_trades}
-          icon="📊"
-        />
-        <StatCard
-          label="Başarı Oranı"
-          value={formatPct(stats.win_rate)}
-          detail={`${stats.winning_trades || 0}W / ${stats.losing_trades || 0}L`}
-          icon="🎯"
-          color={stats.win_rate >= 50 ? 'var(--profit)' : 'var(--loss)'}
-        />
-        <StatCard
-          label="Net Kâr/Zarar"
-          value={formatMoney(stats.total_pnl)}
-          detail="Kapanan işlemler toplamı (DB)"
-          icon="💰"
-          color={stats.total_pnl >= 0 ? 'var(--profit)' : 'var(--loss)'}
-        />
-        <StatCard
-          label="Profit Factor"
-          value={formatPF(perf.profit_factor)}
-          icon="📐"
-          color={perf.profit_factor >= 1.5 ? 'var(--profit)' : perf.profit_factor >= 1 ? 'var(--warning)' : 'var(--loss)'}
-        />
+      {/* ═══ SÜRÜKLE-BIRAK KART SİSTEMİ ══════════════════════════ */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+        <button
+          type="button"
+          className="grid-reset-btn"
+          onClick={handleResetOrder}
+          title="Kartları varsayılan sıraya döndür"
+        >
+          ↺ Sıfırla
+        </button>
       </div>
 
-      {/* ═══ HESAP DURUMU (canlı) ═════════════════════════════════ */}
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleDragEnd}
+      >
+        <SortableContext items={cardOrder} strategy={rectSortingStrategy}>
+        <div className="dash-dnd-grid">
+
+      {cardOrder.map((cardId) => {
+        switch (cardId) {
+
+        /* ═══ STAT KARTLARI (her biri ayrı sürüklenebilir) ═════════ */
+        case 'stat_daily':
+          return (
+            <SortableCard key="stat_daily" id="stat_daily" label={CARD_LABELS.stat_daily} className="dash-stat-item">
+              <StatCard
+                label="Günlük İşlem"
+                sublabel="bugün"
+                value={status.daily_trade_count || 0}
+                total={stats.total_trades}
+                icon="📊"
+              />
+            </SortableCard>
+          );
+
+        case 'stat_winrate':
+          return (
+            <SortableCard key="stat_winrate" id="stat_winrate" label={CARD_LABELS.stat_winrate} className="dash-stat-item">
+              <StatCard
+                label="Başarı Oranı"
+                value={formatPct(stats.win_rate)}
+                detail={`${stats.winning_trades || 0}W / ${stats.losing_trades || 0}L`}
+                icon="🎯"
+                color={stats.win_rate >= 50 ? 'var(--profit)' : 'var(--loss)'}
+              />
+            </SortableCard>
+          );
+
+        case 'stat_pnl':
+          return (
+            <SortableCard key="stat_pnl" id="stat_pnl" label={CARD_LABELS.stat_pnl} className="dash-stat-item">
+              <StatCard
+                label="Net Kâr/Zarar"
+                value={formatMoney(stats.total_pnl)}
+                detail="Kapanan işlemler toplamı (DB)"
+                icon="💰"
+                color={stats.total_pnl >= 0 ? 'var(--profit)' : 'var(--loss)'}
+              />
+            </SortableCard>
+          );
+
+        case 'stat_pf':
+          return (
+            <SortableCard key="stat_pf" id="stat_pf" label={CARD_LABELS.stat_pf} className="dash-stat-item">
+              <StatCard
+                label="Profit Factor"
+                value={formatPF(perf.profit_factor)}
+                icon="📐"
+                color={perf.profit_factor >= 1.5 ? 'var(--profit)' : perf.profit_factor >= 1 ? 'var(--warning)' : 'var(--loss)'}
+              />
+            </SortableCard>
+          );
+
+        /* ═══ HESAP DURUMU (canlı) ═════════════════════════════════ */
+        case 'account':
+          return (
+            <SortableCard key="account" id="account" label={CARD_LABELS.account} className="dash-full-item">
       {(equityStale || wsState === 'reconnecting' || status.data_fresh === false || status.circuit_breaker_active) && (
         <div className="dash-stale-banner">
           {status.circuit_breaker_active
@@ -496,8 +606,13 @@ export default function Dashboard() {
           cls={pnlClass(equityStale ? account.daily_pnl : (liveEquity?.daily_pnl ?? account.daily_pnl))}
         />
       </div>
+            </SortableCard>
+          );
 
-      {/* ═══ ORTA: Açık Pozisyonlar (TAM ÖZELLİKLİ) ═══════════════ */}
+        /* ═══ ORTA: Açık Pozisyonlar (TAM ÖZELLİKLİ) ═══════════════ */
+        case 'positions':
+          return (
+            <SortableCard key="positions" id="positions" label={CARD_LABELS.positions} className="dash-full-item">
       <div className="dash-positions-row">
         <div className="dash-card dash-card--full">
           <div className="dash-card-header">
@@ -653,8 +768,13 @@ export default function Dashboard() {
           )}
         </div>
       </div>
+            </SortableCard>
+          );
 
-      {/* ═══ ALT: Son İşlemler (tam genişlik) ══════════════════════ */}
+        /* ═══ ALT: Son İşlemler (tam genişlik) ══════════════════════ */
+        case 'trades':
+          return (
+            <SortableCard key="trades" id="trades" label={CARD_LABELS.trades} className="dash-full-item">
       <div className="dash-bottom-row">
         <div className="dash-card">
           <h3>
@@ -706,9 +826,25 @@ export default function Dashboard() {
           )}
         </div>
       </div>
+            </SortableCard>
+          );
 
-      {/* ═══ HABER PANELİ (v5.7.1) — Son İşlemler altında ═════════ */}
-      <NewsPanel newsData={newsData} />
+        /* ═══ HABER PANELİ (v5.7.1) ══════════════════════════════════ */
+        case 'news':
+          return (
+            <SortableCard key="news" id="news" label={CARD_LABELS.news} className="dash-full-item">
+              <NewsPanel newsData={newsData} />
+            </SortableCard>
+          );
+
+        default:
+          return null;
+        }
+      })}
+
+        </div>
+        </SortableContext>
+      </DndContext>
 
       {/* ═══ HATA MODAL (window.alert yerine) ═════════════════════ */}
       {/* ═══ PRİMNET DETAY MODALI ══════════════════════════════════ */}

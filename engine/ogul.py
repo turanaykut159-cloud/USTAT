@@ -1220,6 +1220,17 @@ class Ogul:
             # Confluence'ı strength çarpanı olarak uygula
             conf_multiplier = conf_score / 100.0
             candidate.strength *= conf_multiplier
+
+            # v5.9.3: SE3 rejim-strateji uyum filtresi
+            # SE3 motoru regime.allowed_strategies'i kontrol etmiyor.
+            # Bu kapı, rejimin izin vermediği stratejiyi reddeder.
+            if regime and candidate.strategy not in regime.allowed_strategies:
+                logger.warning(
+                    f"Rejim filtresi [{symbol}]: {candidate.strategy.value} "
+                    f"{regime.regime_type.value} rejiminde izinsiz — atlanıyor"
+                )
+                continue
+
             logger.info(
                 f"Sinyal onaylandı [{symbol}]: {direction_str} "
                 f"strateji={candidate.strategy.value} güç={candidate.strength:.2f} "

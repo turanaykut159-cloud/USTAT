@@ -185,7 +185,7 @@ C:\Users\pc\Desktop\USTAT\
 ├── CLAUDE.md                  # BU DOSYA — Ana rehber
 ├── USTAT_ANAYASA.md           # Anayasa (değiştirilemez koruma katmanı)
 ├── start_ustat.py             # Başlatıcı + watchdog
-├── ustat_agent.py             # Otonom ajan (v2.0)
+├── ustat_agent.py             # Otonom ajan (v3.2)
 ├── health_check.py            # Sağlık kontrolü
 ├── create_shortcut.ps1        # Kısayol oluşturucu
 ├── update_shortcut.ps1        # Kısayol güncelleyici
@@ -533,12 +533,26 @@ config/default.json → engine/config.py → baba.py, ogul.py, main.py, h_engine
 
 Her değişiklik tamamlandıktan sonra aşağıdaki adımlar SIRASYLA uygulanır. Atlama YASAK.
 
-### ADIM 1: Masaüstü Uygulamasını Güncelle
-Backend/engine değişiklikleri UI'ya yansıması gerekiyorsa:
+### ADIM 1: Masaüstü Uygulamasını Güncelle — BUILD ZORUNLULUĞU
+
+**⚠️ KRİTİK MİMARİ BİLGİ — FRONTEND DEĞİŞİKLİKLERİ İÇİN ZORUNLU OKUMA:**
+
+Uygulama Electron ile **production modda** çalışır. Electron, React kaynak dosyalarını (`.jsx`) doğrudan OKUMAZ — sadece `desktop/dist/` klasöründeki derlenmiş JavaScript bundle'ını yükler. Akış şöyledir:
+
+```
+Kaynak kod (.jsx) → npm run build → Derlenmiş bundle (dist/) → Electron BUNU yükler
+```
+
+Bu demektir ki: **kaynak dosyayı düzenlemek TEK BAŞINA yetmez.** Build yapılmazsa Electron eski `dist/` bundle'ını yüklemeye devam eder ve değişiklikler GÖRÜNMEZ. Dosya doğru, kod doğru, yer doğru — ama uygulama o dosyayı okumuyordur bile.
+
+**Build yapılmadan önce değişiklik "uygulandı" SAYILMAZ. Bu adım atlanamaz.**
+
+Adımlar:
 - API şema (`schemas.py`) ve route değişikliklerini kontrol et
 - İlgili React bileşenlerini güncelle (`desktop/src/components/`)
-- Geliştirme sunucusunda test et: `npm run dev`
-- Production build: `cd desktop && npm run build` (0 HATA olmalı)
+- **Windows makinede** production build çalıştır: `python .agent/claude_bridge.py build` (0 HATA olmalı)
+- Build sonrası uygulamayı yeniden başlat: `python .agent/claude_bridge.py restart_app`
+- Değişikliğin ekranda göründüğünü doğrula (ekran görüntüsü veya kullanıcı teyidi)
 
 ### ADIM 2: Gelişim Tarihçesine Yaz
 `docs/USTAT_GELISIM_TARIHCESI.md` dosyasına giriş ekle (Keep a Changelog formatı):
@@ -665,22 +679,22 @@ C:\Users\pc\Desktop\USTAT
 
 ---
 
-## BÖLÜM 11: AJAN SİSTEMİ v2.0
+## BÖLÜM 11: AJAN SİSTEMİ v3.2
 
-ÜSTAT Ajan v2.0, Claude ile Windows bilgisayar arasında köprü görevi gören otonom bir arka plan servisidir.
+ÜSTAT Ajan v3.2, Claude ile Windows bilgisayar arasında köprü görevi gören otonom bir arka plan servisidir. Singleton koruması (PID + psutil), atomik komut kilitleme (.processing rename), FUSE bypass, Claude-Cowork entegrasyonu ve Windows Service desteği sunar.
 
 ### 11.1 Dosyalar
-- Ana ajan: `ustat_agent.py` (Windows'ta çalışır)
+- Ana ajan: `ustat_agent.py` (Windows'ta çalışır, 3686 satır)
 - Köprü: `.agent/claude_bridge.py`
 - Komutlar: `.agent/commands/`
 - Sonuçlar: `.agent/results/`
 
-### 11.2 Komut Referansı (25 Komut)
+### 11.2 Komut Referansı (37 Komut)
 
-Kaynak: `ustat_agent.py` → `HANDLERS` sözlüğü (satır 1603-1628)
+Kaynak: `ustat_agent.py` → `HANDLERS` sözlüğü
 Kullanım: `python .agent/claude_bridge.py <komut> [parametreler]`
 
-**Uygulama Yönetimi:**
+**Uygulama Yönetimi (5):**
 
 | Komut | Handler | Açıklama |
 |-------|---------|----------|
@@ -690,7 +704,7 @@ Kullanım: `python .agent/claude_bridge.py <komut> [parametreler]`
 | `build` | `handle_build` | Desktop `npm run build` — production derleme |
 | `shortcut` | `handle_shortcut` | Masaüstü kısayolunu güncelle |
 
-**Sistem Durumu ve İzleme:**
+**Sistem Durumu ve İzleme (8):**
 
 | Komut | Handler | Açıklama |
 |-------|---------|----------|
@@ -703,14 +717,14 @@ Kullanım: `python .agent/claude_bridge.py <komut> [parametreler]`
 | `agent_info` | `handle_agent_info` | Ajan versiyon, PID, uptime, yetenekler |
 | `alerts` | `handle_alerts` | Aktif uyarılar (unresolved/all/resolve) |
 
-**Trading Bilgisi:**
+**Trading Bilgisi (2):**
 
 | Komut | Handler | Açıklama |
 |-------|---------|----------|
 | `positions` | `handle_positions` | Açık pozisyonları listele |
 | `trade_history` | `handle_trade_history` | İşlem geçmişi (symbol/limit filtreli) |
 
-**Veritabanı:**
+**Veritabanı (3):**
 
 | Komut | Handler | Açıklama |
 |-------|---------|----------|
@@ -718,7 +732,7 @@ Kullanım: `python .agent/claude_bridge.py <komut> [parametreler]`
 | `db_query` | `handle_db_query` | SQL sorgusu (SADECE SELECT — yazma engelli) |
 | `read_config` | `handle_read_config` | Config dosyasını oku (key filtreli) |
 
-**Log ve Dosya:**
+**Log ve Dosya (5):**
 
 | Komut | Handler | Açıklama |
 |-------|---------|----------|
@@ -728,12 +742,49 @@ Kullanım: `python .agent/claude_bridge.py <komut> [parametreler]`
 | `file_write` | `handle_file_write` | Dosya yaz (SADECE `.agent/` altına) |
 | `list_files` | `handle_list_files` | Dizin listele (path + pattern filtreli) |
 
-**Shell:**
+**Shell (2):**
 
 | Komut | Handler | Açıklama |
 |-------|---------|----------|
 | `shell` | `handle_shell` | Windows'ta komut çalıştır (CMD/PowerShell, maks 120sn timeout) |
 | `screenshot` | `handle_screenshot` | Ekran görüntüsü al |
+
+**Log Yönetim Sistemi — v3.0 (5):**
+
+| Komut | Handler | Açıklama |
+|-------|---------|----------|
+| `fresh_engine_log` | `handle_fresh_engine_log` | Engine logunu FUSE cache bypass ile oku |
+| `search_all_logs` | `handle_search_all_logs` | Tüm loglarda arama (pattern destekli) |
+| `log_digest` | `handle_log_digest` | Log özeti (hata/uyarı sayıları, son olaylar) |
+| `log_stats` | `handle_log_stats` | Log istatistikleri (boyut, satır sayısı, tarih aralığı) |
+| `log_export` | `handle_log_export` | Log dışa aktarma (tarih/seviye filtreli) |
+
+**FUSE Bypass — Tam Dosya Erişim (5):**
+
+| Komut | Handler | Açıklama |
+|-------|---------|----------|
+| `fresh_file_read` | `handle_fresh_file_read` | Dosya oku (önbellek bypass) |
+| `fresh_file_stat` | `handle_fresh_file_stat` | Dosya bilgisi (boyut, tarih, izinler) |
+| `fresh_dir_stat` | `handle_fresh_dir_stat` | Dizin bilgisi (dosya sayısı, toplam boyut) |
+| `fresh_file_search` | `handle_fresh_file_search` | Dosya ara (pattern destekli) |
+| `fresh_grep` | `handle_fresh_grep` | İçerik ara (regex destekli) |
+
+**Claude-Cowork Entegrasyonu — v3.1 (12):**
+
+| Komut | Handler | Açıklama |
+|-------|---------|----------|
+| `window_list` | `handle_window_list` | Açık pencereleri listele (HWND, başlık, PID, boyut) |
+| `window_focus` | `handle_window_focus` | Pencereyi öne getir (HWND veya başlık ile) |
+| `clipboard_read` | `handle_clipboard_read` | Pano içeriğini oku |
+| `clipboard_write` | `handle_clipboard_write` | Panoya yaz |
+| `system_info` | `handle_system_info` | Sistem bilgisi (OS, CPU, RAM, uptime) |
+| `process_detail` | `handle_process_detail` | Detaylı process metrikleri (CPU, RAM, disk I/O) |
+| `net_connections` | `handle_net_connections` | Ağ bağlantıları listesi |
+| `env_vars` | `handle_env_vars` | Ortam değişkenlerini oku |
+| `installed_software` | `handle_installed_software` | Yüklü yazılım listesi |
+| `service_list` | `handle_service_list` | Windows servisleri listesi |
+| `scheduled_tasks` | `handle_scheduled_tasks` | Zamanlanmış görevler listesi |
+| `quick_look` | `handle_quick_look` | Hızlı sistem özeti (tek komutla her şey) |
 
 ### 11.3 Güvenlik
 - `db_query` sadece SELECT çalıştırır (INSERT/UPDATE/DELETE engelli)
@@ -741,6 +792,8 @@ Kullanım: `python .agent/claude_bridge.py <komut> [parametreler]`
 - `file_write` sadece `.agent/` altına yazabilir
 - Tüm dosya yazım işlemleri atomic (tmp + rename)
 - Shell komutları maks 120 saniye timeout
+- Singleton koruması: PID dosyası + psutil ile çoklu instance engellenir
+- Atomik komut kilitleme: `.processing` rename ile aynı komutun tekrar işlenmesi önlenir
 
 ### 11.4 Başlatma
 ```bash
@@ -765,90 +818,4 @@ python ustat_agent.py --status
 - Test sonrası commit: BOZUK kodu ASLA commit'leme
 - `git add dosya1 dosya2` — dosya dosya ekle, `git add .` YASAK
 
-### 12.2 Commit Mesaj Formatı
-```
-<tür>: <kısa açıklama>
-
-<detaylı açıklama (opsiyonel)>
-```
-
-Türler: `feat:` (yeni özellik), `fix:` (hata düzeltme), `refactor:` (yeniden yapılandırma), `docs:` (dokümantasyon), `build:` (derleme), `test:` (test)
-
----
-
-## BÖLÜM 13: LOG DOSYALARI VE KONUMLARI
-
-| Dosya | İçerik | Konum |
-|-------|--------|-------|
-| `logs/ustat_YYYY-MM-DD.log` | Engine günlük logu | `logs/` |
-| `api.log` | API sunucu logu | Kök dizin |
-| `electron.log` | Electron uygulama logu | Kök dizin |
-| `vite.log` | Vite dev sunucu logu | Kök dizin |
-| `startup.log` | Başlatma izleme logu | Kök dizin |
-| `engine.heartbeat` | Motor kalp atışı (timestamp) | Kök dizin |
-
----
-
-## BÖLÜM 14: CHROME TARAYICI BAĞLANTISI
-
-**Ön koşullar:** Masaüstü uygulaması çalışıyor + MT5 bağlı + API aktif (8000) + Vite aktif (5173)
-
-**Adres:** `http://localhost:5173`
-
-**Teknik:** Chrome'da `window.electronAPI` yok → `mt5Launcher.js` tüm fonksiyonları `/api/mt5/verify` endpoint'ine fallback yapar.
-
-**Kural:** Chrome modunda DPAPI erişimi yok. Önce Electron'dan MT5 bağlantısı kurulmalı, Chrome mevcut bağlantıyı kullanır.
-
----
-
-## BÖLÜM 15: KİMLİK VE YAKLAŞIM
-
-### 15.1 Cerrah-Mühendis Kimliği
-
-- **CERRAH:** Her değişiklik HAYATİ. Masada canlı piyasada gerçek para var. İşlem ÖNCESİNDE plan yap, SIRASINDA hassas çalış, SONRASINDA sonuçları kontrol et. Aceleci değişiklik = finansal zarar.
-- **MÜHENDİS:** Sistem BÜTÜNLÜĞÜ önemli. Tek bir fonksiyonu düzeltirken sistemin genel dayanıklılığı zayıflamamalı.
-- **RİSK KORUYUCUSU:** Her değişiklikte "en kötü senaryo ne?" sorusu sorulur. Koruma katmanları ASLA zayıflatılmaz. Şüphe durumunda KİLİTLE, AÇMA.
-
-### 15.2 Kullanıcı Bilgileri
-- **Dil:** Türkçe (tüm yanıtlar Türkçe verilir)
-- **Proje Sahibi:** Turan Aykut
-- **Çalışma Dizini:** `C:\Users\pc\Desktop\USTAT`
-
----
-
-## BÖLÜM 16: ACİL REFERANS
-
-### Uygulamayı Başlat
-```bash
-python start_ustat.py
-```
-
-### Uygulamayı Durdur
-Dashboard → Güvenli Çıkış (shutdown.signal oluşturur)
-
-### Acil Durdurma
-Dashboard → Kill-Switch butonu veya API: `POST /killswitch`
-
-### Build Al
-```bash
-cd desktop && npm run build
-```
-
-### Test Çalıştır
-```bash
-python -m pytest tests/ -v
-```
-
-### Veritabanı Yedeği
-```bash
-python -c "from engine.database import Database; Database().backup()"
-```
-
-### Log Kontrol
-```bash
-# Son engine logu
-type logs\ustat_2026-03-26.log | tail -50
-
-# API logu
-type api.log | tail -50
-```
+### 12.2 Commit Mesaj Forma

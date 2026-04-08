@@ -16,7 +16,7 @@ import React from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 
-export default function SortableCard({ id, label, disabled, children }) {
+export default function SortableCard({ id, label, disabled, className, children }) {
   const {
     attributes,
     listeners,
@@ -34,7 +34,7 @@ export default function SortableCard({ id, label, disabled, children }) {
   };
 
   return (
-    <div ref={setNodeRef} style={style} className="grid-card">
+    <div ref={setNodeRef} style={style} className={`grid-card${className ? ` ${className}` : ''}`}>
       {/* Sürükleme tutamağı */}
       {!disabled && (
         <div className="drag-handle" {...attributes} {...listeners}>

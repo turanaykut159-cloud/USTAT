@@ -57,6 +57,16 @@
 
 ## [5.9.0] — 2026-03-28 / 2026-04-08
 
+### Added
+- #132 — Dashboard sürükle-bırak kart sıralaması: @dnd-kit ile tüm Dashboard bölümleri (8 kart) bağımsız olarak sürüklenip yeniden sıralanabiliyor. 4 stat kartı ayrı ayrı, büyük bölümler tam genişlik grid düzeninde. localStorage ile kalıcı sıralama
+- #131 — SortableCard bileşenine className prop desteği eklendi — Dashboard grid düzeni için gerekli CSS class geçişi
+
+### Fixed
+- #130 — OĞUL SE3 rejim-strateji filtresi: SE3 sinyal motoru regime.allowed_strategies kontrolünü atlatıyordu — RANGE rejiminde trend_follow sinyalleri üretilip zarar eden işlemler açılıyordu. Confluence döngüsüne rejim kapısı eklendi (ogul.py)
+
+### Changed
+- #133 — CLAUDE.md Bölüm 7 ADIM 1 güncellendi: Electron production build zorunluluğu detaylı açıklandı — kaynak dosya düzenlemek yetmez, `npm run build` + shortcut güncelleme + restart gerekir
+
 ### Security
 - #129 — MT5 auto-launch koruma genişletme: `api/routes/mt5_verify.py _verify()` ve `health_check.py`'ye de terminal64.exe process kontrolü eklendi — mt5.initialize() çağrılmadan önce MT5 çalışıyor mu diye bakılıyor. `start_ustat.py` ölü pywebview koduna uyarı eklendi
 - #128 — MT5 auto-launch koruma: Engine connect(launch=False) artık mt5.initialize() çağırmadan ÖNCE terminal64.exe process kontrolü yapıyor — process yoksa bağlantı atlanır, MT5 asla otomatik açılmaz. Siyah Kapı #31 + Anayasa Kural 4.15 eklendi. 10/10 açma-kapama testi geçti

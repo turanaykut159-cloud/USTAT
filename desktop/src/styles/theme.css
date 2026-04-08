@@ -6272,3 +6272,31 @@ h2 {
   border-radius: 0;
 }
 
+/* Dashboard sürükle-bırak grid düzeni — stat kartları yatay, diğerleri tam genişlik */
+.dash-dnd-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.dash-dnd-grid .grid-card {
+  margin-bottom: 0; /* grid gap yönetsin */
+}
+
+/* Stat kartları 1 sütun kaplar (yan yana 4'lü) */
+.dash-dnd-grid .grid-card.dash-stat-item {
+  grid-column: span 1;
+}
+
+/* Diğer büyük bölümler tam genişlik */
+.dash-dnd-grid .grid-card.dash-full-item {
+  grid-column: 1 / -1;
+}
+
+/* Stat kartları içindeki StatCard düzeni */
+.dash-dnd-grid .grid-card.dash-stat-item .dash-stat-card {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
