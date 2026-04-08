@@ -110,6 +110,7 @@ Aşağıdaki fonksiyonlar uygulamanın "hayatta kalma refleksleri"dir. Bu fonksi
 | 19 | `modify_position()` | SL/TP güncelleme. Trailing stop mekanizmasının bağlı olduğu fonksiyon. |
 | 20 | `_safe_call()` | Timeout + circuit breaker sarmalayıcı. Tüm MT5 çağrılarının koruyucusu. Kaldırılırsa MT5 dondurmasında engine takılır. |
 | 21 | `heartbeat()` | 10 saniye bağlantı kontrolü. Kaldırılırsa MT5 kopuşu tespit edilemez. |
+| 31 | `connect()` | MT5 bağlantı fonksiyonu. launch=False modda terminal64.exe process kontrolü yapar — process yoksa mt5.initialize() ÇAĞRILMAZ. Bu koruma kaldırılırsa uygulama açıldığında MT5 otomatik başlar, startup akışı bozulur (OTP girememe, yanlış sırada başlatma). MT5 açma sorumluluğu SADECE Electron'dadır. |
 
 ### 3.4 — Ana Döngü (main.py)
 
@@ -180,6 +181,22 @@ Electron ÖNCE kapanır → lifespan engine.stop() tetiklenir → MT5 disconnect
 
 ### 4.14 — Startup Performans Koruması
 API port hazır süresi ≤5sn olmalıdır. Gecikme ≥10sn tespit edilirse kök neden araştırılır. TIME_WAIT socket temizliği ProcessGuard'da yapılır. Bu performans hedefi düşürülemez.
+
+### 4.15 — MT5 Başlatma Sorumluluğu Kuralı
+MT5 terminal (terminal64.exe) açma sorumluluğu SADECE Electron'dadır (mt5Manager.js → launchMT5). Engine veya API hiçbir koşulda MT5'i kendisi başlatamaz.
+
+**Doğru başlatma sırası:**
+```
+ÜSTAT açılır → LockScreen → Electron mt5Manager.js launchMT5() → terminal64.exe başlar → Kullanıcı OTP girer → MT5 bağlantısı kurulur → Engine MT5'e bağlanır → Dashboard
+```
+
+**Koruma mekanizması:** `mt5_bridge.py connect()` fonksiyonunda `launch=False` modunda `mt5.initialize()` çağrılmadan ÖNCE `terminal64.exe` process kontrolü yapılır. Process çalışmıyorsa bağlantı atlanır — mt5.initialize() asla çağrılmaz.
+
+**NEDEN:** Python MetaTrader5 kütüphanesi, `mt5.initialize()` çağrıldığında path verilmese bile Windows registry'den MT5 yolunu bulup terminal64.exe'yi OTOMATİK BAŞLATIR. Bu davranış `launch=False` modda istenmiyor.
+
+**Bu kural ihlal edilirse:** Uygulama açıldığında kullanıcı müdahalesi olmadan MT5 otomatik başlar, OTP sırası bozulur, startup akışı kırılır.
+
+Bu koruma DEĞİŞTİRİLEMEZ.
 
 ---
 
@@ -332,6 +349,7 @@ ANAYASA'da yapılan her değişiklik aşağıdaki bilgilerle kayıt altına alı
 |---|-------|----------|-------|-------|-------|------|
 | 1 | 2026-03-14 | v1.0 | 1-8 | Kritik dosyaların yanlışlıkla bozulması riski | Kırmızı Bölge + Siyah Kapı koruma sistemi kuruldu | Turan Aykut |
 | 2 | 2026-03-21 | v2.0 | 9-15 | CEO taramasında yönetişim, büyüme, acil durum, koordinasyon eksikleri tespit edildi | CEO yönetim katmanı, geliştirme pipeline, test zorunluluğu, acil durum playbook, ajan koordinasyonu eklendi | Turan Aykut |
+| 3 | 2026-04-08 | v2.1 | 3.3, 4 | MT5 auto-launch bug: Engine connect(launch=False) mt5.initialize() çağrarak MT5'i otomatik açıyordu. 10/10 test ile doğrulandı. | Siyah Kapı #31 (connect), Kural 4.15 (MT5 Başlatma Sorumluluğu) eklendi. Process kontrolü koruma bloğu eklendi. | Turan Aykut |
 
 ---
 

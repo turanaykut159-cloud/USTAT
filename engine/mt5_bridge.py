@@ -635,6 +635,52 @@ class MT5Bridge:
         mt5_login: int | None = self._config.get("mt5.login")
         mt5_server: str | None = self._config.get("mt5.server")
 
+        # ══════════════════════════════════════════════════════════════════
+        #  🚫 SİYAH KAPI — MT5 PROCESS KORUMASI (ANAYASA Kural 4.15)
+        # ══════════════════════════════════════════════════════════════════
+        # Bu koruma bloğu DEĞİŞTİRİLEMEZ. Mantığı:
+        #
+        # 1. Python MetaTrader5 kütüphanesi, mt5.initialize() çağrıldığında
+        #    path verilmese bile Windows registry'den MT5 yolunu bulup
+        #    terminal64.exe'yi OTOMATİK BAŞLATIR.
+        #
+        # 2. Bu davranış launch=False modda İSTENMİYOR. Engine hiçbir koşulda
+        #    MT5 terminal'ini kendisi açmamalı.
+        #
+        # 3. MT5 açma sorumluluğu SADECE Electron'dadır (mt5Manager.js →
+        #    launchMT5). Kullanıcı OTP girene kadar MT5 kapalı kalır.
+        #
+        # 4. Bu blok kaldırılırsa veya atlanırsa:
+        #    - Uygulama açıldığında MT5 otomatik açılır (istenmeyen)
+        #    - Kullanıcı OTP giremez çünkü MT5 yanlış zamanda başlamıştır
+        #    - Startup akışı bozulur: ÜSTAT UI → LockScreen → MT5 sırası kırılır
+        #
+        # DEĞİŞİKLİK GEÇMİŞİ:
+        # - 2026-04-08: İlk ekleme — MT5 auto-launch bug fix (10/10 test geçti)
+        # ══════════════════════════════════════════════════════════════════
+        if not launch:
+            try:
+                import subprocess as _sp
+                _result = _sp.run(
+                    ['tasklist', '/FI', 'IMAGENAME eq terminal64.exe', '/FO', 'CSV', '/NH'],
+                    capture_output=True, text=True, timeout=5,
+                    creationflags=0x08000000,  # CREATE_NO_WINDOW
+                )
+                if 'terminal64.exe' not in _result.stdout.lower():
+                    logger.info(
+                        "MT5 process bulunamadı — launch=False, bağlantı atlanıyor. "
+                        "[Siyah Kapı: MT5 açma sorumluluğu Electron'dadır]"
+                    )
+                    self._connected = False
+                    return False
+            except Exception as _exc:
+                logger.warning(
+                    f"MT5 process kontrol hatası: {_exc} — "
+                    f"güvenlik gereği bağlantı ATLANACAK (launch=False)."
+                )
+                self._connected = False
+                return False
+
         max_retries = MAX_RETRIES_LAUNCH if launch else MAX_RETRIES_RECONNECT
         mode_label = "launch" if launch else "reconnect"
 

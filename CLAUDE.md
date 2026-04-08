@@ -213,11 +213,20 @@ Masaüstü kısayolu → wscript.exe start_ustat.vbs
         → Single instance kilidi (Named Mutex + port + lock file)
         → Alt process başlat (multiprocessing):
             → API + Engine başlat (uvicorn, port 8000)
+                → Engine._connect_mt5() → connect(launch=False)
+                → ⚠️ terminal64.exe process kontrolü → yoksa mt5.initialize() ATLANIR
+                → Engine MT5 olmadan çalışmaya başlar (heartbeat polling devam eder)
             → Electron başlat (USTAT_API_MODE=1, localhost:8000 yükler)
+                → LockScreen gösterilir
+                → Kullanıcı credentials → mt5Manager.js launchMT5() → terminal64.exe açılır
+                → Kullanıcı OTP girer → MT5 bağlantısı kurulur
+                → Engine heartbeat sonraki döngüde MT5'e bağlanır → Dashboard
             → Electron kapanınca → API/Engine güvenle durdur
         → System tray (pystray) başlat
         → Alt process izle (crash'te yeniden başlat)
 ```
+
+**KRİTİK (Anayasa Kural 4.15):** MT5 terminal açma sorumluluğu SADECE Electron'dadır (mt5Manager.js → launchMT5). Engine hiçbir koşulda MT5'i başlatamaz. Bu kural DEĞİŞTİRİLEMEZ.
 
 **NOT:** Production modda UI, Electron ile açılır (titleBarStyle: 'hidden' + titleBarOverlay).
 Electron, Windows native pencere yönetimi kullanır (çoklu monitör, maximize, snap desteği).
@@ -364,7 +373,7 @@ Bölüm 3.3'teki standart adımlar (kök neden + etki analizi + onay) yeterlidir
 
 Yukarıdaki listelerde OLMAYAN tüm dosyalar. Standart dikkatle değiştirilebilir, İŞLEMİ BİTİR prosedürü yeterlidir.
 
-### 4.4 Siyah Kapı (30 Değiştirilemez Fonksiyon)
+### 4.4 Siyah Kapı (31 Değiştirilemez Fonksiyon)
 
 Bu fonksiyonların MANTIĞI değiştirilemez. İzin verilen: kanıtlı bug fix, performans iyileştirmesi (mantık ve çıktı değişmeden), güvenlik katmanı ekleme (mevcut korumayı azaltmadan).
 
@@ -394,7 +403,7 @@ Bu fonksiyonların MANTIĞI değiştirilemez. İzin verilen: kanıtlı bug fix, 
 | 15 | `_manage_active_trades()` | OLAY rejiminde pozisyon yönetimi |
 | 16 | `process_signals()` | Sinyal işleme (SABİT çağrı sırasıyla) |
 
-**MT5 Bridge Koruması (5 fonksiyon)**
+**MT5 Bridge Koruması (6 fonksiyon)**
 
 | # | Fonksiyon | Görev |
 |---|-----------|-------|
@@ -403,6 +412,7 @@ Bu fonksiyonların MANTIĞI değiştirilemez. İzin verilen: kanıtlı bug fix, 
 | 19 | `modify_position()` | SL/TP güncelleme (trailing stop için) |
 | 20 | `_safe_call()` | Timeout + devre kesici sarmalayıcı (ThreadPoolExecutor) |
 | 21 | `heartbeat()` | 10 saniyede bir MT5 bağlantı kontrolü |
+| 31 | `connect()` | MT5 bağlantı — launch=False modda terminal64.exe process kontrolü. MT5 çalışmıyorsa initialize() ÇAĞRILMAZ. MT5 açma sorumluluğu SADECE Electron'dadır |
 
 **Main Loop (3 fonksiyon)**
 
@@ -423,7 +433,7 @@ Bu fonksiyonların MANTIĞI değiştirilemez. İzin verilen: kanıtlı bug fix, 
 | 29 | `main()` | start_ustat.py | ProcessGuard + Mutex + subprocess — tek instance koruması |
 | 30 | `createWindow()` | desktop/main.js | Electron pencere oluşturma + API bekleme + crash handler |
 
-### 4.5 Değiştirilemez 14 Kural
+### 4.5 Değiştirilemez 15 Kural
 
 | # | Kural | Açıklama |
 |---|-------|----------|
@@ -441,6 +451,7 @@ Bu fonksiyonların MANTIĞI değiştirilemez. İzin verilen: kanıtlı bug fix, 
 | 12 | **Lifespan Sırası** | `Config → Database → MT5Bridge → DataPipeline → Ustat → Baba → Ogul → Engine` — constructor sırası DEĞİŞTİRİLEMEZ |
 | 13 | **Kapanış Sırası** | Electron ÖNCE kapanır → lifespan engine.stop() → MT5 disconnect → DB close. Tersine çevirmek renderer crash'e neden olur |
 | 14 | **Startup Performans** | API port hazır süresi ≤5sn olmalı. Gecikme tespit edilirse (≥10sn) kök neden araştırılır. TIME_WAIT socket temizliği start_ustat.py ProcessGuard'da yapılır |
+| 15 | **MT5 Başlatma Sorumluluğu** | MT5 terminal açma sorumluluğu SADECE Electron'dadır (mt5Manager.js → launchMT5). Engine hiçbir koşulda MT5'i başlatamaz. `connect(launch=False)` modunda `mt5.initialize()` çağrılmadan ÖNCE `terminal64.exe` process kontrolü yapılır. Process yoksa bağlantı atlanır. Bu koruma DEĞİŞTİRİLEMEZ |
 
 ---
 

@@ -58,6 +58,7 @@
 ## [5.9.0] — 2026-03-28 / 2026-04-08
 
 ### Security
+- #128 — MT5 auto-launch koruma: Engine connect(launch=False) artık mt5.initialize() çağırmadan ÖNCE terminal64.exe process kontrolü yapıyor — process yoksa bağlantı atlanır, MT5 asla otomatik açılmaz. Siyah Kapı #31 + Anayasa Kural 4.15 eklendi. 10/10 açma-kapama testi geçti
 - #127 — Electron single-instance kilidi HER ZAMAN aktif: `requestSingleInstanceLock()` artık API modda da çalışıyor — birden fazla pencere açılması engellendi (desktop/main.js)
 - #126 — Ajan singleton koruması: PID dosyası + psutil kontrolü ile çoklu ajan instance engellendi. Atomik komut kilitleme (.processing rename) ile aynı komutun birden fazla kez işlenmesi önlendi (ustat_agent.py v3.2.0)
 - #125 — handle_start_app Electron process kontrolü: Uygulama başlatılmadan önce hem API portu hem Electron process'i kontrol ediliyor — çift başlatma engellendi

@@ -33,6 +33,7 @@ from engine.baba import Baba, validate_expiry_dates
 from engine.config import Config
 from engine.data_pipeline import DataPipeline
 from engine.database import Database
+from engine.lifecycle_guard import LifecycleGuard, ShutdownReason
 from engine.logger import get_logger
 from engine.models.regime import RegimeType
 from engine.models.risk import RiskParams
@@ -179,6 +180,11 @@ class Engine:
         )
         logger.info("PreMarketBriefing başlatıldı.")
 
+        # ── Lifecycle Guard (v5.9.3) ──────────────────────────────
+        self.guard = LifecycleGuard()
+        # MT5Bridge'e guard referansı ver (emir kilidi için)
+        self.mt5._lifecycle_guard = self.guard
+
         # ── Durum ───────────────────────────────────────────────────
         self._running: bool = False
         self._cycle_count: int = 0
@@ -208,6 +214,10 @@ class Engine:
         logger.info("ÜSTAT Trading Engine başlatılıyor...")
         logger.info("=" * 60)
 
+        # v5.9.3: Lifecycle Guard aktifleştir + signal handlers kur
+        self.guard.activate()
+        self.guard.install_signal_handlers(engine_stop_fn=self.stop)
+
         # 0. Config durumu kontrolü (Madde 2.6)
         if not self.config.is_loaded:
             logger.critical("Config dosyası yüklenemedi — varsayılan değerlerle devam ediliyor!")
@@ -235,45 +245,27 @@ class Engine:
         if backup_path:
             logger.info(f"DB yedek alındı: {backup_path}")
 
-        # 1. MT5 bağlantısı — başarısız olursa 15sn aralıkla yeniden dene
-        MAX_CONNECT_RETRIES = 20  # 20 × 15sn = 5dk max bekleme
-        RETRY_INTERVAL = 15
+        # 1. MT5 bağlantısı — launch=False, MT5 açma sorumluluğu Electron'da.
+        #    MT5 çalışmıyorsa engine MT5 olmadan başlar, ana döngüde
+        #    heartbeat ile bağlantı kurulana kadar bekler.
+        if self._connect_mt5():
+            self.health.record_connection_established()
+            logger.info("MT5 bağlantısı kuruldu — engine tam modda başlıyor.")
 
-        for attempt in range(1, MAX_CONNECT_RETRIES + 1):
-            if self._shutdown_requested:
-                logger.info("Shutdown istendi — engine başlatma iptal.")
-                return
-
-            if self._connect_mt5():
-                break
-
-            if attempt < MAX_CONNECT_RETRIES:
+            # 1.1 Startup Smoke Test — kritik kontroller
+            from engine.health import run_startup_smoke_test
+            smoke = run_startup_smoke_test(self.mt5)
+            if not smoke.passed:
+                failed = [c for c in smoke.checks if c["status"] == "FAIL"]
+                fail_names = ", ".join(c["name"] for c in failed)
                 logger.warning(
-                    f"MT5 bağlantısı başarısız — {RETRY_INTERVAL}sn sonra "
-                    f"tekrar denenecek ({attempt}/{MAX_CONNECT_RETRIES})"
+                    f"Smoke test başarısız ({fail_names}) — "
+                    f"engine kısıtlı modda devam edecek."
                 )
-                # Heartbeat yaz ki watchdog bizi öldürmesin
-                self._write_heartbeat()
-                time.sleep(RETRY_INTERVAL)
-            else:
-                logger.critical(
-                    f"MT5 bağlantısı {MAX_CONNECT_RETRIES} denemede kurulamadı — "
-                    f"engine başlatılamıyor."
-                )
-                self._log_event("ENGINE_START_FAIL", "MT5 bağlantısı kurulamadı", "CRITICAL")
-                return
-
-        self.health.record_connection_established()
-
-        # 1.1 Startup Smoke Test — kritik kontroller
-        from engine.health import run_startup_smoke_test
-        smoke = run_startup_smoke_test(self.mt5)
-        if not smoke.passed:
-            failed = [c for c in smoke.checks if c["status"] == "FAIL"]
-            fail_names = ", ".join(c["name"] for c in failed)
-            logger.warning(
-                f"Smoke test başarısız ({fail_names}) — "
-                f"engine kısıtlı modda devam edecek."
+        else:
+            logger.info(
+                "MT5 bağlantısı yok — engine MT5 olmadan başlıyor. "
+                "Kullanıcı Electron'dan MT5 bağlantısı kurunca otomatik aktif olacak."
             )
             self._log_event(
                 "SMOKE_TEST_WARN",
@@ -295,6 +287,7 @@ class Engine:
 
         # 4. Ana döngü
         self._running = True
+        self.guard.set_running()  # v5.9.3: Emir kapısını aç — emirler artık gönderilebilir
         self._main_loop()
 
     def _run_weekly_maintenance(self, today: date) -> None:
@@ -408,10 +401,26 @@ class Engine:
                              None (varsayılan, auto mod) ise MT5 bağlantısı
                              varsa kapatma denenir, yoksa sadece uyarı yazılır.
         """
-        if not self._running:
+        if not self._running and not self.guard.is_alive:
             return
 
         logger.info(f"Engine durduruluyor: {reason}")
+
+        # v5.9.3: ÖNCE emir kapısını kapat — yeni emir ANINDA engellenir
+        self.guard.begin_shutdown(reason)
+
+        # v5.9.3: Uçuştaki emirlerin tamamlanmasını bekle (maks 10sn)
+        if self.guard.active_orders > 0:
+            logger.info(
+                f"Uçuştaki {self.guard.active_orders} emir bekleniyor (maks 10sn)..."
+            )
+            completed = self.guard.wait_for_orders_to_complete(timeout=10.0)
+            if not completed:
+                logger.error(
+                    f"UYARI: {self.guard.active_orders} emir timeout — "
+                    f"tamamlanmadan devam ediliyor"
+                )
+
         self._running = False
         self._shutdown_requested = True
 
@@ -530,6 +539,10 @@ class Engine:
         except Exception as exc:
             logger.error(f"DB close hatası: {exc}")
 
+        # v5.9.3: Guard'ı STOPPED durumuna geçir + signal handlers temizle
+        self.guard.set_stopped()
+        self.guard.uninstall_signal_handlers()
+
         logger.info("ÜSTAT Engine durduruldu.")
 
     # ═════════════════════════════════════════════════════════════════
@@ -551,7 +564,7 @@ class Engine:
             7. ÜSTAT brain (raporlama + strateji havuzu)
             8. Cycle loglama
         """
-        while self._running:
+        while self._running and not self.guard.is_shutdown:
             cycle_start = _time.monotonic()
             self._cycle_count += 1
 
@@ -727,7 +740,17 @@ class Engine:
         t0 = _pc()
 
         # ── 1. MT5 Heartbeat ──────────────────────────────────────
-        if not self._heartbeat_mt5():
+        if not self.mt5.is_connected:
+            # MT5 henüz bağlanmadı — sessizce bekle, cycle atla
+            # Kullanıcı Electron'dan OTP girince MT5 bağlanacak,
+            # heartbeat sonraki cycle'da başarılı olacak.
+            if not self._connect_mt5():
+                self._write_heartbeat()
+                return  # Bu cycle'ı atla, engine çalışmaya devam etsin
+            else:
+                self.health.record_connection_established()
+                logger.info("MT5 bağlantısı kuruldu — engine tam moda geçiyor.")
+        elif not self._heartbeat_mt5():
             raise _SystemStopError(
                 "MT5 bağlantısı kurtarılamadı — sistem durduruluyor"
             )
@@ -1063,12 +1086,26 @@ class Engine:
     # ═════════════════════════════════════════════════════════════════
 
     def _connect_mt5(self) -> bool:
-        """İlk MT5 bağlantısı — launch=True ile MT5'i açabilir.
+        """İlk MT5 bağlantısı — launch=False ile sadece çalışan MT5'e bağlanır.
+
+        ╔══════════════════════════════════════════════════════════════╗
+        ║  ANAYASA Kural 4.15 — MT5 Başlatma Sorumluluğu Kuralı      ║
+        ║                                                              ║
+        ║  Engine hiçbir koşulda MT5 terminal'ini başlatamaz.          ║
+        ║  MT5 açma sorumluluğu SADECE Electron'dadır:                 ║
+        ║    mt5Manager.js → launchMT5() → terminal64.exe              ║
+        ║                                                              ║
+        ║  launch=False parametresi DEĞİŞTİRİLEMEZ.                   ║
+        ║  launch=True ile çağrı SADECE mt5Manager.js akışından gelir. ║
+        ╚══════════════════════════════════════════════════════════════╝
+
+        Kullanıcı OTP girene kadar engine MT5 olmadan çalışır,
+        MT5 bağlandığında otomatik olarak aktif olur.
 
         Returns:
             Bağlantı başarılıysa True.
         """
-        return self.mt5.connect(launch=True)
+        return self.mt5.connect(launch=False)
 
     def _heartbeat_mt5(self) -> bool:
         """MT5 bağlantı kontrolü — kopmuşsa 3 kez reconnect dener.
