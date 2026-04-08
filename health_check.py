@@ -55,6 +55,24 @@ def header(title):
 # ═══════════════════════════════════════════════════
 header("TEST 1: MT5 Bağlantı")
 
+# ⚠️ UYARI (Anayasa Kural 4.15): mt5.initialize() MT5 kapalıysa
+# registry'den bulup OTOMATİK AÇAR. Bu script SADECE MT5 zaten
+# açıkken manuel çalıştırılmalıdır. Startup zincirinde ÇAĞRILMAZ.
+import subprocess as _sp
+try:
+    _chk = _sp.run(
+        ['tasklist', '/FI', 'IMAGENAME eq terminal64.exe', '/FO', 'CSV', '/NH'],
+        capture_output=True, text=True, timeout=5,
+        creationflags=0x08000000,
+    )
+    if 'terminal64.exe' not in _chk.stdout.lower():
+        fail("MT5 process çalışmıyor — önce MT5'i açın, sonra bu scripti çalıştırın.")
+        print(f"\n{RED}MT5 kapalı. health_check MT5'i otomatik açmaz (Anayasa 4.15).{RESET}")
+        sys.exit(1)
+except Exception as _e:
+    fail(f"MT5 process kontrol hatası: {_e}")
+    sys.exit(1)
+
 if not mt5.initialize():
     fail(f"mt5.initialize() başarısız: {mt5.last_error()}")
     print(f"\n{RED}MT5 bağlantısı kurulamadı, testler durduruluyor.{RESET}")

@@ -57,9 +57,53 @@ async def verify_mt5_connection():
         return {"connected": False, "message": str(e)}
 
 
-def _verify() -> dict:
-    """Senkron MT5 doğrulama (thread'de çalışır)."""
+@router.get("/mt5/saved-credentials")
+async def get_saved_credentials():
+    """Kayitli MT5 credentials (Windows Credential Manager)."""
     try:
+        import json
+        import keyring
+        raw = keyring.get_password("ustat-mt5", "credentials")
+        if raw:
+            data = json.loads(raw)
+            return {
+                "hasSaved": True,
+                "server": data.get("server", ""),
+                "login": data.get("login", ""),
+                "passwordMask": "******",
+            }
+    except Exception:
+        pass
+    return {"hasSaved": False}
+
+
+def _verify() -> dict:
+    """Senkron MT5 doğrulama (thread'de çalışır).
+
+    ╔══════════════════════════════════════════════════════════════╗
+    ║  ANAYASA Kural 4.15 — MT5 Başlatma Sorumluluğu Koruması     ║
+    ║                                                              ║
+    ║  mt5.initialize() çağrılmadan ÖNCE terminal64.exe process    ║
+    ║  kontrolü yapılır. MT5 çalışmıyorsa initialize() ÇAĞRILMAZ. ║
+    ║  MT5 açma sorumluluğu SADECE Electron'dadır.                 ║
+    ╚══════════════════════════════════════════════════════════════╝
+    """
+    try:
+        # ── Anayasa Kural 4.15: MT5 process kontrolü ──
+        # mt5.initialize() registry'den MT5'i otomatik açar.
+        # Bu endpoint sadece DOĞRULAMA yapmalı, MT5'i AÇMAMALI.
+        import subprocess as _sp
+        try:
+            _result = _sp.run(
+                ['tasklist', '/FI', 'IMAGENAME eq terminal64.exe', '/FO', 'CSV', '/NH'],
+                capture_output=True, text=True, timeout=5,
+                creationflags=0x08000000,
+            )
+            if 'terminal64.exe' not in _result.stdout.lower():
+                return {"connected": False, "message": "MT5 process calismiyorr"}
+        except Exception:
+            return {"connected": False, "message": "MT5 process kontrol hatasi"}
+
         import MetaTrader5 as mt5
 
         if not mt5.initialize():

@@ -227,7 +227,16 @@ def _get_monitor_work_area(x, y):
 
 
 class UstatWindowApi:
-    """JS API bridge — React'in window.electronAPI cagrilarini karsilar."""
+    """JS API bridge — React'in window.electronAPI cagrilarini karsilar.
+
+    ⚠️ ÖLÜ KOD UYARISI (v5.9.1+):
+    Bu sınıf pywebview modunda kullanılıyordu. v5.9.1'den itibaren
+    Electron kullanıldığı için bu sınıf ÇAĞRILMAZ. Ama referans için
+    korunuyor. İçindeki launch_mt5() metodu mt5.initialize() değil,
+    doğrudan terminal64.exe spawn eder — ama yine de Anayasa Kural 4.15
+    gereği MT5 açma sorumluluğu SADECE Electron'dadır.
+    Bu sınıfı yeniden aktive etmek YASAKTIR.
+    """
 
     def __init__(self, window_ref):
         self._window = window_ref

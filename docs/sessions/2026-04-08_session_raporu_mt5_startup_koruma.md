@@ -39,12 +39,40 @@ MT5 bir kez bile kendiliğinden açılmadı.
 | Değişiklik geçmişi | USTAT_ANAYASA.md | #3 kayıt (v2.1) eklendi |
 | Gelişim tarihçesi | USTAT_GELISIM_TARIHCESI.md | #128 maddesi eklendi |
 
+## Derin Tarama — Ek Açıklar (#129)
+
+İlk koruma sonrası yapılan kapsamlı taramada 3 ek açık tespit edildi ve kapatıldı:
+
+| Açık | Dosya | Risk | Çözüm |
+|---|---|---|---|
+| #1 KRİTİK | `api/routes/mt5_verify.py` _verify() | mt5.initialize() doğrudan çağrılıyordu — MT5 otomatik açabilirdi | terminal64.exe process kontrolü eklendi |
+| #2 DÜŞÜK | `health_check.py` | mt5.initialize() doğrudan çağrılıyordu | Process kontrolü + uyarı eklendi (zaten sadece manuel çalıştırılır) |
+| #3 DÜŞÜK | `start_ustat.py` UstatWindowApi | Ölü pywebview kodu launch_mt5() hâlâ dosyada | Ölü kod uyarısı + "yeniden aktive etmek YASAK" notu eklendi |
+
+## Tarama Kapsamı
+
+11 vektör tarandı:
+1. Tüm .py dosyalarında mt5.initialize() çağrıları
+2. Tüm .py dosyalarında connect(launch=True) çağrıları
+3. MT5Bridge.__init__ constructor davranışı
+4. _safe_call() reconnect mekanizması
+5. lifespan() Engine oluşturma sırası
+6. ustat_agent.py MT5 komutları
+7. start_ustat.py / restart_all.bat gizli çağrılar
+8. simulation.py / backtest.py MT5 bağlantısı
+9. data_pipeline.py / health.py import-time davranışı
+10. Electron/JS tarafı zamanlama
+11. Engine crash watchdog davranışı
+
 ## Değişen Dosyalar
 
 | Dosya | Bölge | Değişiklik |
 |---|---|---|
 | `engine/mt5_bridge.py` | Kırmızı + Siyah Kapı | Process kontrol bloğu güçlendirildi, except→return False |
 | `engine/main.py` | Kırmızı | _connect_mt5() docstring güçlendirildi |
+| `api/routes/mt5_verify.py` | API | _verify() fonksiyonuna process kontrolü eklendi |
+| `health_check.py` | Script | mt5.initialize() öncesi process kontrolü eklendi |
+| `start_ustat.py` | Kırmızı | Ölü UstatWindowApi sınıfına uyarı eklendi |
 | `CLAUDE.md` | Dokümantasyon | Siyah Kapı #31, Kural #15, Başlama Zinciri güncellendi |
 | `USTAT_ANAYASA.md` | Anayasa | Siyah Kapı #31, Kural 4.15, Değişiklik Geçmişi #3 |
-| `docs/USTAT_GELISIM_TARIHCESI.md` | Dokümantasyon | #128 maddesi |
+| `docs/USTAT_GELISIM_TARIHCESI.md` | Dokümantasyon | #128 + #129 maddeleri |
