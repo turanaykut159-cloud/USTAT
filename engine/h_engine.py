@@ -1241,15 +1241,16 @@ class HEngine:
             )
 
             if order_exists:
-                # TRADE_ACTION_MODIFY — atomik güncelleme (tek fiyat)
+                # TRADE_ACTION_MODIFY — stop + stoplimit birlikte güncelle
                 result = self.mt5.modify_pending_order(
                     hp.trailing_order_ticket, stop_price,
+                    new_stoplimit=limit_price,
                 )
                 if result is not None:
                     self._close_retry_counts.pop(f"tr_sl_{hp.ticket}", None)
                     logger.info(
                         f"Trailing Stop güncellendi: ticket={hp.trailing_order_ticket} "
-                        f"{hp.symbol} price={stop_price:.4f}"
+                        f"{hp.symbol} stop={stop_price:.4f} limit={limit_price:.4f}"
                     )
                 else:
                     retry_key = f"tr_sl_{hp.ticket}"

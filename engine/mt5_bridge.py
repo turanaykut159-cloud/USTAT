@@ -2618,15 +2618,23 @@ class MT5Bridge:
         self,
         order_ticket: int,
         new_price: float,
+        new_stoplimit: float | None = None,
     ) -> dict[str, Any] | None:
-        """Bekleyen STOP veya LIMIT emrinin fiyatını güncelle.
+        """Bekleyen STOP, LIMIT veya STOP LIMIT emrinin fiyatını güncelle.
 
         TRADE_ACTION_MODIFY ile atomik güncelleme — tek API çağrısı.
         PrimNet trailing stop ve OĞUL trailing SL için kullanılır.
 
+        STOP LIMIT emirlerde hem tetikleme (price) hem limit (stoplimit)
+        fiyatı birlikte güncellenmelidir — aksi halde MT5 ``10015 Invalid
+        price`` ile reddeder çünkü SELL STOP LIMIT'te stoplimit ≥ price,
+        BUY STOP LIMIT'te stoplimit ≤ price koşulu zorunludur.
+
         Args:
             order_ticket: Bekleyen emir ticket numarası.
             new_price: Yeni tetikleme/limit fiyatı.
+            new_stoplimit: STOP LIMIT emirler için yeni limit fiyatı.
+                None ise request'e eklenmez (geriye uyumlu).
 
         Returns:
             Değiştirme sonuç sözlüğü veya None.
@@ -2670,9 +2678,15 @@ class MT5Bridge:
                     "type_time": mt5.ORDER_TIME_DAY,
                 }
 
+                # STOP LIMIT emirlerde limit fiyatı da güncellenmeli
+                if new_stoplimit is not None:
+                    new_stoplimit = round(new_stoplimit / tick_size) * tick_size
+                    request["stoplimit"] = new_stoplimit
+
+                sl_info = f" stoplimit={new_stoplimit:.4f}" if new_stoplimit is not None else ""
                 logger.info(
                     f"Pending order modify: ticket={order_ticket} "
-                    f"price={new_price:.4f}"
+                    f"price={new_price:.4f}{sl_info}"
                 )
 
                 MODIFY_MAX_RETRIES = 3
@@ -2682,7 +2696,7 @@ class MT5Bridge:
                     if result is not None and result.retcode == mt5.TRADE_RETCODE_DONE:
                         logger.info(
                             f"Pending order modify başarılı (deneme {attempt}): "
-                            f"ticket={order_ticket} price={new_price:.4f}"
+                            f"ticket={order_ticket} price={new_price:.4f}{sl_info}"
                         )
                         return {"retcode": result.retcode, "comment": result.comment}
 
