@@ -945,6 +945,80 @@ class HEngine:
                 f"TP {old_tp:.4f}→{hp.current_tp:.4f} "
                 f"(PRİMNET yeniden hesaplandı)"
             )
+
+            # ── MT5 bekleyen emirleri yeniden yerleştir ──────────────
+            # Lot eklendiğinde hem fiyat hem volume değişir.
+            # modify_pending_order sadece fiyat günceller, volume/limit
+            # güncelleyemez → iptal + yeni emir.
+            if self._use_stop_limit and ref_price and ref_price > 0:
+                # ── 1. Trailing Stop Limit yenile ──────────────────
+                old_trail_ticket = hp.trailing_order_ticket
+                if old_trail_ticket > 0:
+                    self.mt5.cancel_pending_order(old_trail_ticket)
+                    logger.info(
+                        f"Netting SYNC: eski trailing emri iptal edildi "
+                        f"order={old_trail_ticket} {hp.symbol}"
+                    )
+
+                if hp.direction == "BUY":
+                    trail_dir = "SELL"
+                    trail_limit = self._prim_to_price(
+                        stop_prim + self._stop_limit_gap_prim, ref_price,
+                    )
+                else:
+                    trail_dir = "BUY"
+                    trail_limit = self._prim_to_price(
+                        stop_prim - self._stop_limit_gap_prim, ref_price,
+                    )
+
+                trail_result = self.mt5.send_stop_limit(
+                    hp.symbol, trail_dir, mt5_volume,
+                    hp.current_sl, trail_limit,
+                    comment=f"PRIMNET_TRAIL_{hp.ticket}",
+                )
+                if trail_result is not None:
+                    hp.trailing_order_ticket = trail_result["order_ticket"]
+                    logger.info(
+                        f"Netting SYNC: yeni trailing emri yerleştirildi "
+                        f"order={hp.trailing_order_ticket} {hp.symbol} "
+                        f"stop={hp.current_sl:.4f} limit={trail_limit:.4f} "
+                        f"vol={mt5_volume}"
+                    )
+                else:
+                    hp.trailing_order_ticket = 0
+                    logger.error(
+                        f"Netting SYNC: trailing emri gönderilemedi "
+                        f"{hp.symbol} — software SL devam edecek"
+                    )
+
+                # ── 2. Hedef Limit yenile ──────────────────────────
+                old_tgt_ticket = hp.target_order_ticket
+                if old_tgt_ticket > 0:
+                    self.mt5.cancel_pending_order(old_tgt_ticket)
+                    logger.info(
+                        f"Netting SYNC: eski hedef emri iptal edildi "
+                        f"order={old_tgt_ticket} {hp.symbol}"
+                    )
+
+                tgt_dir = "SELL" if hp.direction == "BUY" else "BUY"
+                tgt_result = self.mt5.send_limit(
+                    hp.symbol, tgt_dir, mt5_volume,
+                    hp.current_tp,
+                    comment=f"PRIMNET_TGT_{hp.ticket}",
+                )
+                if tgt_result is not None:
+                    hp.target_order_ticket = tgt_result["order_ticket"]
+                    logger.info(
+                        f"Netting SYNC: yeni hedef emri yerleştirildi "
+                        f"order={hp.target_order_ticket} {hp.symbol} "
+                        f"price={hp.current_tp:.4f} vol={mt5_volume}"
+                    )
+                else:
+                    hp.target_order_ticket = 0
+                    logger.warning(
+                        f"Netting SYNC: hedef emri gönderilemedi "
+                        f"{hp.symbol} — software TP devam edecek"
+                    )
         else:
             # Lot çıkarma — SL/TP koru, sadece hacim güncelle
             logger.info(
@@ -960,6 +1034,8 @@ class HEngine:
             "current_sl": hp.current_sl,
             "current_tp": hp.current_tp,
             "breakeven_hit": int(hp.breakeven_hit),
+            "trailing_order_ticket": hp.trailing_order_ticket,
+            "target_order_ticket": hp.target_order_ticket,
         })
 
         # Olay geçmişine kaydet
@@ -971,6 +1047,8 @@ class HEngine:
                 "old_entry": old_entry, "new_entry": mt5_entry,
                 "old_sl": old_sl, "new_sl": hp.current_sl,
                 "old_tp": old_tp, "new_tp": hp.current_tp,
+                "trail_ticket": hp.trailing_order_ticket,
+                "tgt_ticket": hp.target_order_ticket,
                 "breakeven_reset": old_be and not hp.breakeven_hit,
             },
         )
