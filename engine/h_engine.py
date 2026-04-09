@@ -1512,18 +1512,54 @@ class HEngine:
         return (price - ref_price) / one_prim
 
     def _prim_to_price(self, prim: float, ref_price: float) -> float:
-        """Prim seviyesini fiyata çevir.
+        """Prim seviyesini fiyata çevir ve VİOP adımına yuvarla.
 
         Fiyat = referans + prim × (referans × 0.01)
+        Sonuç VİOP fiyat adımına yuvarlanır (_viop_tick_size).
 
         Args:
             prim: Prim seviyesi (ör: +9.5, -1.5).
             ref_price: Uzlaşma (referans) fiyatı.
 
         Returns:
-            Fiyat değeri.
+            VİOP adımına yuvarlanmış fiyat değeri.
         """
-        return ref_price + prim * (ref_price * 0.01)
+        raw = ref_price + prim * (ref_price * 0.01)
+        step = self._viop_tick_size(raw)
+        # round(, 2) → floating point temizliği (VİOP digits=2)
+        return round(round(raw / step) * step, 2)
+
+    @staticmethod
+    def _viop_tick_size(price: float) -> float:
+        """VİOP pay vadeli kontrat fiyat adımını döndür.
+
+        MT5 API trade_tick_size alanı VİOP'ta fiyat aralığına göre
+        değişen adımları doğru raporlamıyor (hep 0.01 dönüyor).
+        Bu tablo Borsa İstanbul VİOP kurallarını uygular.
+
+        Kaynak: MT5 broker hata mesajı —
+        "Price step 0.05 [100.00-499.99]"
+
+        Args:
+            price: Fiyat seviyesi.
+
+        Returns:
+            O fiyat aralığı için geçerli minimum adım.
+        """
+        abs_price = abs(price)
+        if abs_price < 25.0:
+            return 0.01
+        if abs_price < 50.0:
+            return 0.02
+        if abs_price < 100.0:
+            return 0.05
+        if abs_price < 500.0:
+            return 0.05
+        if abs_price < 1000.0:
+            return 0.10
+        if abs_price < 2500.0:
+            return 0.25
+        return 0.50
 
     def _calc_primnet_trailing_sl(
         self, hp: HybridPosition, current_price: float,
