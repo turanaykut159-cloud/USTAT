@@ -1115,9 +1115,11 @@ class HEngine:
         # SL sadece daha iyi yöne taşınır
         if hp.direction == "BUY":
             if new_sl <= hp.current_sl:
+                self._verify_trailing_sync(hp, current_price, profit, swap)
                 return
         else:
             if new_sl >= hp.current_sl:
+                self._verify_trailing_sync(hp, current_price, profit, swap)
                 return
 
         # ── Stop Limit modu: bekleyen emir ile trailing ─────────────
@@ -1330,6 +1332,97 @@ class HEngine:
             f"Trailing SL: ticket={hp.ticket} {hp.symbol} "
             f"SL {old_sl:.4f} → {new_sl:.4f} (fiyat={current_price:.4f}, "
             f"kâr={total_pnl:.0f} TRY) [stop_limit]"
+        )
+
+    # ═════════════════════════════════════════════════════════════════
+    #  TRAILING EMİR DESYNC KONTROLÜ — v5.9.0
+    # ═════════════════════════════════════════════════════════════════
+
+    def _verify_trailing_sync(
+        self, hp: HybridPosition, current_price: float,
+        profit: float, swap: float,
+    ) -> None:
+        """MT5 trailing bekleyen emir ile bellek SL arasındaki desync'i tespit ve düzelt.
+
+        ``_check_trailing`` LOCK bloklandığında (yeni SL ≤ mevcut SL) çağrılır.
+        İki senaryoyu kapsar:
+
+        1. **Bilinen emir desync:** ``hp.trailing_order_ticket > 0`` ama MT5 emri
+           farklı fiyatta. ``modify_pending_order`` başarısızlığı sonrası oluşur.
+
+        2. **Yetim emir (restart sonrası):** ``hp.trailing_order_ticket == 0``
+           (bellekte tutulur, DB'de yok) ama MT5'te bu sembol için PRIMNET_TRAIL
+           emri var. Restart sonrası oluşur.
+
+        Her iki durumda da eski emir iptal edilip ``hp.current_sl`` seviyesinde
+        yenisi yerleştirilir.
+
+        Args:
+            hp: Hibrit pozisyon.
+            current_price: Güncel fiyat.
+            profit: MT5 profit.
+            swap: Birikmiş swap.
+        """
+        if not self._use_stop_limit:
+            return
+
+        # MT5'teki bekleyen emirleri al
+        pending = self.mt5.get_pending_orders(hp.symbol)
+        if not pending:
+            # Bekleyen emir yok — trailing ticket'ı sıfırla
+            if hp.trailing_order_ticket > 0:
+                hp.trailing_order_ticket = 0
+            return
+
+        trail_comment = f"PRIMNET_TRAIL_{hp.ticket}"
+
+        if hp.trailing_order_ticket > 0:
+            # ── Durum 1: Bilinen ticket ile desync kontrolü ─────────
+            order = next(
+                (o for o in pending
+                 if o.get("ticket") == hp.trailing_order_ticket),
+                None,
+            )
+            if order is None:
+                hp.trailing_order_ticket = 0
+                return
+        else:
+            # ── Durum 2: Restart sonrası yetim emir tarama ─────────
+            # Comment alanında PRIMNET_TRAIL_{ticket} ara
+            order = next(
+                (o for o in pending
+                 if trail_comment in str(o.get("comment", ""))),
+                None,
+            )
+            if order is None:
+                return  # Bu sembol için trail emri yok
+            # Yetim emri sahiplen
+            hp.trailing_order_ticket = order.get("ticket", 0)
+            logger.info(
+                f"Yetim trailing emir sahiplenildi: "
+                f"ticket={hp.trailing_order_ticket} {hp.symbol}"
+            )
+
+        mt5_price = order.get("price_open", 0.0)
+
+        # Desync var mı? (tick tolerance ile karşılaştır)
+        tick = self._viop_tick_size(hp.current_sl)
+        if abs(mt5_price - hp.current_sl) < tick * 1.5:
+            return  # Senkron, müdahale gerekmiyor
+
+        # ── DESYNC TESPİT — cancel + replace ───────────────────────
+        logger.warning(
+            f"Trailing emir desync: ticket={hp.trailing_order_ticket} "
+            f"{hp.symbol} MT5={mt5_price:.4f} vs bellek={hp.current_sl:.4f} "
+            f"— yeniden yerleştiriliyor"
+        )
+
+        self.mt5.cancel_pending_order(hp.trailing_order_ticket)
+        hp.trailing_order_ticket = 0
+
+        # hp.current_sl seviyesinde yeni emir yerleştir
+        self._trailing_via_stop_limit(
+            hp, hp.current_sl, current_price, profit, swap,
         )
 
     # ═════════════════════════════════════════════════════════════════

@@ -63,6 +63,7 @@
 - #131 — SortableCard bileşenine className prop desteği eklendi — Dashboard grid düzeni için gerekli CSS class geçişi
 
 ### Fixed
+- #143 — Trailing LOCK sonrası MT5-bellek desync tespiti: `modify_pending_order` başarısız olduğunda bellek/DB güncelleniyor ama MT5 emri eski fiyatta kalıyordu → LOCK bloğu desync'i gizliyordu. `_verify_trailing_sync()` eklendi: LOCK tetiklendiğinde MT5 bekleyen emri kontrol eder, fark varsa cancel+replace yapar. Restart sonrası yetim emir sahiplenmesi (comment-based) de destekleniyor (h_engine.py)
 - #142 — Trailing Stop modify STOP LIMIT emirlerde "Invalid price" hatası: `modify_pending_order` sadece `price` gönderiyordu, `stoplimit` eksikti → SELL STOP LIMIT'te stoplimit < price kuralı ihlali (retcode 10015). Fonksiyona opsiyonel `new_stoplimit` parametresi eklendi, `_trailing_via_stop_limit` limit fiyatını da geçiyor (mt5_bridge.py, h_engine.py)
 - #141 — Netting lot ekleme sonrası MT5 bekleyen emirler güncellenmiyor: `_sync_netting_volume` hp.current_sl'yi yeniden hesaplıyor ama MT5 stop limit emri eski fiyat+volume ile kalıyordu → iptal+yeni emir mekanizması eklendi (trailing + hedef, h_engine.py)
 - #140 — Hibrit devir "Invalid order" hatası: GCM VİOP düz STOP emirleri desteklemiyor — `send_stop()` → `send_stop_limit()` dönüşümü yapıldı. 3 nokta düzeltildi: `transfer_to_hybrid()`, `_trailing_via_stop_limit()`, `_daily_primnet_refresh()` (h_engine.py)
