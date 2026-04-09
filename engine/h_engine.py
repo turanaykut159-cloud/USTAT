@@ -421,18 +421,26 @@ class HEngine:
 
         if self._use_stop_limit and ref_price > 0:
             # ─ Bekleyen emirlerle SL/TP yönetimi ─
-            # SL: plain STOP (tetiklenince market — dolum garantili)
+            # SL: STOP LIMIT (GCM VİOP düz STOP desteklemez)
             # TP: plain LIMIT (fiyat hedefe ulaşınca tetiklenir)
 
-            # Trailing Stop emri (SL)
+            # Trailing Stop Limit emri (SL)
             if direction == "BUY":
                 trail_dir = "SELL"
+                # SELL STOP LIMIT: limit_price > stop_price
+                trail_limit = self._prim_to_price(
+                    stop_prim + self._stop_limit_gap_prim, ref_price,
+                )
             else:
                 trail_dir = "BUY"
+                # BUY STOP LIMIT: limit_price < stop_price
+                trail_limit = self._prim_to_price(
+                    stop_prim - self._stop_limit_gap_prim, ref_price,
+                )
 
-            trail_result = self.mt5.send_stop(
+            trail_result = self.mt5.send_stop_limit(
                 symbol, trail_dir, volume,
-                suggested_sl,
+                suggested_sl, trail_limit,
                 comment=f"PRIMNET_TRAIL_{ticket}",
             )
             if trail_result is None:
@@ -1108,13 +1116,13 @@ class HEngine:
         self, hp: HybridPosition, new_sl: float,
         current_price: float, profit: float, swap: float,
     ) -> None:
-        """Plain STOP bekleyen emir ile trailing stop güncelleme.
+        """STOP LIMIT bekleyen emir ile trailing stop güncelleme.
 
-        SELL pozisyon → BUY STOP (ask ≥ price → market buy → pozisyonu kapat)
-        BUY pozisyon  → SELL STOP (bid ≤ price → market sell → pozisyonu kapat)
+        SELL pozisyon → BUY STOP LIMIT (ask ≥ stop → limit fiyattan al → kapat)
+        BUY pozisyon  → SELL STOP LIMIT (bid ≤ stop → limit fiyattan sat → kapat)
 
-        Plain STOP emri tetiklendiğinde MARKET olarak çalışır — dolum garantili.
-        Stop Limit'ten farklı olarak limit fiyatı yoktur.
+        GCM VİOP düz STOP desteklemez — STOP LIMIT kullanılır.
+        stop_limit_gap_prim kadar gap ile limit fiyatı hesaplanır.
 
         Args:
             hp: Hibrit pozisyon.
@@ -1123,14 +1131,26 @@ class HEngine:
             profit: MT5 profit.
             swap: Birikmiş swap.
         """
-        # Stop fiyatı hesapla (limit yok — plain STOP)
         stop_price = new_sl
+        ref_price = hp.reference_price or self._get_reference_price(hp.symbol) or 0.0
+        sl_prim = self._price_to_prim(new_sl, ref_price) if ref_price > 0 else 0.0
+
         if hp.direction == "BUY":
-            # BUY pozisyon → SELL STOP (fiyat düşerse kapat)
+            # BUY pozisyon → SELL STOP LIMIT (fiyat düşerse kapat)
             order_direction = "SELL"
+            # SELL STOP LIMIT: limit_price > stop_price
+            limit_price = (
+                self._prim_to_price(sl_prim + self._stop_limit_gap_prim, ref_price)
+                if ref_price > 0 else stop_price
+            )
         else:
-            # SELL pozisyon → BUY STOP (fiyat yükselirse kapat)
+            # SELL pozisyon → BUY STOP LIMIT (fiyat yükselirse kapat)
             order_direction = "BUY"
+            # BUY STOP LIMIT: limit_price < stop_price
+            limit_price = (
+                self._prim_to_price(sl_prim - self._stop_limit_gap_prim, ref_price)
+                if ref_price > 0 else stop_price
+            )
 
         old_sl = hp.current_sl
 
@@ -1182,28 +1202,28 @@ class HEngine:
 
         # Yeni emir gönder (ilk kez veya eski iptal edilmiş)
         if hp.trailing_order_ticket == 0:
-            result = self.mt5.send_stop(
+            result = self.mt5.send_stop_limit(
                 hp.symbol, order_direction, hp.volume,
-                stop_price,
+                stop_price, limit_price,
                 comment=f"PRIMNET_TRAIL_{hp.ticket}",
             )
             if result is not None:
                 hp.trailing_order_ticket = result["order_ticket"]
                 logger.info(
-                    f"Trailing Stop yerleştirildi: "
+                    f"Trailing Stop Limit yerleştirildi: "
                     f"order={hp.trailing_order_ticket} {hp.symbol} "
-                    f"{order_direction} price={stop_price:.4f}"
+                    f"{order_direction} stop={stop_price:.4f} limit={limit_price:.4f}"
                 )
             else:
                 logger.error(
-                    f"Trailing Stop gönderilemedi: {hp.symbol} {order_direction} "
-                    f"price={stop_price:.4f} — software SL ile devam edilecek"
+                    f"Trailing Stop Limit gönderilemedi: {hp.symbol} {order_direction} "
+                    f"stop={stop_price:.4f} limit={limit_price:.4f} — software SL ile devam edilecek"
                 )
                 # MT5 emri gönderilemedi AMA bellekte SL güncellenir:
                 # Software SL (_check_software_sltp) güvenlik ağı olarak
                 # bu seviyeyi kullanacak. KİLİT bozulmaz.
 
-        # Bellek + DB güncelle (send_stop başarısız olsa bile!)
+        # Bellek + DB güncelle (send_stop_limit başarısız olsa bile!)
         # Bu sayede software SL her zaman doğru seviyede kalır
         # ve trailing KİLİT mekanizması bozulmaz.
         hp.current_sl = new_sl
@@ -1896,22 +1916,31 @@ class HEngine:
                 # Eski emirleri iptal et, yenilerini koy
                 self._cancel_stop_limit_orders(hp)
 
-                # Trailing Stop emri (SL)
+                # Trailing Stop Limit emri (SL)
+                sl_prim = self._price_to_prim(new_sl, new_ref)
                 if hp.direction == "BUY":
                     trail_dir = "SELL"
+                    # SELL STOP LIMIT: limit_price > stop_price
+                    trail_limit = self._prim_to_price(
+                        sl_prim + self._stop_limit_gap_prim, new_ref,
+                    )
                 else:
                     trail_dir = "BUY"
+                    # BUY STOP LIMIT: limit_price < stop_price
+                    trail_limit = self._prim_to_price(
+                        sl_prim - self._stop_limit_gap_prim, new_ref,
+                    )
 
-                trail_res = self.mt5.send_stop(
+                trail_res = self.mt5.send_stop_limit(
                     hp.symbol, trail_dir, hp.volume,
-                    new_sl,
+                    new_sl, trail_limit,
                     comment=f"PRIMNET_TRAIL_{ticket}",
                 )
                 if trail_res is not None:
                     hp.trailing_order_ticket = trail_res["order_ticket"]
                 else:
                     logger.error(
-                        f"PRİMNET yenileme trailing Stop başarısız: "
+                        f"PRİMNET yenileme trailing Stop Limit başarısız: "
                         f"ticket={ticket} {hp.symbol}"
                     )
 
