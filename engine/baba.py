@@ -2145,6 +2145,20 @@ class Baba:
 
         # L3: tüm pozisyonları kapat; başarısız ticket listesi saklanır
         if level == KILL_SWITCH_L3:
+            # v5.9.1 Fix #146: Önce h_engine bekleyen emirlerini iptal et.
+            # BABA _close_all_positions sadece MT5 pozisyonlarını kapatır —
+            # h_engine'in STOP LIMIT / LIMIT emirleri kalır ve yetim olur.
+            # force_close_all hem emirleri iptal eder hem pozisyonları kapatır.
+            h_eng = getattr(self, "h_engine", None)
+            if h_eng is not None:
+                try:
+                    h_failed = h_eng.force_close_all("KILL_SWITCH_L3")
+                    if h_failed:
+                        logger.error(
+                            f"L3 h_engine kapatma başarısız ticketlar: {h_failed}"
+                        )
+                except Exception as exc:
+                    logger.error(f"L3 h_engine.force_close_all hatası: {exc}")
             self._last_l3_failed_tickets = self._close_all_positions("KILL_SWITCH_L3")
 
     def _clear_kill_switch(self, reason: str) -> None:

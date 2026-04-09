@@ -163,6 +163,8 @@ CREATE TABLE IF NOT EXISTS hybrid_positions (
     state           TEXT    NOT NULL DEFAULT 'ACTIVE',
     breakeven_hit   INTEGER NOT NULL DEFAULT 0,
     trailing_active INTEGER NOT NULL DEFAULT 0,
+    trailing_order_ticket INTEGER DEFAULT 0,
+    target_order_ticket   INTEGER DEFAULT 0,
     transferred_at  TEXT    NOT NULL,
     closed_at       TEXT,
     close_reason    TEXT,
@@ -1343,15 +1345,16 @@ class Database:
             """INSERT OR REPLACE INTO hybrid_positions
                (ticket, symbol, direction, volume, entry_price, entry_atr,
                 initial_sl, initial_tp, current_sl, current_tp,
-                state, breakeven_hit, trailing_active, transferred_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                state, breakeven_hit, trailing_active,
+                trailing_order_ticket, target_order_ticket, transferred_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 data["ticket"], data["symbol"], data["direction"],
                 data["volume"], data["entry_price"], data["entry_atr"],
                 data["initial_sl"], data["initial_tp"],
                 data.get("current_sl", data["initial_sl"]),
                 data.get("current_tp", data["initial_tp"]),
-                "ACTIVE", 0, 0, self._now(),
+                "ACTIVE", 0, 0, 0, 0, self._now(),
             ),
         )
         logger.info(

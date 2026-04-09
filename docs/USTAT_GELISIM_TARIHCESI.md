@@ -55,7 +55,7 @@
 
 ---
 
-## [5.9.0] — 2026-03-28 / 2026-04-08
+## [5.9.0] — 2026-03-28 / 2026-04-09
 
 ### Added
 - #139 — Kill-Switch bilgi modalı: Risk Yönetimi sayfasında Kill-Switch kartına tıklanınca seviye, neden, tetiklenme zamanı ve engelli kontratları gösteren modal pencere açılıyor (RiskManagement.jsx, api/routes/risk.py, api/schemas.py)
@@ -63,6 +63,9 @@
 - #131 — SortableCard bileşenine className prop desteği eklendi — Dashboard grid düzeni için gerekli CSS class geçişi
 
 ### Fixed
+- #146 — Kill-Switch L3 h_engine koordinasyonu: BABA L3 tetiklendiğinde `h_engine.force_close_all()` çağrılıyor — STOP LIMIT/LIMIT bekleyen emirler artık yetim kalmıyor (baba.py, main.py)
+- #145 — Yön değişimi algılama: VİOP netting ile pozisyon yönü değişirse (ör. SELL→BUY) h_engine tüm PRIMNET emirlerini iptal edip hibrit takibi sonlandırıyor, UI'a critical bildirim gönderiyor (h_engine.py)
+- #144 — Lot çıkarma sonrası bekleyen emir güncelleme: `_sync_netting_volume` lot azaltma branch'inde PRIMNET trailing+target emirleri yeni volume ile iptal+yeniden oluşturuluyor (h_engine.py)
 - #143 — Trailing LOCK sonrası MT5-bellek desync tespiti: `modify_pending_order` başarısız olduğunda bellek/DB güncelleniyor ama MT5 emri eski fiyatta kalıyordu → LOCK bloğu desync'i gizliyordu. `_verify_trailing_sync()` eklendi: LOCK tetiklendiğinde MT5 bekleyen emri kontrol eder, fark varsa cancel+replace yapar. Restart sonrası yetim emir sahiplenmesi (comment-based) de destekleniyor (h_engine.py)
 - #142 — Trailing Stop modify STOP LIMIT emirlerde "Invalid price" hatası: `modify_pending_order` sadece `price` gönderiyordu, `stoplimit` eksikti → SELL STOP LIMIT'te stoplimit < price kuralı ihlali (retcode 10015). Fonksiyona opsiyonel `new_stoplimit` parametresi eklendi, `_trailing_via_stop_limit` limit fiyatını da geçiyor (mt5_bridge.py, h_engine.py)
 - #141 — Netting lot ekleme sonrası MT5 bekleyen emirler güncellenmiyor: `_sync_netting_volume` hp.current_sl'yi yeniden hesaplıyor ama MT5 stop limit emri eski fiyat+volume ile kalıyordu → iptal+yeni emir mekanizması eklendi (trailing + hedef, h_engine.py)

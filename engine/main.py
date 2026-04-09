@@ -155,6 +155,8 @@ class Engine:
         self.ogul.manuel_motor = self.manuel_motor
         self.h_engine.manuel_motor = self.manuel_motor
         self.baba.manuel_motor = self.manuel_motor
+        # v5.9.1: BABA'ya h_engine referansı ver (L3 Kill-Switch koordinasyonu)
+        self.baba.h_engine = self.h_engine
 
         # ── Sistem Sağlığı ─────────────────────────────────────────
         self.health = HealthCollector()

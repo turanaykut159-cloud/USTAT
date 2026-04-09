@@ -765,6 +765,51 @@ class HEngine:
             profit = mt5_pos.get("profit", 0.0)
             swap = mt5_pos.get("swap", 0.0)
 
+            # ── v5.9.1 Fix #145: Yön değişimi algılama ─────────────
+            # VİOP netting'de karşı yönde büyük emir girerse pozisyon
+            # yön değiştirebilir (ör. SELL 16 → BUY 4). h_engine ters
+            # yöndeki pozisyonu yönetemez — güvenli kapanış gerekir.
+            mt5_direction = mt5_pos.get("type")  # "BUY" veya "SELL"
+            if mt5_direction and mt5_direction != hp.direction:
+                logger.critical(
+                    f"YÖN DEĞİŞİMİ TESPİT: ticket={ticket} {hp.symbol} "
+                    f"beklenen={hp.direction} MT5={mt5_direction} — "
+                    f"bekleyen emirler iptal, hibrit yönetim sonlandırılıyor"
+                )
+                # Tüm PRIMNET bekleyen emirlerini iptal et
+                self._cancel_stop_limit_orders(hp)
+                # Pozisyonu KAPATMA — yeni yöndeki pozisyon kullanıcının
+                # manuel müdahalesi gerektirir. Sadece h_engine takibini kapat.
+                pnl = mt5_pos.get("profit", 0.0) + mt5_pos.get("swap", 0.0)
+                swap = mt5_pos.get("swap", 0.0)
+                self._finalize_close(hp, "DIRECTION_FLIP", pnl, swap)
+                # UI'a bildirim gönder
+                try:
+                    from engine.event_bus import emit as _emit
+                    _emit("notification", {
+                        "type": "hybrid_direction_flip",
+                        "title": "Hibrit Yön Değişimi",
+                        "message": (
+                            f"{hp.symbol}: Pozisyon yönü {hp.direction}→{mt5_direction} "
+                            f"değişti. Hibrit yönetim sonlandırıldı. "
+                            f"Pozisyon açık — manuel müdahale gerekli."
+                        ),
+                        "severity": "critical",
+                        "timestamp": now.isoformat(timespec="seconds"),
+                    })
+                except Exception:
+                    pass
+                self.db.insert_notification(
+                    notif_type="hybrid_direction_flip",
+                    title="Hibrit Yön Değişimi",
+                    message=(
+                        f"{hp.symbol}: {hp.direction}→{mt5_direction} yön değişimi. "
+                        f"Bekleyen emirler iptal edildi. Manuel müdahale gerekli."
+                    ),
+                    severity="critical",
+                )
+                continue
+
             # ── Netting hacim senkronizasyonu ─────────────────────
             mt5_volume = mt5_pos.get("volume", hp.volume)
             if mt5_volume != hp.volume:
@@ -950,16 +995,28 @@ class HEngine:
             # Lot eklendiğinde hem fiyat hem volume değişir.
             # modify_pending_order sadece fiyat günceller, volume/limit
             # güncelleyemez → iptal + yeni emir.
+            #
+            # v5.9.1: Sadece bilinen ticket değil, sembol için TÜM
+            # PRIMNET emirlerini iptal et. Restart sonrası yetim
+            # emirler kalabilir — duplikat riski.
             if self._use_stop_limit and ref_price and ref_price > 0:
-                # ── 1. Trailing Stop Limit yenile ──────────────────
-                old_trail_ticket = hp.trailing_order_ticket
-                if old_trail_ticket > 0:
-                    self.mt5.cancel_pending_order(old_trail_ticket)
-                    logger.info(
-                        f"Netting SYNC: eski trailing emri iptal edildi "
-                        f"order={old_trail_ticket} {hp.symbol}"
-                    )
+                # ── 0. TÜM eski PRIMNET emirlerini temizle ────────
+                trail_comment = f"PRIMNET_TRAIL_{hp.ticket}"
+                tgt_comment = f"PRIMNET_TGT_{hp.ticket}"
+                pending = self.mt5.get_pending_orders(hp.symbol)
+                for order in (pending or []):
+                    cmt = str(order.get("comment", ""))
+                    otk = order.get("ticket", 0)
+                    if trail_comment in cmt or tgt_comment in cmt:
+                        self.mt5.cancel_pending_order(otk)
+                        logger.info(
+                            f"Netting SYNC: eski PRIMNET emri iptal edildi "
+                            f"order={otk} {hp.symbol} comment={cmt}"
+                        )
+                hp.trailing_order_ticket = 0
+                hp.target_order_ticket = 0
 
+                # ── 1. Trailing Stop Limit yenile ──────────────────
                 if hp.direction == "BUY":
                     trail_dir = "SELL"
                     trail_limit = self._prim_to_price(
@@ -985,21 +1042,12 @@ class HEngine:
                         f"vol={mt5_volume}"
                     )
                 else:
-                    hp.trailing_order_ticket = 0
                     logger.error(
                         f"Netting SYNC: trailing emri gönderilemedi "
                         f"{hp.symbol} — software SL devam edecek"
                     )
 
                 # ── 2. Hedef Limit yenile ──────────────────────────
-                old_tgt_ticket = hp.target_order_ticket
-                if old_tgt_ticket > 0:
-                    self.mt5.cancel_pending_order(old_tgt_ticket)
-                    logger.info(
-                        f"Netting SYNC: eski hedef emri iptal edildi "
-                        f"order={old_tgt_ticket} {hp.symbol}"
-                    )
-
                 tgt_dir = "SELL" if hp.direction == "BUY" else "BUY"
                 tgt_result = self.mt5.send_limit(
                     hp.symbol, tgt_dir, mt5_volume,
@@ -1014,18 +1062,89 @@ class HEngine:
                         f"price={hp.current_tp:.4f} vol={mt5_volume}"
                     )
                 else:
-                    hp.target_order_ticket = 0
                     logger.warning(
                         f"Netting SYNC: hedef emri gönderilemedi "
                         f"{hp.symbol} — software TP devam edecek"
                     )
         else:
-            # Lot çıkarma — SL/TP koru, sadece hacim güncelle
+            # Lot çıkarma — SL/TP koru, bekleyen emirleri yeni volume ile güncelle
             logger.info(
                 f"Netting SYNC (lot çıkarma): ticket={hp.ticket} {hp.symbol} "
                 f"lot {old_volume}→{mt5_volume}, entry {old_entry:.4f}→{mt5_entry:.4f} "
-                f"(SL/TP korundu)"
+                f"(SL/TP korundu, bekleyen emirler güncelleniyor)"
             )
+
+            # v5.9.1: Lot çıkarmada da bekleyen emirleri güncelle.
+            # Eski lotlu emir tetiklenirse fazla lot = yön değişir.
+            # modify_pending_order volume güncelleyemez → iptal + yeni emir.
+            if self._use_stop_limit:
+                trail_comment = f"PRIMNET_TRAIL_{hp.ticket}"
+                tgt_comment = f"PRIMNET_TGT_{hp.ticket}"
+                pending = self.mt5.get_pending_orders(hp.symbol)
+                for order in (pending or []):
+                    cmt = str(order.get("comment", ""))
+                    otk = order.get("ticket", 0)
+                    if trail_comment in cmt or tgt_comment in cmt:
+                        self.mt5.cancel_pending_order(otk)
+                        logger.info(
+                            f"Netting SYNC (lot çıkarma): eski emir iptal "
+                            f"order={otk} {hp.symbol}"
+                        )
+                hp.trailing_order_ticket = 0
+                hp.target_order_ticket = 0
+
+                # Trailing SL yeniden yerleştir (yeni volume ile)
+                ref_price = hp.reference_price or self._get_reference_price(hp.symbol)
+                if ref_price and ref_price > 0:
+                    sl_prim = self._price_to_prim(hp.current_sl, ref_price)
+                    if hp.direction == "BUY":
+                        trail_dir = "SELL"
+                        trail_limit = self._prim_to_price(
+                            sl_prim + self._stop_limit_gap_prim, ref_price,
+                        )
+                    else:
+                        trail_dir = "BUY"
+                        trail_limit = self._prim_to_price(
+                            sl_prim - self._stop_limit_gap_prim, ref_price,
+                        )
+
+                    trail_result = self.mt5.send_stop_limit(
+                        hp.symbol, trail_dir, mt5_volume,
+                        hp.current_sl, trail_limit,
+                        comment=f"PRIMNET_TRAIL_{hp.ticket}",
+                    )
+                    if trail_result is not None:
+                        hp.trailing_order_ticket = trail_result["order_ticket"]
+                        logger.info(
+                            f"Netting SYNC (lot çıkarma): trailing yenilendi "
+                            f"order={hp.trailing_order_ticket} {hp.symbol} "
+                            f"vol={mt5_volume}"
+                        )
+                    else:
+                        logger.error(
+                            f"Netting SYNC (lot çıkarma): trailing gönderilemedi "
+                            f"{hp.symbol} — software SL devam edecek"
+                        )
+
+                    # TP yeniden yerleştir
+                    tgt_dir = "SELL" if hp.direction == "BUY" else "BUY"
+                    tgt_result = self.mt5.send_limit(
+                        hp.symbol, tgt_dir, mt5_volume,
+                        hp.current_tp,
+                        comment=f"PRIMNET_TGT_{hp.ticket}",
+                    )
+                    if tgt_result is not None:
+                        hp.target_order_ticket = tgt_result["order_ticket"]
+                        logger.info(
+                            f"Netting SYNC (lot çıkarma): TP yenilendi "
+                            f"order={hp.target_order_ticket} {hp.symbol} "
+                            f"vol={mt5_volume}"
+                        )
+                    else:
+                        logger.warning(
+                            f"Netting SYNC (lot çıkarma): TP gönderilemedi "
+                            f"{hp.symbol} — software TP devam edecek"
+                        )
 
         # DB güncelle
         self.db.update_hybrid_position(hp.ticket, {
@@ -1345,7 +1464,7 @@ class HEngine:
         """MT5 trailing bekleyen emir ile bellek SL arasındaki desync'i tespit ve düzelt.
 
         ``_check_trailing`` LOCK bloklandığında (yeni SL ≤ mevcut SL) çağrılır.
-        İki senaryoyu kapsar:
+        Üç senaryoyu kapsar:
 
         1. **Bilinen emir desync:** ``hp.trailing_order_ticket > 0`` ama MT5 emri
            farklı fiyatta. ``modify_pending_order`` başarısızlığı sonrası oluşur.
@@ -1353,6 +1472,9 @@ class HEngine:
         2. **Yetim emir (restart sonrası):** ``hp.trailing_order_ticket == 0``
            (bellekte tutulur, DB'de yok) ama MT5'te bu sembol için PRIMNET_TRAIL
            emri var. Restart sonrası oluşur.
+
+        3. **Duplikat emir (v5.9.1):** Birden fazla PRIMNET_TRAIL emri var.
+           Restart sırasında yarış durumu sonucu oluşur. Fazlalıklar iptal edilir.
 
         Her iki durumda da eski emir iptal edilip ``hp.current_sl`` seviyesinde
         yenisi yerleştirilir.
@@ -1375,6 +1497,31 @@ class HEngine:
             return
 
         trail_comment = f"PRIMNET_TRAIL_{hp.ticket}"
+
+        # ── v5.9.1: Duplikat trailing emir temizliği ───────────────
+        # Sembol için TÜM PRIMNET_TRAIL emirlerini bul
+        trail_orders = [
+            o for o in pending
+            if trail_comment in str(o.get("comment", ""))
+        ]
+
+        if len(trail_orders) > 1:
+            # Duplikat! En eski emri (en küçük ticket) koru, gerisini sil
+            trail_orders.sort(key=lambda o: o.get("ticket", 0))
+            kept = trail_orders[0]
+            for dup in trail_orders[1:]:
+                dup_ticket = dup.get("ticket", 0)
+                self.mt5.cancel_pending_order(dup_ticket)
+                logger.warning(
+                    f"Duplikat trailing emir silindi: order={dup_ticket} "
+                    f"{hp.symbol} (toplam {len(trail_orders)} emir vardı)"
+                )
+            # Kalan emri sahiplen
+            hp.trailing_order_ticket = kept.get("ticket", 0)
+            logger.info(
+                f"Duplikat temizliği sonrası trailing emir: "
+                f"order={hp.trailing_order_ticket} {hp.symbol}"
+            )
 
         if hp.trailing_order_ticket > 0:
             # ── Durum 1: Bilinen ticket ile desync kontrolü ─────────
@@ -1556,6 +1703,8 @@ class HEngine:
                 trailing_active=bool(row.get("trailing_active", 0)),
                 transferred_at=row.get("transferred_at", ""),
                 db_id=row["id"],
+                trailing_order_ticket=row.get("trailing_order_ticket", 0) or 0,
+                target_order_ticket=row.get("target_order_ticket", 0) or 0,
             )
             # PRİMNET: trailing her zaman aktif — restart sonrası da
             hp.breakeven_hit = True
