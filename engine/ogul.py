@@ -2465,7 +2465,7 @@ class Ogul:
         # ── 2. MOD BELİRLE ─────────────────────────────────────────
         mode = self._determine_trade_mode(
             trade, current_profit_pts, atr_val, trend,
-            close, high, low, volume, open_,
+            close, high, low, volume, open_, liq_class,
         )
 
         # ── 3. MODA GÖRE YÖNET ────────────────────────────────────
@@ -2510,6 +2510,7 @@ class Ogul:
         low: np.ndarray,
         volume: np.ndarray,
         open_: np.ndarray,
+        liq_class: str = "B",
     ) -> str:
         """Pozisyonun mevcut modunu belirle.
 
@@ -2522,7 +2523,9 @@ class Ogul:
 
         # Henüz breakeven'a ulaşmadı
         if not trade.breakeven_hit:
-            if profit_pts >= atr_val:
+            # O-10: Likidite sınıfına göre breakeven eşiği
+            be_mult = BE_ATR_BY_CLASS.get(liq_class, 1.0)
+            if profit_pts >= be_mult * atr_val:
                 # Breakeven çek
                 trade.breakeven_hit = True
                 try:
