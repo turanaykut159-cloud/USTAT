@@ -106,8 +106,16 @@ const isApiMode = process.env.USTAT_API_MODE === '1';
 const gotTheLock = app.requestSingleInstanceLock();
 elog(`requestSingleInstanceLock: ${gotTheLock} (apiMode=${isApiMode})`);
 if (!gotTheLock) {
-  elog('Baska bir USTAT Electron instance calisiyor, cikis yapiliyor.');
-  app.quit();
+  // KRITIK BUG FIX (v5.9.2): app.quit() ASENKRON — whenReady() promise'i
+  // yine fire eder ve createWindow() cagrilir, bir HAYALET pencere olusur.
+  // Bu hayalet pencere Chromium userData mutex'ini tutar ve sonraki tum
+  // baslatma denemelerini sonsuza dek bloke eder.
+  //
+  // Cozum: app.exit(42) ile SENKRON cikis. Exit code 42 parent Python'a
+  // 'singleton catismasi' sinyalidir — start_ustat.py bunu yakalar,
+  // orphan Electron sweep yapar ve 1 kez retry dener.
+  elog('SINGLETON_CONFLICT: Baska bir USTAT Electron instance calisiyor, exit(42).');
+  app.exit(42);
 } else {
   app.on('second-instance', () => {
     elog('İkinci instance algılandı — mevcut pencere öne getiriliyor');
