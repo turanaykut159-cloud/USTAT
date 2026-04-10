@@ -127,10 +127,14 @@ def _build_layers() -> dict:
     ogul_info: dict = {}
     if ogul:
         active_trades = getattr(ogul, "active_trades", {})
+        # O-1/D-7: daily_loss_stop BABA tarafina devredildi — Anayasa Kural 10.
+        # OGUL'da stale field kaldirildi; BABA kill_switch_level >= L2 (=2)
+        # ise gunluk/ayl1k kayip tetigi aktiftir.
+        _ks_level = getattr(baba, "kill_switch_level", 0) if baba else 0
         ogul_info = {
             "active_trade_count": len(active_trades),
             "active_symbols": sorted(active_trades.keys()) if active_trades else [],
-            "daily_loss_stop": getattr(ogul, "_daily_loss_stop", False),
+            "daily_loss_stop": _ks_level >= 2,
             "universal_management": True,  # USE_UNIVERSAL_MANAGEMENT flag
         }
 

@@ -418,8 +418,8 @@ class Ogul:
 
         # ── Sinyal tetikleme (M5 mum kapanışında) ──
         self._last_m5_candle_ts: str = ""           # son işlenen M5 mum timestamp
-        self._daily_loss_stop: bool = False          # %3 günlük zarar durdurucu
-        self._daily_loss_stop_date: date | None = None  # sıfırlama takibi
+        # O-1/D-7: Gunluk/aylik kayip state BABA'ya devredildi (Anayasa Kural 10)
+        # _daily_loss_stop, _monthly_* field'lari kaldirildi - olu stateydi.
         self._symbol_loss_count: dict[str, int] = {}    # sembol bazlı ardışık zarar
         self._symbol_loss_date: date | None = None       # günlük sıfırlama
 
@@ -427,11 +427,6 @@ class Ogul:
         # R-Multiple istatistikleri
         self._r_multiple_history: list[float] = []        # kapanan işlemlerin R değerleri
         self._r_expectancy: float = 0.0                   # (WR × Avg Win R) - (LR × 1R)
-        # Aylık drawdown takibi
-        self._monthly_start_equity: float = 0.0           # ay başı equity
-        self._monthly_start_date: date | None = None
-        self._monthly_dd_stop: bool = False               # aylık limit aşıldı mı
-        self._monthly_dd_warn: bool = False               # uyarı seviyesi
         # Pyramid tracking per symbol
         self._pyramid_last_add: dict[str, float] = {}     # symbol → son ekleme fiyatı
 
@@ -539,10 +534,9 @@ class Ogul:
         now = datetime.now()
 
         # ── Günlük sıfırlamalar ────────────────────────────────────
+        # O-1/D-7: Gunluk kayip reset BABA _check_period_resets'te yapilir.
+        # OGUL sadece sembol-bazli ardisik kayip sayacini sifirlar.
         today = now.date()
-        if self._daily_loss_stop_date != today:
-            self._daily_loss_stop = False
-            self._daily_loss_stop_date = today
         if self._symbol_loss_date != today:
             self._symbol_loss_count.clear()
             self._symbol_loss_date = today
