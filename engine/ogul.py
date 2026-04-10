@@ -2507,7 +2507,7 @@ class Ogul:
         low: np.ndarray,
         volume: np.ndarray,
         open_: np.ndarray,
-        liq_class: str = "B",
+        liq_class: str = "A",
     ) -> str:
         """Pozisyonun mevcut modunu belirle.
 
