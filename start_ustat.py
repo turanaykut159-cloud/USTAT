@@ -695,27 +695,64 @@ def run_webview_process(parent_pid=None):
     env["USTAT_API_PORT"] = str(API_PORT)
 
     slog(f"[APP] Electron baslatiliyor: {' '.join(electron_args)}")
-    try:
-        electron_proc = _sp.Popen(
-            electron_args,
-            cwd=desktop_dir,
-            env=env,
-        )
-        slog(f"[APP] Electron baslatildi (PID {electron_proc.pid})")
 
-        # Electron PID'ini kaydet (ProcessGuard üzerinden — hayalet koruması)
-        global _electron_pid_for_cleanup
-        _electron_pid_for_cleanup = electron_proc.pid
-        _write_electron_pid(electron_proc.pid)
+    # ── Singleton retry mekanizması (v5.9.2) ─────────────────────
+    # main.js singleton çatışması algılarsa app.exit(42) ile çıkar.
+    # Exit code 42 alırsak: ProcessGuard ile orphan Electron sweep + 1 kez retry.
+    # Bu sayede bir önceki çöken oturumdan kalan hayalet Electron bile olsa
+    # uygulama kendini onarır ve ikinci denemede açılır.
+    SINGLETON_CONFLICT_EXIT_CODE = 42
+    MAX_SINGLETON_RETRIES = 1
+    _singleton_retries = 0
 
-        # Electron kapanana kadar bekle (BLOKLAR)
-        exit_code = electron_proc.wait()
-        slog(f"[APP] Electron kapandi (exit code: {exit_code})")
-    except FileNotFoundError:
-        slog("[APP] HATA: Electron bulunamadi! 'cd desktop && npm install' calistirin.")
-        # Electron yoksa API'yi de kapat
-    except Exception as e:
-        slog(f"[APP] Electron hata: {e}")
+    while True:
+        try:
+            electron_proc = _sp.Popen(
+                electron_args,
+                cwd=desktop_dir,
+                env=env,
+            )
+            slog(f"[APP] Electron baslatildi (PID {electron_proc.pid})")
+
+            # Electron PID'ini kaydet (ProcessGuard üzerinden — hayalet koruması)
+            global _electron_pid_for_cleanup
+            _electron_pid_for_cleanup = electron_proc.pid
+            _write_electron_pid(electron_proc.pid)
+
+            # Electron kapanana kadar bekle (BLOKLAR)
+            exit_code = electron_proc.wait()
+            slog(f"[APP] Electron kapandi (exit code: {exit_code})")
+        except FileNotFoundError:
+            slog("[APP] HATA: Electron bulunamadi! 'cd desktop && npm install' calistirin.")
+            break
+        except Exception as e:
+            slog(f"[APP] Electron hata: {e}")
+            break
+
+        # Singleton çatışması retry mantığı
+        if exit_code == SINGLETON_CONFLICT_EXIT_CODE and _singleton_retries < MAX_SINGLETON_RETRIES:
+            _singleton_retries += 1
+            slog(f"[APP] SINGLETON_CONFLICT (exit 42) — orphan Electron sweep + retry {_singleton_retries}/{MAX_SINGLETON_RETRIES}")
+            try:
+                # ProcessGuard ile orphan Electron temizliği
+                from engine.process_guard import ProcessGuard
+                _pg = ProcessGuard(ustat_dir)
+                orphans = _pg._find_orphan_electrons()
+                if orphans:
+                    slog(f"[APP] Orphan Electron bulundu: {orphans} — tree-kill")
+                    for opid in orphans:
+                        try:
+                            _pg._tree_kill(opid)
+                        except Exception as _e:
+                            slog(f"[APP] tree-kill hata (PID {opid}): {_e}")
+                else:
+                    slog("[APP] Orphan Electron bulunamadi")
+                time.sleep(1.5)  # Chromium mutex release için bekle
+            except Exception as _pg_e:
+                slog(f"[APP] ProcessGuard sweep hata: {_pg_e}")
+            continue  # Electron'u tekrar başlat
+
+        break  # Normal exit veya retry limiti aşıldı
 
     # ── 3. Electron kapandi — Engine/API kapat ────────────────────
     slog("[APP] Pencere kapandi — Engine/API kapatiliyor...")
