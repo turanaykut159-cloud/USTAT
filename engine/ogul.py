@@ -937,7 +937,8 @@ class Ogul:
             es = last_valid(h1_ema_s)
             if ef is not None and es is not None:
                 gap_pct = abs(ef - es) / es if es > 0 else 0
-                if gap_pct > 0.001:  # EMA farkı %0.1'den büyükse yön var
+                # O-6: H1 slope eşiği %0.1 → %0.5 (yanal piyasada yanlış yön engeli)
+                if gap_pct > 0.005:  # EMA farkı %0.5'ten büyükse yön var
                     if ef > es:
                         votes["BUY"] += 1
                     else:
@@ -968,17 +969,17 @@ class Ogul:
         except Exception as exc:
             logger.warning(f"SE3 yön hatası [{symbol}]: {exc}")
 
-        # ── Konsensüs: v5.9.2 — 1/3 bile yeterli, strength'e yansır ──
-        # 3/3 = güçlü, 2/3 = normal, 1/3 = zayıf (ama yine de yön var)
+        # ── Konsensüs: C-2 — 3 kaynaktan en az 2 çoğunluk (sert çoğunluk)
+        # 3/3 = güçlü, 2/3 = minimum geçerli. 1/3 yeterli DEĞİL.
         buy_v = votes["BUY"]
         sell_v = votes["SELL"]
 
-        if buy_v > sell_v and buy_v >= 1:
+        if buy_v > sell_v and buy_v >= 2:
             logger.debug(
                 f"Yön konsensüsü [{symbol}]: BUY ({buy_v}/3)"
             )
             return "BUY"
-        elif sell_v > buy_v and sell_v >= 1:
+        elif sell_v > buy_v and sell_v >= 2:
             logger.debug(
                 f"Yön konsensüsü [{symbol}]: SELL ({sell_v}/3)"
             )
