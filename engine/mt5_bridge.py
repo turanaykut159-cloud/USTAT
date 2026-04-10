@@ -116,6 +116,14 @@ class MT5Bridge:
         self._last_order_error: dict[str, Any] = {}
         # modify_position() başarısız olduğunda MT5 hata detayı (hibrit devir vb.)
         self._last_modify_error: dict[str, Any] = {}
+        # send_stop_limit() None döndüğünde retcode/comment detayı
+        # (hibrit devir başarısızlığında zengin modal için).
+        self._last_stop_limit_error: dict[str, Any] = {}
+        # send_limit() None döndüğünde retcode/comment detayı (hedef emir)
+        self._last_limit_error: dict[str, Any] = {}
+        # MT5 terminalinde Algo Trading butonu durumu (heartbeat'te guncellenir)
+        # False => retcode 10027 riski, kullanici Ctrl+E ile acmali
+        self._trade_allowed: bool = True
         # Emir gönderimi tek seferde bir çağrı (manuel + engine race önlemi)
         # v5.9.2-fix: RLock — send_order içinden close_position çağrılabilsin (deadlock önlemi)
         self._order_lock: threading.RLock = threading.RLock()
@@ -751,6 +759,16 @@ class MT5Bridge:
         finally:
             self._connected = False
 
+    # ── is_trade_allowed ─────────────────────────────────────────────
+    def is_trade_allowed(self) -> bool:
+        """MT5 Algo Trading butonu acik mi?
+
+        heartbeat() her 10 saniyede bu degeri gunceller. Emir gonderimi
+        oncesinde kontrol edilmez (MT5 retcode 10027 gosterir), ancak
+        UI'da uyari banner'i icin okunur.
+        """
+        return self._trade_allowed
+
     # ── heartbeat ────────────────────────────────────────────────────
     def heartbeat(self) -> bool:
         """Bağlantı kontrolü — 10 saniyede bir çağrılmalı.
@@ -783,6 +801,17 @@ class MT5Bridge:
                 if self._health:
                     self._health.record_disconnect()
                 return self._ensure_connection()
+
+            # MT5 Algo Trading butonu durumu — False ise emir gonderimi blokajli
+            prev_allowed = self._trade_allowed
+            self._trade_allowed = bool(getattr(info, 'trade_allowed', True))
+            if prev_allowed and not self._trade_allowed:
+                logger.warning(
+                    "MT5 Algo Trading KAPANDI — emir gonderimi bloke. "
+                    "Kullanici Ctrl+E ile acmali."
+                )
+            elif not prev_allowed and self._trade_allowed:
+                logger.info("MT5 Algo Trading yeniden ACIK.")
 
             # Ping kaydı (başarılı heartbeat)
             if self._health:
@@ -2512,9 +2541,13 @@ class MT5Bridge:
         Returns:
             Emir sonuç sözlüğü (order_ticket, retcode) veya None.
         """
+        # Yeni cagri — onceki hata durumunu sifirla
+        self._last_limit_error = {}
+
         with self._order_lock, self._write_lock:
             if not self._ensure_connection():
                 logger.error("send_limit: MT5 bağlantısı yok")
+                self._last_limit_error = {"last_error": "MT5 bağlantısı yok"}
                 return None
 
             try:
@@ -2524,6 +2557,9 @@ class MT5Bridge:
                 sym_info = self._safe_call(mt5.symbol_info, mt5_name)
                 if sym_info is None:
                     logger.error(f"send_limit: symbol_info alınamadı [{symbol}]")
+                    self._last_limit_error = {
+                        "last_error": f"symbol_info alınamadı: {symbol}",
+                    }
                     return None
 
                 tick_size = sym_info.trade_tick_size
@@ -2547,6 +2583,9 @@ class MT5Bridge:
                     mt5_type = mt5.ORDER_TYPE_SELL_LIMIT
                 else:
                     logger.error(f"send_limit: Geçersiz yön: {direction}")
+                    self._last_limit_error = {
+                        "last_error": f"Geçersiz yön: {direction}",
+                    }
                     return None
 
                 # Fiyat ilişkisi doğrulama
@@ -2586,6 +2625,9 @@ class MT5Bridge:
                 if result is None:
                     err = mt5.last_error()
                     logger.error(f"send_limit None [{symbol}]: {err}")
+                    self._last_limit_error = {
+                        "last_error": str(err) if err else "order_send None",
+                    }
                     return None
 
                 accepted = {mt5.TRADE_RETCODE_DONE, mt5.TRADE_RETCODE_PLACED}
@@ -2594,6 +2636,10 @@ class MT5Bridge:
                         f"Limit emri reddedildi [{symbol}]: "
                         f"retcode={result.retcode}, comment={result.comment}"
                     )
+                    self._last_limit_error = {
+                        "retcode": int(result.retcode),
+                        "comment": str(result.comment) if result.comment else "",
+                    }
                     return None
 
                 order_ticket = result.order
@@ -2611,6 +2657,7 @@ class MT5Bridge:
 
             except Exception as exc:
                 logger.error(f"send_limit istisnası [{symbol}]: {exc}")
+                self._last_limit_error = {"exception": str(exc)}
                 return None
 
     # ── modify_pending_order ─────────────────────────────────────────
@@ -2813,9 +2860,13 @@ class MT5Bridge:
         Returns:
             Emir sonuç sözlüğü (order_ticket, retcode) veya None.
         """
+        # Yeni cagri — onceki hata durumunu sifirla
+        self._last_stop_limit_error = {}
+
         with self._order_lock, self._write_lock:
             if not self._ensure_connection():
                 logger.error("send_stop_limit: MT5 bağlantısı yok")
+                self._last_stop_limit_error = {"last_error": "MT5 bağlantısı yok"}
                 return None
 
             try:
@@ -2825,6 +2876,9 @@ class MT5Bridge:
                 sym_info = self._safe_call(mt5.symbol_info, mt5_name)
                 if sym_info is None:
                     logger.error(f"send_stop_limit: symbol_info alınamadı [{symbol}]")
+                    self._last_stop_limit_error = {
+                        "last_error": f"symbol_info alınamadı: {symbol}",
+                    }
                     return None
 
                 tick_size = sym_info.trade_tick_size
@@ -2849,6 +2903,9 @@ class MT5Bridge:
                     mt5_type = mt5.ORDER_TYPE_SELL_STOP_LIMIT
                 else:
                     logger.error(f"send_stop_limit: Geçersiz yön: {direction}")
+                    self._last_stop_limit_error = {
+                        "last_error": f"Geçersiz yön: {direction}",
+                    }
                     return None
 
                 # Fiyat ilişkisi doğrulama
@@ -2902,6 +2959,9 @@ class MT5Bridge:
                     logger.error(
                         f"send_stop_limit None [{symbol}]: {err}"
                     )
+                    self._last_stop_limit_error = {
+                        "last_error": str(err) if err else "order_send None",
+                    }
                     return None
 
                 # RETCODE_PLACED (10008) = bekleyen emir kabul edildi
@@ -2912,6 +2972,10 @@ class MT5Bridge:
                         f"Stop Limit reddedildi [{symbol}]: "
                         f"retcode={result.retcode}, comment={result.comment}"
                     )
+                    self._last_stop_limit_error = {
+                        "retcode": int(result.retcode),
+                        "comment": str(result.comment) if result.comment else "",
+                    }
                     return None
 
                 order_ticket = result.order
@@ -2930,6 +2994,7 @@ class MT5Bridge:
 
             except Exception as exc:
                 logger.error(f"send_stop_limit istisnası [{symbol}]: {exc}")
+                self._last_stop_limit_error = {"exception": str(exc)}
                 return None
 
     # ── modify_stop_limit ───────────────────────────────────────────
