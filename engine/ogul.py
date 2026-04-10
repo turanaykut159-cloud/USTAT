@@ -563,7 +563,8 @@ class Ogul:
 
         # v5.9.2-fix: L3 kill-switch kontrolü — OĞUL seviyesinde ikinci savunma hattı
         # main.py OR koşulunun herhangi bir şekilde bypass edilmesine karşı koruma
-        if self.baba and getattr(self.baba, "_kill_switch_level", 0) >= 3:
+        # Y-1: public `kill_switch_level` property kullan (private alana dokunma)
+        if self.baba and getattr(self.baba, "kill_switch_level", 0) >= 3:
             logger.warning("process_signals: L3 aktif — sinyal üretimi engellendi")
             return
 
