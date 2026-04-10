@@ -2315,19 +2315,31 @@ class Baba:
     def activate_kill_switch_l1(self, symbol: str, reason: str) -> None:
         """L1: Tek kontrat durdur (anomali tespitinde dışardan çağrılır).
 
+        v5.9.3 — BULGU #4 fix: Eski sürümde state mutasyonu kilit dışındaydı
+        → ``_activate_kill_switch`` ile concurrent yarış durumunda Anayasa
+        Kural 3 (monotonluk) ihlal edilebilirdi: Thread A L2 atıyor, Thread B
+        eski ``_kill_switch_level`` değerini okuyup ``<= L1`` kontrolünü
+        geçiyor ve ``_kill_switch_level = L1`` overwrite ediyordu (L2→L1
+        düşürme + L2 details kaybı). Ayrıca ``_killed_symbols.add`` set
+        iterasyonu sırasında concurrent mutasyona yol açabilirdi. Artık tüm
+        state yazımı ``_ks_lock`` altında (``_activate_kill_switch`` ile aynı
+        pattern). Log çağrıları kilit dışında tutuluyor (deadlock riski yok).
+
         Args:
             symbol: Durdurulacak kontrat.
             reason: Neden.
         """
-        # L1 özel: mevcut seviyeyi yükseltmez, sadece sembolü ekler
-        if self._kill_switch_level <= KILL_SWITCH_L1:
-            self._kill_switch_level = KILL_SWITCH_L1
-            self._kill_switch_details = {
-                "reason": reason,
-                "message": f"L1 kontrat durdurma: {symbol} — {reason}",
-                "triggered_at": datetime.now().isoformat(),
-            }
-        self._killed_symbols.add(symbol)
+        with self._ks_lock:
+            # L1 özel: mevcut seviyeyi yükseltmez, sadece sembolü ekler.
+            # L2/L3 aktifse level/details alanlarına dokunmayız (monotonluk).
+            if self._kill_switch_level <= KILL_SWITCH_L1:
+                self._kill_switch_level = KILL_SWITCH_L1
+                self._kill_switch_details = {
+                    "reason": reason,
+                    "message": f"L1 kontrat durdurma: {symbol} — {reason}",
+                    "triggered_at": datetime.now().isoformat(),
+                }
+            self._killed_symbols.add(symbol)
 
         logger.warning(f"KILL-SWITCH L1: {symbol} durduruldu — {reason}")
         self._log_kill_event(
