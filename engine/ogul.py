@@ -1845,6 +1845,9 @@ class Ogul:
                     return
                 else:
                     # Kapatma da başarısız — KRİTİK: korumasız pozisyon açık!
+                    # C-4: FILLED yazma, increment_daily, DB.insert_trade bypass.
+                    # Trade state SIGNAL'a geri alınır, aktiften silinir,
+                    # BABA'ya raporlanır ve sinyal iptal edilir.
                     logger.critical(
                         f"KORUMASIZ POZİSYON AÇIK [{symbol}] "
                         f"ticket={position_ticket} — SL yerleştirilemedi "
@@ -1855,6 +1858,22 @@ class Ogul:
                             symbol=symbol,
                             ticket=position_ticket,
                         )
+                    trade.state = TradeState.CANCELLED
+                    trade.cancel_reason = (
+                        f"sl_placement_failed_and_close_failed "
+                        f"ticket={position_ticket}"
+                    )
+                    self.active_trades.pop(symbol, None)
+                    self.db.insert_event(
+                        event_type="TRADE_ERROR",
+                        message=(
+                            f"Korumasiz pozisyon acik (manuel mudahale): "
+                            f"{symbol} ticket={position_ticket}"
+                        ),
+                        severity="CRITICAL",
+                        action="unprotected_position_orphan",
+                    )
+                    return
 
         # Günlük işlem sayacı
         if self.baba:
