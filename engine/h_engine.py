@@ -39,6 +39,7 @@ import numpy as np
 
 from engine.logger import get_logger
 from engine.models.regime import RegimeType
+from engine.mt5_errors import enrich_message
 from engine.utils.indicators import atr as calc_atr
 
 if TYPE_CHECKING:
@@ -451,10 +452,12 @@ class HEngine:
                 comment=f"TRL_{ticket}",
             )
             if trail_result is None:
-                result["message"] = "Stop trailing emri gönderilemedi — devir iptal"
+                base_msg = "Stop trailing emri gönderilemedi — devir iptal"
+                detail = getattr(self.mt5, "_last_stop_limit_error", None)
+                result["message"] = enrich_message(base_msg, detail)
                 logger.error(
                     f"Hibrit devir başarısız — trailing Stop hatası: "
-                    f"ticket={ticket} {symbol}"
+                    f"ticket={ticket} {symbol} | detay={detail}"
                 )
                 return result
             trailing_order_ticket = trail_result["order_ticket"]
@@ -494,18 +497,12 @@ class HEngine:
                 ticket, sl=suggested_sl, tp=suggested_tp,
             )
             if modify_result is None:
-                result["message"] = "MT5 SL/TP ataması başarısız — devir iptal"
+                base_msg = "MT5 SL/TP ataması başarısız — devir iptal"
                 detail = getattr(self.mt5, "_last_modify_error", None)
-                if detail:
-                    if "last_error" in detail:
-                        result["message"] += f" — MT5: {detail['last_error']}"
-                    elif "retcode" in detail:
-                        result["message"] += f" — retcode={detail.get('retcode')} {detail.get('comment', '')}"
-                    elif "exception" in detail:
-                        result["message"] += f" — {detail['exception']}"
+                result["message"] = enrich_message(base_msg, detail)
                 logger.error(
                     f"Hibrit devir başarısız — MT5 modify hatası: "
-                    f"ticket={ticket} {symbol} | {result['message']}"
+                    f"ticket={ticket} {symbol} | detay={detail}"
                 )
                 return result
         else:
