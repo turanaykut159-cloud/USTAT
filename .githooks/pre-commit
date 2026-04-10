@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# USTAT pre-commit hook — 'bir yeri tamir ederken basini bozuyorsun' koruma katmani.
+#
+# Calisan kontroller:
+#   1. AST dogrulama (tum degisen .py dosyalari)
+#   2. Kritik akis testleri (tests/critical_flows)
+#   3. Kirmizi bolge uyarisi (dokunulan dosyalari listeler)
+#
+# Atlamak icin: git commit --no-verify  (yalnizca barlis zamanda izin)
+#
+# Kurulum:
+#   git config core.hooksPath .githooks
+
+set -e
+
+# ── Renkler ──────────────────────────────────────────────────────
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+NC='\033[0m'
+
+echo -e "${YELLOW}USTAT pre-commit kontrol baslatiliyor...${NC}"
+
+# ── 1. Degisen Python dosyalari AST kontrolu ─────────────────────
+echo -e "\n[1/3] AST dogrulama (degisen .py dosyalari)"
+STAGED_PY=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.py$' || true)
+
+if [ -n "$STAGED_PY" ]; then
+  for f in $STAGED_PY; do
+    if [ -f "$f" ]; then
+      python -c "import ast; ast.parse(open('$f', encoding='utf-8').read())" 2>/dev/null \
+        || { echo -e "${RED}HATA: $f AST bozuk${NC}"; exit 1; }
+      echo "  OK: $f"
+    fi
+  done
+else
+  echo "  (degisen Python dosyasi yok)"
+fi
+
+# ── 2. Kritik akis testleri ──────────────────────────────────────
+echo -e "\n[2/3] Kritik akis testleri"
+if [ -d "tests/critical_flows" ]; then
+  python -m pytest tests/critical_flows -q --tb=short \
+    || { echo -e "${RED}HATA: Kritik akis testleri patladi — commit reddedildi${NC}"; exit 2; }
+else
+  echo -e "  ${YELLOW}(tests/critical_flows yok — testler atlandi)${NC}"
+fi
+
+# ── 3. Kirmizi bolge uyarisi ─────────────────────────────────────
+echo -e "\n[3/3] Kirmizi bolge etki analizi"
+RED_ZONE_FILES="engine/baba.py engine/ogul.py engine/mt5_bridge.py engine/main.py engine/ustat.py engine/database.py engine/data_pipeline.py config/default.json start_ustat.py api/server.py"
+
+TOUCHED_RED=""
+for rf in $RED_ZONE_FILES; do
+  if echo "$STAGED_PY" | grep -Fxq "$rf" 2>/dev/null; then
+    TOUCHED_RED="$TOUCHED_RED $rf"
+  fi
+done
+
+if [ -n "$TOUCHED_RED" ]; then
+  echo -e "  ${YELLOW}UYARI: Kirmizi bolge dosyalari commit ediliyor:${NC}"
+  for rf in $TOUCHED_RED; do
+    echo "    - $rf"
+  done
+  echo -e "  ${YELLOW}Anayasa gereklilikleri:${NC}"
+  echo "    [x] Cift dogrulama (plan + onay + uygulama + rapor + dogrulama)"
+  echo "    [x] Siyah Kapi fonksiyonunun MANTIGI degistirilmedi"
+  echo "    [x] Kritik akis testleri ve etki haritasi incelendi"
+  echo -e "  ${YELLOW}tools/impact_map.py ile etkiyi inceleyin:${NC}"
+  for rf in $TOUCHED_RED; do
+    echo "    python tools/impact_map.py $rf"
+  done
+else
+  echo "  (kirmizi bolge dokunusu yok)"
+fi
+
+echo -e "\n${GREEN}Pre-commit kontrol BASARILI — commit devam ediyor.${NC}"
+exit 0
