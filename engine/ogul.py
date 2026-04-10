@@ -380,7 +380,8 @@ class Ogul:
         self.risk_params = risk_params or RiskParams()
         self.active_trades: dict[str, Trade] = {}
         self._trade_lock = threading.Lock()  # Pozisyon limiti atomik kontrolü
-        self._risk_multiplier: float = 1.0  # v5.9.2: BABA risk çarpanı (main.py set eder)
+        # Y-2: _risk_multiplier kaldirildi. BABA.calculate_position_size
+        # kendi current_regime.risk_multiplier degerini uyguluyor (C-1).
         # Config'den okunan parametreler (hardcoded değil)
         self._margin_reserve_pct: float = float(
             config.get("engine.margin_reserve_pct", MARGIN_RESERVE_PCT_DEFAULT)
