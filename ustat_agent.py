@@ -965,15 +965,108 @@ def handle_start_app(cmd: dict) -> tuple[bool, str, str]:
         return False, "", str(e)
 
 
+def _kill_ustat_electrons() -> list[int]:
+    """ÜSTAT'a ait Electron process'lerini psutil ile gerçekten bul ve öldür.
+
+    KRITIK BUG FIX (v5.9.2):
+    PowerShell `Get-Process | Where {$_.CommandLine -match ...}` YANLIŞTIR —
+    Windows'ta Get-Process.CommandLine genelde BOŞTUR (WMI/CIM gerekli).
+    Dolayısıyla eski handle_stop_app regex'i HİÇBİR Electron'u yakalayamazdı ve
+    her restart_app zombi Electron biriktirirdi. Biriken zombi'ler Chromium
+    singleton mutex'ini tutar → main.js requestSingleInstanceLock false döner →
+    uygulama SONSUZA DEK açılmaz.
+
+    Çözüm: psutil.process_iter() ile name="electron.exe" olan process'leri
+    tara, cmdline içinde "USTAT" veya "desktop" geçenleri filtrele, taskkill
+    /F /T ile tree-kill et. Ajanın kendi PID'ini ve parent'ını KORU.
+
+    Returns:
+        Öldürülen PID'lerin listesi.
+    """
+    killed: list[int] = []
+    try:
+        import psutil
+    except Exception:
+        return killed
+
+    # Ajan koruması
+    agent_pid = os.getpid()
+    protected = {agent_pid}
+    try:
+        protected.add(psutil.Process(agent_pid).ppid())
+    except Exception:
+        pass
+
+    ustat_root = str(USTAT_DIR).lower()
+
+    for p in psutil.process_iter(["pid", "name", "cmdline"]):
+        try:
+            info = p.info
+            pid = info.get("pid")
+            if not pid or pid in protected:
+                continue
+            name = (info.get("name") or "").lower()
+            cmd_list = info.get("cmdline") or []
+            cmd_str = " ".join(cmd_list).lower() if cmd_list else ""
+
+            # Electron binary kontrolü
+            is_electron = (
+                "electron" in name
+                or "electron.exe" in cmd_str
+                or "\\electron\\dist\\electron" in cmd_str
+            )
+            if not is_electron:
+                continue
+
+            # USTAT'a ait mi?
+            is_ustat = (
+                ustat_root in cmd_str
+                or "ustat" in cmd_str
+                or "ustat_api_mode" in cmd_str
+            )
+            if not is_ustat:
+                continue
+
+            # Tree-kill
+            try:
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(pid)],
+                    capture_output=True, text=True, timeout=10,
+                    creationflags=0x08000000 if os.name == "nt" else 0,
+                    startupinfo=_hidden_si(),
+                )
+                killed.append(pid)
+            except Exception:
+                try:
+                    p.kill()
+                    killed.append(pid)
+                except Exception:
+                    pass
+        except (psutil.NoSuchProcess, psutil.AccessDenied, Exception):
+            continue
+
+    return killed
+
+
 def handle_stop_app(cmd: dict) -> tuple[bool, str, str]:
     """ÜSTAT uygulamasını durdur.
 
-    İki aşamalı durdurma:
+    Üç aşamalı durdurma:
+    0. psutil ile ÜSTAT Electron'larını zorla kapat (zombi fabrikası kırıcı)
     1. Normal Stop-Process (CommandLine match ile)
     2. Başarısız olursa admin yetkili taskkill /F /PID ile zorla kapat
     """
     killed = []
     errors = []
+
+    # ── Aşama 0: psutil tabanlı Electron katili (YENİ — zombi fabrikası kapanır) ─
+    try:
+        electron_killed = _kill_ustat_electrons()
+        if electron_killed:
+            killed.extend([f"electron:{pid}" for pid in electron_killed])
+    except Exception as e:
+        errors.append(f"_kill_ustat_electrons: {e}")
+
     targets = ["python.*start_ustat", "uvicorn", "node.*electron", "node.*vite"]
 
     # ── Aşama 1: Normal Stop-Process ──────────────────────────────
