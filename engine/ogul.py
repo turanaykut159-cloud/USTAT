@@ -1614,9 +1614,73 @@ class Ogul:
             )
             return
 
-        # ── FAZ 1: SIGNAL ────────────────────────────────────────────
-        # Test süreci: sabit 1 lot (lot hesaplama docs/ogul_calculate_lot_backup.md'de)
-        lot = 1.0
+        # ── FAZ 1: SIGNAL — Lot hesaplama (BABA fixed-fractional) ──
+        # ATR (M15) — BABA.calculate_position_size için gerekli
+        atr_val: float | None = None
+        try:
+            df_atr = self.db.get_bars(symbol, "M15", limit=MIN_BARS_M15)
+            if (
+                df_atr is not None
+                and not df_atr.empty
+                and len(df_atr) >= ATR_PERIOD + 1
+            ):
+                high_a = df_atr["high"].values.astype(np.float64)
+                low_a = df_atr["low"].values.astype(np.float64)
+                close_a = df_atr["close"].values.astype(np.float64)
+                atr_arr = calc_atr(high_a, low_a, close_a, ATR_PERIOD)
+                atr_val = last_valid(atr_arr)
+        except Exception as exc:
+            logger.error(f"Lot ATR hesap hatası [{symbol}]: {exc}")
+
+        if atr_val is None or atr_val <= 0:
+            logger.warning(
+                f"Sinyal iptal [{symbol}]: ATR hesaplanamadı — "
+                f"lot hesabı yapılamaz"
+            )
+            self.db.insert_event(
+                event_type="TRADE_CANCELLED",
+                message=f"Sinyal iptal: {symbol} — ATR yok",
+                severity="WARNING",
+                action="atr_unavailable",
+            )
+            return
+
+        # Hesap bilgisi — equity BABA.calculate_position_size için gerekli
+        account_pre = self.mt5.get_account_info()
+        if account_pre is None or account_pre.equity <= 0:
+            logger.warning(
+                f"Sinyal iptal [{symbol}]: hesap bilgisi alınamadı"
+            )
+            self.db.insert_event(
+                event_type="TRADE_CANCELLED",
+                message=f"Sinyal iptal: {symbol} — account_info_unavailable",
+                severity="WARNING",
+                action="account_unavailable",
+            )
+            return
+
+        # BABA fixed-fractional lot (rejim çarpanı + graduated + haftalık dahil)
+        if self.baba is None:
+            logger.error(
+                f"Sinyal iptal [{symbol}]: BABA motoru mevcut değil"
+            )
+            return
+        lot = self.baba.calculate_position_size(
+            symbol, self.risk_params, atr_val, account_pre.equity,
+        )
+
+        if lot <= 0:
+            logger.info(
+                f"Sinyal iptal [{symbol}]: lot=0 "
+                f"(graduated/haftalık/rejim çarpanı)"
+            )
+            self.db.insert_event(
+                event_type="TRADE_CANCELLED",
+                message=f"Sinyal iptal: {symbol} — lot=0",
+                severity="INFO",
+                action="lot_zero",
+            )
+            return
 
         trade = Trade(
             symbol=symbol,
