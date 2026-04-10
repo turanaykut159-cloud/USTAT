@@ -3092,10 +3092,18 @@ class Ogul:
                 f"MT5 deal verisi kullanıldı [{symbol}]: "
                 f"pnl={trade.pnl:.2f} comm={commission:.2f} swap={swap:.2f}"
             )
+        else:
+            # C-6: deal_summary alinamadi - commission/swap bilinmiyor.
+            # DB'ye 0 yazmak yerine alanlari atlayacagiz (eski deger kalir).
+            logger.warning(
+                f"MT5 deal_summary yok [{symbol}] ticket={trade.ticket} - "
+                f"fallback PnL={trade.pnl:.2f} kullanildi, "
+                f"commission/swap DB'ye yazilmadi"
+            )
 
         # DB güncelle — entry_price/lot da dahil (netting değişikliği yansısın)
         if trade.db_id > 0:
-            self.db.update_trade(trade.db_id, {
+            update_payload = {
                 "exit_time": now.isoformat(),
                 "exit_price": trade.exit_price,
                 "entry_price": trade.entry_price,
@@ -3103,9 +3111,12 @@ class Ogul:
                 "pnl": trade.pnl,
                 "exit_reason": exit_reason,
                 "mt5_position_id": trade.ticket,
-                "commission": commission,
-                "swap": swap,
-            })
+            }
+            # C-6: commission/swap SADECE deal_summary basariliysa yazilir
+            if deal_summary is not None:
+                update_payload["commission"] = commission
+                update_payload["swap"] = swap
+            self.db.update_trade(trade.db_id, update_payload)
 
         # Event kaydet
         self.db.insert_event(
