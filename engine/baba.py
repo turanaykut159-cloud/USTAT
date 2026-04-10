@@ -2606,18 +2606,25 @@ class Baba:
         return 0, [ticket]
 
     def _still_above_hard_drawdown(self) -> bool:
-        """Zarardaki pozisyonlar kapatıldıktan sonra drawdown kontrolü."""
+        """Zarardaki pozisyonlar kapatıldıktan sonra drawdown kontrolü.
+
+        v5.9.3 — BULGU #2 fix: Eski sürümde ``self._risk_state.get("peak_equity",
+        equity)`` kullanılıyordu ama ``peak_equity`` _risk_state dict'ine HİÇ
+        yazılmıyordu → ``.get()`` her zaman default (current equity) döndürüyordu
+        → dd=0 → fonksiyon her zaman False dönüyordu → ``_close_all_positions``
+        akıllı kapanışta kârdaki pozisyonlar felaket drawdown devam etse bile
+        sessizce korunuyordu (Anayasa Kural 6 niyeti ölü). Artık data_pipeline
+        tarafından hesaplanıp risk_snapshot'a yazılan ``drawdown`` alanı +
+        config ``risk.hard_drawdown_pct`` eşiği kullanılıyor (``_check_hard_drawdown``
+        ile aynı, doğrulanmış kaynak). Fonksiyon imzası ve niyeti aynı.
+        """
         try:
             snap = self._db.get_latest_risk_snapshot()
             if not snap:
                 return True  # Veri yoksa güvenli tarafta kal
-            equity = snap.get("equity", 0.0)
-            peak = self._risk_state.get("peak_equity", equity)
-            if peak <= 0:
-                return True
-            dd = (peak - equity) / peak
-            hard_limit = self._risk_state.get("hard_drawdown", 0.15)
-            return dd >= hard_limit
+            drawdown = snap.get("drawdown", 0.0)
+            hard_limit = self._config.get("risk.hard_drawdown_pct", 0.15)
+            return drawdown >= hard_limit
         except Exception:
             return True  # Hata durumunda güvenli tarafta kal
 
