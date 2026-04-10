@@ -526,13 +526,10 @@ class Ogul:
 
         Çağrı sırası:
             1. _check_end_of_day()             — EOD kapatma (EN ÖNCE)
-            2. _advance_orders(regime)          — emir state-machine ilerletme
-            3. _manage_active_trades(regime)    — pozisyon yönetimi
-            4. _sync_positions()               — MT5 senkronizasyon
-            5. _check_advanced_risk_rules()     — günlük zarar, aylık drawdown
-            6. _check_time_rules(regime)        — yatay piyasa, son 45dk
-            7. Oylama hesapla                  — Dashboard için
-            8. M5 kapanış → sinyal üretimi     — yeni mum yoksa atla
+            2. _manage_active_trades(regime)    — pozisyon yönetimi
+            3. _sync_positions()               — MT5 senkronizasyon
+            4. Oylama hesapla                  — Dashboard için
+            5. M5 kapanış → sinyal üretimi     — yeni mum yoksa atla
 
         Args:
             symbols: Top-5 kontrat sembolleri.
@@ -554,20 +551,11 @@ class Ogul:
         # 1. Gün sonu kontrolü — 17:45 tüm pozisyon/emir kapatma
         self._check_end_of_day()
 
-        # 2. Bekleyen emir state-machine ilerletme
-        self._advance_orders(regime)
-
-        # 3. Mevcut işlemleri yönet (evrensel veya strateji bazlı)
+        # 2. Mevcut işlemleri yönet (evrensel veya strateji bazlı)
         self._manage_active_trades(regime)
 
-        # 4. MT5 ile pozisyon senkronizasyonu
+        # 3. MT5 ile pozisyon senkronizasyonu
         self._sync_positions()
-
-        # 5. Gelişmiş risk kuralları (günlük zarar, aylık drawdown, spread)
-        self._check_advanced_risk_rules()
-
-        # 6. Zaman bazlı kurallar (yatay piyasa, son 45dk kâr kapanışı)
-        self._check_time_rules(regime)
 
         # 7. Her sembol için oylama hesapla — her zaman, koşulsuz (Dashboard)
         for symbol in symbols:
@@ -577,11 +565,6 @@ class Ogul:
         # main.py OR koşulunun herhangi bir şekilde bypass edilmesine karşı koruma
         if self.baba and getattr(self.baba, "_kill_switch_level", 0) >= 3:
             logger.warning("process_signals: L3 aktif — sinyal üretimi engellendi")
-            return
-
-        # Günlük zarar durdurucu aktifse sinyal üretme
-        if self._daily_loss_stop:
-            logger.warning("Sinyal üretimi engellendi: günlük zarar durdurucu aktif (_daily_loss_stop=True)")
             return
 
         # ═══ SİNYAL DÖNGÜSÜ (M5 mum kapanışında tetiklenir — v5.7) ═════
@@ -1591,51 +1574,6 @@ class Ogul:
             strategy=StrategyType.BREAKOUT,
         )
 
-    # ── H1 Onay ──────────────────────────────────────────────────
-
-    def _confirm_h1(self, symbol: str, signal: Signal) -> bool:
-        """H1 zaman diliminde trend onayı (sadece trend follow).
-
-        BUY → H1 EMA(20) > EMA(50)
-        SELL → H1 EMA(20) < EMA(50)
-
-        Args:
-            symbol: Kontrat sembolü.
-            signal: Onaylanacak sinyal.
-
-        Returns:
-            True ise H1 onaylı.
-        """
-        df = self.db.get_bars(symbol, "H1", limit=MIN_BARS_H1)
-        if df.empty or len(df) < TF_EMA_SLOW + 1:
-            logger.info(f"H1 teyit RED [{symbol}]: H1 verisi yetersiz ({len(df) if not df.empty else 0} bar)")
-            return False
-
-        close_h1 = df["close"].values.astype(np.float64)
-        ema_fast_h1 = ema(close_h1, TF_EMA_FAST)
-        ema_slow_h1 = ema(close_h1, TF_EMA_SLOW)
-
-        ef = last_valid(ema_fast_h1)
-        es = last_valid(ema_slow_h1)
-
-        if ef is None or es is None:
-            logger.info(f"H1 teyit RED [{symbol}]: EMA hesaplanamadı (ef={ef}, es={es})")
-            return False
-
-        if signal.signal_type == SignalType.BUY:
-            confirmed = ef > es
-        elif signal.signal_type == SignalType.SELL:
-            confirmed = ef < es
-        else:
-            confirmed = False
-
-        if not confirmed:
-            logger.info(
-                f"H1 teyit RED [{symbol}]: {signal.signal_type.value} — "
-                f"EMA_fast={ef:.4f}, EMA_slow={es:.4f}"
-            )
-        return confirmed
-
     # ═════════════════════════════════════════════════════════════════
     #  EMİR YÜRÜTME
     # ═════════════════════════════════════════════════════════════════
@@ -1753,17 +1691,6 @@ class Ogul:
             self._log_cancelled_trade(trade)
             return
 
-        # Aylık drawdown uyarısında yeni işlem engelle
-        if MONTHLY_DD_ENABLED and (self._monthly_dd_warn or self._monthly_dd_stop):
-            trade.state = TradeState.CANCELLED
-            trade.cancel_reason = "monthly_dd_limit"
-            self.active_trades.pop(symbol, None)
-            logger.warning(
-                f"Aylık drawdown limiti — yeni işlem engellendi [{symbol}]"
-            )
-            self._log_cancelled_trade(trade)
-            return
-
         trade.volume = lot
         trade.requested_volume = lot
         trade.initial_volume = lot
@@ -1833,7 +1760,7 @@ class Ogul:
                     f"Korumasız pozisyon YASAK — pozisyon kapatılıyor!"
                 )
                 position_ticket = trade.ticket
-                close_result = self.bridge.close_position(position_ticket)
+                close_result = self.mt5.close_position(position_ticket)
                 if close_result is not None:
                     logger.warning(
                         f"Korumasız pozisyon kapatıldı [{symbol}]: "
@@ -1898,161 +1825,11 @@ class Ogul:
             f"@ {trade.entry_price:.4f} ticket={trade.ticket}"
         )
 
-        logger.info(
-            f"LIMIT emir gönderildi [{symbol}]: {direction} {lot} lot "
-            f"@ {signal.price:.4f} order_ticket={trade.order_ticket}"
-        )
-
     # ═════════════════════════════════════════════════════════════════
     #  MANUEL İŞLEM — ManuelMotor'a taşındı (v14.0)
     # ═════════════════════════════════════════════════════════════════
 
     # ── Yardımcı metodlar ─────────────────────────────────────────
-
-    def _calculate_lot(
-        self,
-        signal: Signal,
-        regime: Regime,
-        equity: float,
-        risk_params: RiskParams,
-    ) -> float:
-        """Pozisyon boyutu hesapla.
-
-        BABA varsa ``calculate_position_size`` kullanır,
-        yoksa basit fallback (1 lot). Her durumda
-        ``self._max_lot`` (config) ile sınırlar.
-
-        A4: Bias-lot entegrasyonu — bias ters yöndeyse lot=0,
-        bias nötr ise lot*0.7 (güven düşürme).
-
-        Returns:
-            Hesaplanan lot miktarı.
-        """
-        if self.baba:
-            atr_val = self._get_current_atr(signal.symbol)
-            if atr_val is None or atr_val <= 0:
-                return 0.0
-            lot = self.baba.calculate_position_size(
-                signal.symbol, risk_params, atr_val, equity,
-            )
-        else:
-            lot = 1.0
-
-        # A4: Bias-lot entegrasyonu
-        bias = self._calculate_bias(signal.symbol)
-        direction = "BUY" if signal.signal_type == SignalType.BUY else "SELL"
-        if bias != "NOTR" and bias != direction:
-            # Bias ters yönde → işlem yapma
-            logger.info(
-                f"Bias-lot engeli [{signal.symbol}]: "
-                f"sinyal={direction}, bias={bias} → lot=0"
-            )
-            return 0.0
-        elif bias == "NOTR":
-            # Bias nötr → güven düşürme (Fix 6: 0.7→0.85 yumuşatma)
-            lot = lot * 0.85
-            logger.debug(
-                f"Bias-lot nötr [{signal.symbol}]: lot*0.85={lot:.2f}"
-            )
-
-        # ── FAZ 3: Conviction bazlı lot ölçekleme ───────────────
-        # Confluence skoru yüksekse → daha büyük lot (güçlü inanç)
-        # Düşükse → daha küçük lot (düşük inanç)
-        try:
-            df = self.db.get_bars(signal.symbol, "M15", limit=MIN_BARS_M15)
-            if df is not None and not df.empty and len(df) >= MIN_BARS_M15:
-                _close = df["close"].values.astype(np.float64)
-                _high = df["high"].values.astype(np.float64)
-                _low = df["low"].values.astype(np.float64)
-                _volume = df["volume"].values.astype(np.float64)
-                _open = df["open"].values.astype(np.float64) if "open" in df.columns else _close.copy()
-
-                _atr_arr = calc_atr(_high, _low, _close, ATR_PERIOD)
-                _atr = last_valid(_atr_arr)
-                if _atr is not None and _atr > 0:
-                    _levels = find_support_resistance(_high, _low, _close, _atr)
-                    _patterns = detect_bar_patterns(_open, _high, _low, _close, _atr)
-                    _trend = analyze_trend_structure(_high, _low, _close)
-
-                    _ema_f = last_valid(ema(_close, TF_EMA_FAST)) or 0
-                    _ema_s = last_valid(ema(_close, TF_EMA_SLOW)) or 0
-                    _rsi = last_valid(calc_rsi(_close, MR_RSI_PERIOD)) or 50
-                    _, _, _hist = calc_macd(_close)
-                    _hist_val = last_valid(_hist) or 0
-                    _adx = last_valid(calc_adx(_high, _low, _close, ATR_PERIOD)) or 0
-                    _vol_avg = float(np.nanmean(_volume[-21:-1])) if len(_volume) > 21 else float(np.nanmean(_volume))
-                    _vol_ratio = float(_volume[-1]) / _vol_avg if _vol_avg > 0 else 1.0
-
-                    conf = calculate_confluence(
-                        direction=direction, price=signal.price,
-                        levels=_levels, patterns=_patterns, trend=_trend,
-                        atr_val=_atr, adx_val=_adx, rsi_val=_rsi,
-                        macd_hist=_hist_val, ema_fast=_ema_f, ema_slow=_ema_s,
-                        volume_ratio=_vol_ratio,
-                        regime_type=regime.regime_type.value if regime else "",
-                    )
-
-                    # Fix M17: Confluence skor sınır kontrolü
-                    if conf.total_score < 0 or conf.total_score > 100:
-                        logger.warning(
-                            f"Confluence skor sınır dışı [{signal.symbol}]: "
-                            f"{conf.total_score:.0f} → clamp [0,100]"
-                        )
-                        conf.total_score = max(0.0, min(100.0, conf.total_score))
-
-                    if conf.total_score >= CONVICTION_HIGH_THRESHOLD:
-                        conv_mult = CONVICTION_HIGH_MULT
-                    elif conf.total_score >= CONVICTION_MED_THRESHOLD:
-                        conv_mult = CONVICTION_MED_MULT
-                    else:
-                        conv_mult = CONVICTION_LOW_MULT
-
-                    lot_before = lot
-                    lot = lot * conv_mult
-                    logger.info(
-                        f"[FAZ3] Conviction sizing [{signal.symbol}]: "
-                        f"conf={conf.total_score:.0f} → ×{conv_mult} "
-                        f"lot {lot_before:.2f}→{lot:.2f}"
-                    )
-        except Exception as exc:
-            logger.warning(f"[FAZ3] Conviction sizing hatası [{signal.symbol}]: {exc}")
-
-        # v5.9.2: Risk multiplier çarpanı (BABA'dan, main.py üzerinden)
-        if self._risk_multiplier < 1.0:
-            lot_before_rm = lot
-            lot = lot * self._risk_multiplier
-            if lot_before_rm > 0:
-                logger.info(
-                    f"Risk çarpanı [{signal.symbol}]: ×{self._risk_multiplier:.2f} "
-                    f"lot {lot_before_rm:.2f}→{lot:.2f}"
-                )
-
-        # v14: Lot çarpan yığılması koruması — tüm çarpanlar sonrası
-        # lot hâlâ pozitifse minimum 1.0 lot (vol_min) uygula
-        if 0 < lot < 1.0:
-            logger.info(
-                f"Lot floor [{signal.symbol}]: {lot:.3f}→1.0 "
-                f"(çarpan yığılması koruması)"
-            )
-            lot = 1.0
-
-        return min(lot, self._max_lot)
-
-    def _get_current_atr(self, symbol: str) -> float | None:
-        """Sembol için güncel ATR(14) değeri.
-
-        Returns:
-            ATR değeri veya veri yoksa None.
-        """
-        df = self.db.get_bars(symbol, "M15", limit=MIN_BARS_M15)
-        if df.empty or len(df) < ATR_PERIOD + 1:
-            return None
-
-        close = df["close"].values.astype(np.float64)
-        high_arr = df["high"].values.astype(np.float64)
-        low_arr = df["low"].values.astype(np.float64)
-        atr_arr = calc_atr(high_arr, low_arr, close, ATR_PERIOD)
-        return last_valid(atr_arr)
 
     def _log_cancelled_trade(self, trade: Trade) -> None:
         """İptal edilen trade'i logla ve event yaz.
@@ -2107,361 +1884,6 @@ class Ogul:
 
         self.active_trades.pop(symbol, None)
         logger.info(f"Trade kaldırıldı [{symbol}]: {reason}")
-
-    # ═════════════════════════════════════════════════════════════════
-    #  STATE MACHINE — EMİR İLERLETME
-    # ═════════════════════════════════════════════════════════════════
-
-    def _advance_orders(self, regime: Regime) -> None:
-        """Bekleyen emirlerin state-machine'ini ilerlet.
-
-        SENT → FILLED / PARTIAL / TIMEOUT
-        PARTIAL → FILLED / CANCELLED
-        TIMEOUT → MARKET_RETRY / CANCELLED
-        MARKET_RETRY → FILLED / REJECTED
-
-        Her cycle'da ``process_signals()`` başında çağrılır.
-
-        Args:
-            regime: Mevcut piyasa rejimi.
-        """
-        for symbol in list(self.active_trades):
-            trade = self.active_trades[symbol]
-
-            if trade.state == TradeState.SENT:
-                self._advance_sent(symbol, trade, regime)
-            elif trade.state == TradeState.PARTIAL:
-                self._advance_partial(symbol, trade, regime)
-            elif trade.state == TradeState.TIMEOUT:
-                self._advance_timeout(symbol, trade, regime)
-            elif trade.state == TradeState.MARKET_RETRY:
-                self._advance_market_retry(symbol, trade, regime)
-
-    def _advance_sent(
-        self,
-        symbol: str,
-        trade: Trade,
-        regime: Regime,
-    ) -> None:
-        """SENT state ilerletme — emir dolum kontrolü.
-
-        Args:
-            symbol: Kontrat sembolü.
-            trade: SENT state'teki Trade.
-            regime: Mevcut rejim.
-        """
-        status = self.mt5.check_order_status(trade.order_ticket)
-
-        if status is None:
-            # MT5 yanıt yok — timeout kontrolü
-            if trade.sent_at and (
-                datetime.now() - trade.sent_at
-            ).total_seconds() > ORDER_TIMEOUT_SEC:
-                trade.state = TradeState.TIMEOUT
-                logger.warning(
-                    f"Emir timeout (yanıt yok) [{symbol}]: "
-                    f"order_ticket={trade.order_ticket}"
-                )
-            return
-
-        order_status = status["status"]
-
-        if order_status == "filled":
-            trade.state = TradeState.FILLED
-            # Netting modda position_ticket kullan (close_position bunu bekler)
-            # Fix Y5: position_ticket yoksa uyarı logla — fallback ticket
-            #         ile close_position başarısız olabilir
-            pos_ticket = status.get("position_ticket")
-            if pos_ticket:
-                trade.ticket = pos_ticket
-            else:
-                fallback_ticket = status.get("deal_ticket", trade.order_ticket)
-                trade.ticket = fallback_ticket
-                logger.warning(
-                    f"Netting: position_ticket yok [{symbol}], "
-                    f"fallback ticket={fallback_ticket} kullanılıyor — "
-                    f"close_position başarısız olabilir"
-                )
-            trade.filled_volume = status.get(
-                "filled_volume", trade.volume,
-            )
-            trade.volume = trade.filled_volume
-            self._update_fill_price(symbol, trade)
-            logger.info(
-                f"LIMIT emir doldu [{symbol}]: position_ticket={trade.ticket}"
-            )
-            self.db.insert_event(
-                event_type="ORDER_FILLED",
-                message=(
-                    f"Emir doldu: {trade.direction} {trade.volume} lot "
-                    f"{symbol} ticket={trade.ticket}"
-                ),
-                severity="INFO",
-                action="order_filled",
-            )
-            # Günlük işlem sayacı — sadece gerçek dolumda artır
-            if self.baba:
-                self.baba.increment_daily_trade_count()
-
-        elif order_status == "partial":
-            trade.state = TradeState.PARTIAL
-            trade.filled_volume = status.get("filled_volume", 0.0)
-            logger.info(
-                f"Kısmi dolum [{symbol}]: "
-                f"{trade.filled_volume}/{trade.requested_volume} lot"
-            )
-
-        elif order_status == "pending":
-            # Hâlâ bekliyor — timeout kontrolü
-            if trade.sent_at and (
-                datetime.now() - trade.sent_at
-            ).total_seconds() > ORDER_TIMEOUT_SEC:
-                trade.state = TradeState.TIMEOUT
-                logger.info(
-                    f"LIMIT emir timeout [{symbol}]: "
-                    f"order_ticket={trade.order_ticket}"
-                )
-
-        elif order_status == "cancelled":
-            # Borsa tarafından iptal edilmiş
-            trade.state = TradeState.TIMEOUT
-            logger.warning(
-                f"Emir borsa tarafından iptal edildi [{symbol}]: "
-                f"order_ticket={trade.order_ticket}"
-            )
-
-    def _advance_partial(
-        self,
-        symbol: str,
-        trade: Trade,
-        regime: Regime,
-    ) -> None:
-        """PARTIAL state ilerletme — kısmi dolum değerlendirme.
-
-        ≥%50 dolum → kabul (FILLED).
-        <%50 dolum → kısmi pozisyonu kapat (CANCELLED).
-
-        Args:
-            symbol: Kontrat sembolü.
-            trade: PARTIAL state'teki Trade.
-            regime: Mevcut rejim.
-        """
-        # Kalan bekleyen emri iptal et
-        try:
-            self.mt5.cancel_order(trade.order_ticket)
-        except Exception as exc:
-            logger.error(f"cancel_order hatası [{symbol}] ticket={trade.order_ticket}: {exc}")
-
-        threshold = trade.requested_volume * 0.5
-
-        if trade.filled_volume >= threshold:
-            # Kabul — kısmi dolum yeterli
-            trade.state = TradeState.FILLED
-            trade.volume = trade.filled_volume
-            self._update_fill_price(symbol, trade)
-            logger.info(
-                f"Kısmi dolum kabul [{symbol}]: "
-                f"{trade.filled_volume}/{trade.requested_volume} lot"
-            )
-            self.db.insert_event(
-                event_type="ORDER_FILLED",
-                message=(
-                    f"Kısmi dolum kabul: {trade.filled_volume} lot "
-                    f"{symbol} (istek: {trade.requested_volume})"
-                ),
-                severity="INFO",
-                action="partial_accepted",
-            )
-            # Günlük işlem sayacı — kısmi dolum kabul edildi
-            if self.baba:
-                self.baba.increment_daily_trade_count()
-        else:
-            # Yetersiz — kısmi pozisyonu kapat
-            if trade.ticket:
-                try:
-                    self.mt5.close_position(trade.ticket)
-                except Exception as exc:
-                    logger.error(f"close_position hatası [{symbol}] ticket={trade.ticket}: {exc}")
-            self._remove_trade(
-                symbol, trade,
-                f"partial_insufficient "
-                f"({trade.filled_volume}/{trade.requested_volume})",
-            )
-
-    def _advance_timeout(
-        self,
-        symbol: str,
-        trade: Trade,
-        regime: Regime,
-    ) -> None:
-        """TIMEOUT state ilerletme — market retry veya iptal.
-
-        VOLATILE/OLAY → market emir YASAK → CANCELLED.
-        TREND/RANGE → market retry (max 1 kez).
-
-        Args:
-            symbol: Kontrat sembolü.
-            trade: TIMEOUT state'teki Trade.
-            regime: Mevcut rejim.
-        """
-        # Bekleyen emri iptal et (v5.5.1: 3 deneme ile retry)
-        cancel_ok = False
-        for _cancel_try in range(1, 4):
-            try:
-                self.mt5.cancel_order(trade.order_ticket)
-                cancel_ok = True
-                break
-            except Exception as exc:
-                logger.error(
-                    f"cancel_order hatası [{symbol}] ticket={trade.order_ticket} "
-                    f"deneme {_cancel_try}/3: {exc}"
-                )
-                if _cancel_try < 3:
-                    import time as _time
-                    _time.sleep(0.5)
-
-        if not cancel_ok:
-            logger.error(
-                f"cancel_order 3 denemede başarısız [{symbol}] "
-                f"ticket={trade.order_ticket} — sync_positions düzeltmeli"
-            )
-
-        # VOLATILE/OLAY rejimde market emir yasak
-        if trade.regime_at_entry in ("VOLATILE", "OLAY"):
-            self._remove_trade(
-                symbol, trade,
-                f"timeout_no_market_retry "
-                f"(regime={trade.regime_at_entry})",
-            )
-            return
-
-        # Max retry kontrolü
-        if trade.retry_count >= 1:
-            self._remove_trade(
-                symbol, trade, "timeout_max_retry_reached",
-            )
-            return
-
-        # Market emir gönder
-        result = self.mt5.send_order(
-            symbol=symbol,
-            direction=trade.direction,
-            lot=trade.volume,
-            price=trade.limit_price,
-            sl=trade.sl,
-            tp=trade.tp,
-            order_type="market",
-        )
-
-        if result is None:
-            trade.state = TradeState.REJECTED
-            trade.cancel_reason = "market_retry_failed"
-            self._remove_trade(symbol, trade, "market_retry_send_failed")
-            return
-
-        # Market retry başarılı — order ticket'ı kaydet
-        trade.state = TradeState.MARKET_RETRY
-        trade.order_ticket = result.get("order", 0)
-        trade.retry_count += 1
-
-        logger.info(
-            f"Market retry [{symbol}]: order_ticket={trade.order_ticket}"
-        )
-        self.db.insert_event(
-            event_type="MARKET_RETRY",
-            message=(
-                f"Market retry: {trade.direction} {trade.volume} lot "
-                f"{symbol} ticket={trade.ticket}"
-            ),
-            severity="INFO",
-            action="market_retry",
-        )
-
-    def _advance_market_retry(
-        self,
-        symbol: str,
-        trade: Trade,
-        regime: Regime,
-    ) -> None:
-        """MARKET_RETRY state ilerletme — dolum ve slippage kontrolü.
-
-        Dolum var → slippage kontrol → kabul veya red.
-        Dolum yok → REJECTED.
-
-        Args:
-            symbol: Kontrat sembolü.
-            trade: MARKET_RETRY state'teki Trade.
-            regime: Mevcut rejim.
-        """
-        # MT5'te pozisyon var mı? (Netting: sembol bazlı eşleştir)
-        try:
-            positions = self.mt5.get_positions()
-        except Exception as exc:
-            logger.error(f"get_positions hatası [{symbol}]: {exc}")
-            positions = []
-        pos = next(
-            (p for p in positions if p.get("symbol") == symbol),
-            None,
-        )
-
-        if pos is None:
-            # Pozisyon oluşmadı
-            self._remove_trade(
-                symbol, trade, "market_retry_no_position",
-            )
-            return
-
-        # Pozisyon ticket'ını kaydet (close_position için gerekli)
-        trade.ticket = pos.get("ticket", 0)
-
-        # Dolum fiyatı ve slippage kontrolü
-        fill_price = pos.get("price_open", 0.0)
-        slippage = abs(fill_price - trade.limit_price)
-
-        if trade.max_slippage > 0 and slippage > trade.max_slippage:
-            # Slippage aşımı — pozisyonu kapat
-            logger.warning(
-                f"Slippage aşımı [{symbol}]: "
-                f"fill={fill_price:.4f} limit={trade.limit_price:.4f} "
-                f"slippage={slippage:.4f} max={trade.max_slippage:.4f}"
-            )
-            try:
-                self.mt5.close_position(trade.ticket)
-            except Exception as exc:
-                logger.error(f"close_position hatası [{symbol}] ticket={trade.ticket}: {exc}")
-            self._remove_trade(
-                symbol, trade,
-                f"slippage_exceeded "
-                f"({slippage:.4f}>{trade.max_slippage:.4f})",
-            )
-            return
-
-        # Kabul — dolum başarılı
-        trade.state = TradeState.FILLED
-        trade.entry_price = fill_price
-        trade.filled_volume = trade.volume
-        # Günlük işlem sayacı — market retry dolum
-        if self.baba:
-            self.baba.increment_daily_trade_count()
-
-        if trade.db_id > 0:
-            self.db.update_trade(trade.db_id, {
-                "entry_price": fill_price,
-            })
-
-        logger.info(
-            f"Market retry dolum [{symbol}]: "
-            f"fill_price={fill_price:.4f} slippage={slippage:.4f}"
-        )
-        self.db.insert_event(
-            event_type="ORDER_FILLED",
-            message=(
-                f"Market retry dolum: {trade.direction} {trade.volume} lot "
-                f"{symbol} @ {fill_price:.4f}"
-            ),
-            severity="INFO",
-            action="market_retry_filled",
-        )
 
     def _update_fill_price(self, symbol: str, trade: Trade) -> None:
         """MT5 pozisyondan gerçek dolum fiyatını al ve DB güncelle.
@@ -2557,6 +1979,14 @@ class Ogul:
         for symbol in list(self.active_trades):
             trade = self.active_trades[symbol]
 
+            # Yetim pozisyon — OĞUL'un değil, EOD'da dokunma (v14.1)
+            if getattr(trade, "orphan", False):
+                logger.info(
+                    f"EOD: {symbol} ticket={trade.ticket} yetim pozisyon — "
+                    f"OĞUL kapatmaz"
+                )
+                continue
+
             if trade.state == TradeState.FILLED:
                 # Önce Stop Limit SL emirlerini iptal et (v5.9.2)
                 try:
@@ -2569,24 +1999,6 @@ class Ogul:
                 except Exception as exc:
                     logger.error(f"EOD close_position hatası [{symbol}] ticket={trade.ticket}: {exc}")
                 self._handle_closed_trade(symbol, trade, "end_of_day")
-
-            elif trade.state in (
-                TradeState.SENT, TradeState.PARTIAL,
-                TradeState.TIMEOUT, TradeState.MARKET_RETRY,
-            ):
-                # Bekleyen emri iptal et
-                if trade.order_ticket:
-                    try:
-                        self.mt5.cancel_order(trade.order_ticket)
-                    except Exception as exc:
-                        logger.error(f"EOD cancel_order hatası [{symbol}] ticket={trade.order_ticket}: {exc}")
-                # Kısmi dolum varsa pozisyonu da kapat
-                if trade.ticket and trade.filled_volume > 0:
-                    try:
-                        self.mt5.close_position(trade.ticket)
-                    except Exception as exc:
-                        logger.error(f"EOD close_position hatası [{symbol}] ticket={trade.ticket}: {exc}")
-                self._remove_trade(symbol, trade, "end_of_day")
 
         # Hibrit pozisyonlar EOD'da kapatılmaz — kullanıcı kararı ile yönetilir.
         # Manuel pozisyonlar ManuelMotor'un kendi EOD'sunda kapatılır — OĞUL müdahale etmez.
@@ -2628,9 +2040,27 @@ class Ogul:
         if self.h_engine:
             hybrid_tickets = {t for t in self.h_engine.hybrid_positions}
 
+        # v14.1 — Manuel pozisyonları EOD doğrulamasından hariç tut
+        manual_tickets: set[int] = set()
+        manual_symbols: set[str] = set()
+        if self.manuel_motor:
+            try:
+                manual_tickets = self.manuel_motor.get_manual_tickets()
+                manual_symbols = self.manuel_motor.get_manual_symbols()
+            except Exception as exc:
+                logger.error(f"EOD doğrulama — manuel ticket alınamadı: {exc}")
+
+        # v14.1 — Yetim (orphan) pozisyonları EOD doğrulamasından hariç tut
+        # (OĞUL'un izlediği ama sahiplenmediği pozisyonlar)
+        orphan_tickets: set[int] = {
+            tr.ticket for tr in self.active_trades.values()
+            if getattr(tr, "orphan", False) and tr.ticket
+        }
+
         still_open: list[int] = []
         for pos in remaining:
             ticket = pos.get("ticket")
+            pos_symbol = pos.get("symbol", "")
             if not ticket:
                 continue
             # Hibrit pozisyonlar kullanıcı kararıyla yönetilir — atla
@@ -2638,6 +2068,20 @@ class Ogul:
                 logger.info(
                     f"EOD doğrulama — ticket={ticket} hibrit pozisyon, "
                     f"kapatma atlandı (kullanıcı kararı)"
+                )
+                continue
+            # Manuel pozisyonlar ManuelMotor'un sorumluluğunda — atla
+            if ticket in manual_tickets or pos_symbol in manual_symbols:
+                logger.info(
+                    f"EOD doğrulama — ticket={ticket} {pos_symbol} manuel, "
+                    f"kapatma atlandı (ManuelMotor'a ait)"
+                )
+                continue
+            # Yetim pozisyonlar — OĞUL sahiplenmedi, kapatmaz
+            if ticket in orphan_tickets:
+                logger.info(
+                    f"EOD doğrulama — ticket={ticket} {pos_symbol} yetim, "
+                    f"kapatma atlandı (OĞUL'un değil)"
                 )
                 continue
             closed = False
@@ -2735,6 +2179,9 @@ class Ogul:
                 trade = self.active_trades[symbol]
                 if trade.state != TradeState.FILLED:
                     continue
+                # Yetim pozisyon — dokunma (v14.1)
+                if getattr(trade, "orphan", False):
+                    continue
                 try:
                     close_result = self.mt5.close_position(trade.ticket)
                 except Exception as exc:
@@ -2753,6 +2200,9 @@ class Ogul:
             for symbol in list(self.active_trades):
                 trade = self.active_trades[symbol]
                 if trade.state != TradeState.FILLED:
+                    continue
+                # Yetim pozisyon — dokunma (v14.1)
+                if getattr(trade, "orphan", False):
                     continue
                 pos = pos_by_symbol.get(symbol)
                 if pos is None:
@@ -2785,6 +2235,10 @@ class Ogul:
             trade = self.active_trades[symbol]
 
             if trade.state != TradeState.FILLED:
+                continue
+
+            # Yetim pozisyon — OĞUL'un değil, yönetme (v14.1)
+            if getattr(trade, "orphan", False):
                 continue
 
             # Pozisyon hâlâ MT5'te var mı?
@@ -3222,362 +2676,6 @@ class Ogul:
             )
 
         return None
-
-    def _check_cost_average_DISABLED(
-        self,
-        symbol: str,
-        trade: Trade,
-        pos: dict[str, Any],
-        voting: dict,
-        atr_val: float,
-        volume: np.ndarray,
-    ) -> None:
-        """Maliyetlendirme — test sürecinde devre dışı (lot=1).
-        Yedek: docs/ogul_calculate_lot_backup.md
-        """
-        return
-        # 1. Zaten yapılmışsa atla
-        if trade.cost_averaged:
-            return
-
-        # 2. Oylama: 3/4+ lehte olmalı
-        if trade.direction == "BUY":
-            favorable = voting.get("buy_votes", 0)
-        else:
-            favorable = voting.get("sell_votes", 0)
-        if favorable < 3:
-            return
-
-        # 3. Fiyat 1×ATR geri çekilmiş olmalı
-        current_price = pos.get("price_current", 0.0)
-        if trade.direction == "BUY":
-            pullback = trade.entry_price - current_price
-        else:
-            pullback = current_price - trade.entry_price
-        if pullback < AVG_PULLBACK_ATR * atr_val:
-            return
-
-        # 4. Hacim düşmüyor olmalı
-        if len(volume) >= VOL_LOOKBACK + 1:
-            recent_vol = np.nanmean(volume[-4:])
-            avg_vol = np.nanmean(volume[-(VOL_LOOKBACK + 1):-1])
-            if avg_vol > 0 and recent_vol < avg_vol:
-                return  # hacim düşüyor, ekleme yapma
-
-        # 5. Toplam risk kontrolü (≤ %120)
-        initial_risk = trade.initial_volume * atr_val if trade.initial_volume > 0 \
-            else trade.volume * atr_val
-        add_lot = trade.volume  # mevcut lot kadar ekle (toplam max 1.0)
-        total_after = trade.volume + add_lot
-        if total_after > self._max_lot:
-            add_lot = self._max_lot - trade.volume
-        if add_lot <= 0:
-            return
-
-        new_total_risk = total_after * atr_val
-        if new_total_risk > initial_risk * AVG_MAX_RISK_MULT:
-            return
-
-        # Spread kontrolü
-        try:
-            tick = self.mt5.get_tick(symbol)
-            if not tick:
-                return
-            if trade.direction == "BUY":
-                price = tick.ask
-            else:
-                price = tick.bid
-        except Exception:
-            return
-
-        # Ekleme emri gönder (market)
-        try:
-            result = self.mt5.send_order(
-                symbol,
-                trade.direction,
-                add_lot,
-                price=price,
-                sl=trade.sl,
-                tp=trade.tp,
-                order_type="market",
-            )
-            if result:
-                old_entry = trade.entry_price
-                old_vol = trade.volume
-                # Yeni ortalama maliyet
-                trade.entry_price = (
-                    (old_entry * old_vol + price * add_lot) / (old_vol + add_lot)
-                )
-                trade.volume = old_vol + add_lot
-                trade.cost_averaged = True
-                if trade.initial_volume == 0.0:
-                    trade.initial_volume = old_vol
-
-                logger.info(
-                    f"Maliyetlendirme [{symbol}]: +{add_lot} lot @ {price:.4f}, "
-                    f"ort.maliyet={trade.entry_price:.4f}, "
-                    f"toplam={trade.volume:.2f} lot"
-                )
-                self.db.insert_event(
-                    "COST_AVERAGE",
-                    f"{symbol} +{add_lot} lot @ {price:.4f} "
-                    f"avg_entry={trade.entry_price:.4f} total={trade.volume:.2f}",
-                    severity="INFO",
-                )
-                # DB güncelle
-                if trade.db_id > 0:
-                    self.db.update_trade(trade.db_id, {
-                        "lot": trade.volume,
-                        "entry_price": trade.entry_price,
-                        "cost_averaged": 1,
-                        "initial_volume": trade.initial_volume,
-                    })
-                # BABA günlük sayaç (ekleme de bir işlem sayılır)
-                if self.baba:
-                    self.baba.increment_daily_trade_count()
-        except Exception as exc:
-            logger.error(f"Maliyetlendirme emri hatası [{symbol}]: {exc}")
-
-    # ═════════════════════════════════════════════════════════════════
-    #  ZAMAN KURALLARI
-    # ═════════════════════════════════════════════════════════════════
-
-    def _check_time_rules(self, regime: Regime) -> None:
-        """Zaman bazlı pozisyon yönetim kuralları.
-
-        Kurallar:
-            1. Yatay kontrol: son 8 mum range < 0.5×ATR → kapat
-            2. Son 45 dk (17:00+): kârdaysan kapat
-        """
-        if not USE_UNIVERSAL_MANAGEMENT:
-            return
-        if not self.active_trades:
-            return
-
-        now = datetime.now()
-        current_time = now.time()
-
-        for symbol in list(self.active_trades):
-            trade = self.active_trades[symbol]
-            if trade.state != TradeState.FILLED:
-                continue
-
-            # ── Son 45 dk kârdaysan kapat ──────────────────────────
-            if current_time >= LAST_45_MIN:
-                current_price = 0.0
-                try:
-                    tick = self.mt5.get_tick(symbol)
-                    if tick:
-                        current_price = tick.bid if trade.direction == "BUY" else tick.ask
-                except Exception:
-                    pass
-
-                if current_price > 0:
-                    if trade.direction == "BUY":
-                        profit = current_price - trade.entry_price
-                    else:
-                        profit = trade.entry_price - current_price
-
-                    if profit > 0:
-                        logger.info(
-                            f"Son 45 dk kâr kapanışı [{symbol}]: "
-                            f"kâr={profit:.4f}"
-                        )
-                        try:
-                            self.mt5.close_position(trade.ticket)
-                        except Exception as exc:
-                            logger.error(
-                                f"Son 45 dk kapatma hatası [{symbol}]: {exc}"
-                            )
-                        self._handle_closed_trade(
-                            symbol, trade, "last_45min_profit"
-                        )
-                        continue
-
-            # ── Yatay kontrol (2 saat = 8 × M15 mum) ──────────────
-            try:
-                df = self.db.get_bars(symbol, "M15", limit=FLAT_CANDLE_COUNT)
-                if df is not None and len(df) >= FLAT_CANDLE_COUNT:
-                    highs = df["high"].values.astype(np.float64)
-                    lows = df["low"].values.astype(np.float64)
-                    closes = df["close"].values.astype(np.float64)
-
-                    candle_range = np.max(highs) - np.min(lows)
-                    atr_arr = calc_atr(highs, lows, closes, period=ATR_PERIOD)
-                    atr_val = last_valid(atr_arr)
-
-                    if atr_val and atr_val > 0:
-                        if candle_range < FLAT_ATR_MULT * atr_val:
-                            logger.info(
-                                f"Yatay piyasa [{symbol}]: range={candle_range:.4f} "
-                                f"< {FLAT_ATR_MULT}×ATR={FLAT_ATR_MULT * atr_val:.4f}"
-                            )
-                            try:
-                                self.mt5.close_position(trade.ticket)
-                            except Exception as exc:
-                                logger.error(
-                                    f"Yatay kapatma hatası [{symbol}]: {exc}"
-                                )
-                            self._handle_closed_trade(
-                                symbol, trade, "flat_market"
-                            )
-                            continue
-            except Exception as exc:
-                logger.error(f"Yatay kontrol hatası [{symbol}]: {exc}")
-
-    # ═════════════════════════════════════════════════════════════════
-    #  GELİŞMİŞ RİSK KURALLARI
-    # ═════════════════════════════════════════════════════════════════
-
-    def _check_advanced_risk_rules(self) -> None:
-        """Gelişmiş risk kuralları — her cycle'da kontrol edilir.
-
-        Kurallar:
-            1. Günlük zarar ≥ equity'nin %3'ü → hepsini kapat, gün sonu
-            1b. Aylık drawdown ≥ %6 → tüm işlemleri kapat, ay sonuna kadar dur
-            2. Spread anormal (≥ ort×2) → kârdaysa kapat
-            3. Gap kontrolü: açılışta SL aşılmışsa → anında kapat
-        """
-        if not USE_UNIVERSAL_MANAGEMENT:
-            return
-
-        # ── 0. Aylık Drawdown Takibi (v13.0) ────────────────────
-        if MONTHLY_DD_ENABLED:
-            try:
-                today = date.today()
-                account = self.mt5.get_account_info()
-                if account:
-                    current_equity = account.equity
-                    # Ay başı equity'yi ayarla / sıfırla
-                    if (self._monthly_start_date is None
-                            or self._monthly_start_date.month != today.month
-                            or self._monthly_start_date.year != today.year):
-                        self._monthly_start_equity = current_equity
-                        self._monthly_start_date = today
-                        self._monthly_dd_stop = False
-                        self._monthly_dd_warn = False
-                        logger.info(
-                            f"Aylık drawdown sıfırlandı: equity={current_equity:.0f}"
-                        )
-
-                    if self._monthly_start_equity > 0:
-                        monthly_dd = (self._monthly_start_equity - current_equity) / self._monthly_start_equity
-
-                        # %6 mutlak limit: tüm işlemleri kapat
-                        if monthly_dd >= MONTHLY_DD_MAX_PCT and not self._monthly_dd_stop:
-                            self._monthly_dd_stop = True
-                            logger.critical(
-                                f"AYLIK DRAWDOWN LİMİTİ AŞILDI: {monthly_dd:.2%} ≥ {MONTHLY_DD_MAX_PCT:.0%}"
-                            )
-                            self.db.insert_event(
-                                "MONTHLY_DD_STOP",
-                                f"dd={monthly_dd:.2%} start={self._monthly_start_equity:.0f} "
-                                f"current={current_equity:.0f}",
-                                severity="CRITICAL",
-                                action="close_all",
-                            )
-                            for sym in list(self.active_trades):
-                                t = self.active_trades[sym]
-                                if t.state == TradeState.FILLED:
-                                    try:
-                                        self.mt5.close_position(t.ticket)
-                                    except Exception:
-                                        pass
-                                    self._handle_closed_trade(sym, t, "monthly_dd_limit")
-                            return
-
-                        # %4 uyarı: yeni işlem alma
-                        if monthly_dd >= MONTHLY_DD_WARN_PCT and not self._monthly_dd_warn:
-                            self._monthly_dd_warn = True
-                            logger.warning(
-                                f"Aylık drawdown uyarısı: {monthly_dd:.2%} ≥ {MONTHLY_DD_WARN_PCT:.0%} "
-                                f"→ yeni işlem alınmayacak"
-                            )
-                            self.db.insert_event(
-                                "MONTHLY_DD_WARNING",
-                                f"dd={monthly_dd:.2%}",
-                                severity="WARNING",
-                            )
-            except Exception as exc:
-                logger.error(f"Aylık drawdown kontrol hatası: {exc}")
-
-        if not self.active_trades:
-            return
-
-        # ── 1. Günlük zarar limiti (%3 equity) ────────────────────
-        if not self._daily_loss_stop:
-            try:
-                account = self.mt5.get_account_info()
-                if account:
-                    equity = account.equity
-                    balance = account.balance
-                    if balance > 0:
-                        daily_pnl_pct = (equity - balance) / balance
-                        if daily_pnl_pct <= -DAILY_LOSS_STOP_PCT:
-                            logger.warning(
-                                f"Günlük zarar limiti aşıldı: "
-                                f"{daily_pnl_pct:.2%} ≤ -{DAILY_LOSS_STOP_PCT:.0%}"
-                            )
-                            self._daily_loss_stop = True
-                            self.db.insert_event(
-                                "DAILY_LOSS_STOP",
-                                f"equity={equity:.0f} balance={balance:.0f} "
-                                f"pnl={daily_pnl_pct:.2%}",
-                                severity="CRITICAL",
-                                action="close_all",
-                            )
-                            # Tüm FILLED pozisyonları kapat
-                            for sym in list(self.active_trades):
-                                t = self.active_trades[sym]
-                                if t.state == TradeState.FILLED:
-                                    try:
-                                        self.mt5.close_position(t.ticket)
-                                    except Exception:
-                                        pass
-                                    self._handle_closed_trade(
-                                        sym, t, "daily_loss_limit"
-                                    )
-                            return
-            except Exception as exc:
-                logger.error(f"Günlük zarar kontrol hatası: {exc}")
-
-        # ── 2. Spread anormalliği ──────────────────────────────────
-        for symbol in list(self.active_trades):
-            trade = self.active_trades[symbol]
-            if trade.state != TradeState.FILLED:
-                continue
-
-            try:
-                tick = self.mt5.get_tick(symbol)
-                if tick and tick.spread > 0:
-                    # Basit kontrol: spread çok yüksekse
-                    df = self.db.get_bars(symbol, "M15", limit=20)
-                    if df is not None and len(df) >= 10:
-                        highs = df["high"].values.astype(np.float64)
-                        lows = df["low"].values.astype(np.float64)
-                        avg_range = np.nanmean(highs[-10:] - lows[-10:])
-                        if avg_range > 0:
-                            spread_ratio = tick.spread / avg_range
-                            if spread_ratio > SPREAD_SPIKE_MULT:
-                                # Kârdaysa kapat
-                                if trade.direction == "BUY":
-                                    profit = tick.bid - trade.entry_price
-                                else:
-                                    profit = trade.entry_price - tick.ask
-                                if profit > 0:
-                                    logger.warning(
-                                        f"Spread anormal [{symbol}]: "
-                                        f"ratio={spread_ratio:.1f}x, kapat"
-                                    )
-                                    try:
-                                        self.mt5.close_position(trade.ticket)
-                                    except Exception:
-                                        pass
-                                    self._handle_closed_trade(
-                                        symbol, trade, "spread_anomaly"
-                                    )
-            except Exception as exc:
-                logger.error(f"Spread kontrol hatası [{symbol}]: {exc}")
 
     # ═════════════════════════════════════════════════════════════════
     #  ESKİ STRATEJİ BAZLI YÖNETİM (feature flag=False için korunur)

@@ -346,6 +346,8 @@ class Baba:
 
         # ── Cross-motor referansı (fake sinyal koruması) ─────────────
         self.manuel_motor: Any | None = None  # main.py tarafından atanır
+        # v14.1 — OĞUL referansı (L2 kayıp kapanışı için)
+        self.ogul: Any | None = None  # main.py tarafından atanır
 
         # ── ÜSTAT geri bildirim ─────────────────────────────────────
         self._risk_miss_log: list[dict] = []
@@ -2161,6 +2163,16 @@ class Baba:
                     logger.error(f"L3 h_engine.force_close_all hatası: {exc}")
             self._last_l3_failed_tickets = self._close_all_positions("KILL_SWITCH_L3")
 
+        # v14.1 — L2 kayıp tetikleri: OĞUL + H-Engine pozisyonlarını kapat
+        # Manuel pozisyonlar ManuelMotor'un sorumluluğunda — dokunulmaz.
+        # Eskiden bu iş OĞUL _check_advanced_risk_rules'in işiydi;
+        # tek merkezi kapanış yeri olarak BABA'ya taşındı.
+        elif level == KILL_SWITCH_L2 and reason in ("daily_loss", "monthly_loss"):
+            try:
+                self._close_ogul_and_hybrid(f"KILL_SWITCH_L2_{reason}")
+            except Exception as exc:
+                logger.error(f"L2 ({reason}) kapanış hatası: {exc}")
+
     def _clear_kill_switch(self, reason: str) -> None:
         """Kill-switch'i temizle.
 
@@ -2468,6 +2480,83 @@ class Baba:
                 })
             except Exception:
                 pass
+        return failed_tickets
+
+    def _close_ogul_and_hybrid(self, reason: str) -> list[int]:
+        """L2 kayıp kapanışı — OĞUL ve H-Engine pozisyonları (v14.1).
+
+        Manuel ve yetim (orphan) pozisyonlara dokunmaz.
+        Tek merkezi risk kapanışı — OĞUL'dan BABA'ya taşınan sorumluluk.
+
+        Args:
+            reason: Kapanış nedeni (event log için).
+
+        Returns:
+            Kapatılamayan ticket listesi.
+        """
+        failed_tickets: list[int] = []
+        if self._mt5 is None:
+            logger.error(f"L2 kapanış — MT5 bağlantısı yok ({reason})")
+            return failed_tickets
+
+        # 1) H-Engine hibrit pozisyonlarını kapat (emirler + pozisyonlar)
+        h_eng = getattr(self, "h_engine", None)
+        if h_eng is not None:
+            try:
+                h_failed = h_eng.force_close_all(reason)
+                if h_failed:
+                    logger.error(
+                        f"L2 ({reason}) h_engine kapatma başarısız: {h_failed}"
+                    )
+                    failed_tickets.extend(h_failed)
+            except Exception as exc:
+                logger.error(f"L2 ({reason}) h_engine.force_close_all hatası: {exc}")
+
+        # 2) OĞUL active_trades FILLED pozisyonları (yetim HARIÇ)
+        og = getattr(self, "ogul", None)
+        if og is None or not getattr(og, "active_trades", None):
+            logger.info(f"L2 ({reason}) — OĞUL pozisyon yok")
+            return failed_tickets
+
+        closed_count = 0
+        for symbol in list(og.active_trades):
+            trade = og.active_trades.get(symbol)
+            if trade is None:
+                continue
+            if getattr(trade, "orphan", False):
+                continue
+            state = getattr(trade, "state", None)
+            state_name = state.name if state is not None and hasattr(state, "name") else str(state)
+            if state_name != "FILLED":
+                continue
+            ticket = getattr(trade, "ticket", 0)
+            if not ticket:
+                continue
+            try:
+                result = self._mt5.close_position(ticket)
+                if result:
+                    closed_count += 1
+                    try:
+                        og._handle_closed_trade(symbol, trade, reason.lower())
+                    except Exception:
+                        pass
+                else:
+                    failed_tickets.append(ticket)
+            except Exception as exc:
+                logger.error(
+                    f"L2 ({reason}) OĞUL kapatma hatası [{symbol}] ticket={ticket}: {exc}"
+                )
+                failed_tickets.append(ticket)
+
+        logger.warning(
+            f"L2 ({reason}) kapanış tamamlandı: "
+            f"{closed_count} OĞUL pozisyonu kapatıldı, {len(failed_tickets)} başarısız"
+        )
+        if closed_count > 0:
+            self._log_kill_event(
+                f"{closed_count} OĞUL pozisyonu kapatıldı ({reason})",
+                "CRITICAL", "positions_closed_l2",
+            )
         return failed_tickets
 
     def _try_close_position(

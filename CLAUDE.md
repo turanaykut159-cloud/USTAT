@@ -1,6 +1,6 @@
 # ÜSTAT v5.9 — ANA REHBER
 
-**Versiyon:** 3.2 | **Tarih:** 28 Mart 2026 | **Kaynak:** Kod tabanı doğrulaması
+**Versiyon:** 3.3 | **Tarih:** 10 Nisan 2026 | **Kaynak:** Kod tabanı doğrulaması
 **Anayasa Referansı:** USTAT_ANAYASA.md (v2.0) — ayrı belge, kendi versiyonlaması var
 
 > Bu dosya ÜSTAT projesinin TEK rehberidir. Tüm geliştiriciler (insan ve AI) bu kurallara MUTLAK uyum gösterir. Varsayım, olasılık, tahmin YASAKTIR — her karar kanıta dayanır.
@@ -377,31 +377,31 @@ Yukarıdaki listelerde OLMAYAN tüm dosyalar. Standart dikkatle değiştirilebil
 
 Bu fonksiyonların MANTIĞI değiştirilemez. İzin verilen: kanıtlı bug fix, performans iyileştirmesi (mantık ve çıktı değişmeden), güvenlik katmanı ekleme (mevcut korumayı azaltmadan).
 
-**BABA — Risk Koruması (10 fonksiyon)**
+**BABA — Risk Koruması (11 fonksiyon)**
 
 | # | Fonksiyon | Görev |
 |---|-----------|-------|
 | 1 | `check_risk_limits()` | İşlem açılıp açılmayacağını belirleyen MERKEZİ KAPI |
 | 2 | `_activate_kill_switch()` | Acil durdurma tetikleyicisi (L1/L2/L3) |
-| 3 | `_close_all_positions()` | L3'te tüm pozisyonları kapatır |
-| 4 | `check_drawdown_limits()` | Günlük/toplam drawdown kapıları |
-| 5 | `_check_hard_drawdown()` | %15 felaket drawdown algılama |
-| 6 | `_check_monthly_loss()` | Aylık kayıp limiti |
-| 7 | `detect_regime()` | TREND/RANGE/VOLATILE/OLAY sınıflandırması |
-| 8 | `calculate_position_size()` | Risk tabanlı lot boyutlandırma |
-| 9 | `run_cycle()` | BABA ana 10-saniye döngüsü |
-| 10 | `_check_period_resets()` | Günlük/haftalık/aylık sıfırlama |
+| 3 | `_close_all_positions()` | L3'te tüm pozisyonları kapatır (manuel dahil) |
+| 4 | `_close_ogul_and_hybrid()` | L2 günlük/aylık kayıp tetiğinde SADECE OĞUL + Hybrid pozisyonlarını kapatır — manuele dokunmaz |
+| 5 | `check_drawdown_limits()` | Günlük/toplam drawdown kapıları |
+| 6 | `_check_hard_drawdown()` | %15 felaket drawdown algılama |
+| 7 | `_check_monthly_loss()` | Aylık kayıp limiti |
+| 8 | `detect_regime()` | TREND/RANGE/VOLATILE/OLAY sınıflandırması |
+| 9 | `calculate_position_size()` | Risk tabanlı lot boyutlandırma |
+| 10 | `run_cycle()` | BABA ana 10-saniye döngüsü |
+| 11 | `_check_period_resets()` | Günlük/haftalık/aylık sıfırlama |
 
-**OĞUL — Emir Güvenliği (6 fonksiyon)**
+**OĞUL — Emir Güvenliği (5 fonksiyon)**
 
 | # | Fonksiyon | Görev |
 |---|-----------|-------|
-| 11 | `_send_order_signal()` | Emir öncesi tüm risk kontrolleri + sinyal yürütme |
-| 12 | `_check_end_of_day()` | 17:45 zorunlu kapanış |
-| 13 | `_verify_eod_closure()` | Gün sonu hayalet pozisyon temizliği |
-| 14 | `_check_advanced_risk_rules()` | Günlük -%3 kayıp tetigi |
-| 15 | `_manage_active_trades()` | OLAY rejiminde pozisyon yönetimi |
-| 16 | `process_signals()` | Sinyal işleme (SABİT çağrı sırasıyla) |
+| 12 | `_execute_signal()` | Emir öncesi risk kontrolleri + sinyal yürütme (BABA `can_trade` kapısı arkasında) |
+| 13 | `_check_end_of_day()` | 17:45 zorunlu kapanış (manuel + orphan hariç) |
+| 14 | `_verify_eod_closure()` | Gün sonu hayalet pozisyon temizliği (manuel + orphan exclusion) |
+| 15 | `_manage_active_trades()` | Pozisyon yönetimi (orphan guard'lı) |
+| 16 | `process_signals()` | Sinyal işleme (SABİT çağrı sırasıyla — günlük/aylık kayıp kontrolü BABA'ya devredildi) |
 
 **MT5 Bridge Koruması (6 fonksiyon)**
 
@@ -446,7 +446,7 @@ Bu fonksiyonların MANTIĞI değiştirilemez. İzin verilen: kanıtlı bug fix, 
 | 7 | **OLAY Rejimi** | `risk_multiplier = 0.0`. Yeni işlem açılmaz, mevcutlar kapatılır |
 | 8 | **Circuit Breaker** | 5 ardışık MT5 timeout → 30sn tüm MT5 çağrıları engellenir |
 | 9 | **Fail-Safe** | Güvenlik modülü sessizce devre dışı kalırsa sistem "kilitli" duruma düşer. Şüphede dur |
-| 10 | **Günlük Kayıp** | ≥%3 → tüm pozisyonlar kapatılır. ≥%2.5 → yeni işlem açılmaz |
+| 10 | **Günlük Kayıp** | BABA günlük/aylık kayıp tetiğinde L2 kill-switch devreye girer → `_close_ogul_and_hybrid()` çağrılır → SADECE OĞUL + Hybrid pozisyonları kapanır (manuel dokunulmaz). OĞUL artık kendi günlük kayıp check'i yapmaz — tek merkez BABA'dır |
 | 11 | **Başlatma Zinciri** | `start_ustat.py → ProcessGuard → Mutex → API thread (uvicorn) → port_open bekleme → Electron → wait` — sıra DEĞİŞTİRİLEMEZ |
 | 12 | **Lifespan Sırası** | `Config → Database → MT5Bridge → DataPipeline → Ustat → Baba → Ogul → Engine` — constructor sırası DEĞİŞTİRİLEMEZ |
 | 13 | **Kapanış Sırası** | Electron ÖNCE kapanır → lifespan engine.stop() → MT5 disconnect → DB close. Tersine çevirmek renderer crash'e neden olur |
