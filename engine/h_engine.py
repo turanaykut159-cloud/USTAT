@@ -448,7 +448,7 @@ class HEngine:
             trail_result = self.mt5.send_stop_limit(
                 symbol, trail_dir, volume,
                 suggested_sl, trail_limit,
-                comment=f"PRIMNET_TRAIL_{ticket}",
+                comment=f"TRL_{ticket}",
             )
             if trail_result is None:
                 result["message"] = "Stop trailing emri gönderilemedi — devir iptal"
@@ -468,7 +468,7 @@ class HEngine:
             tgt_result = self.mt5.send_limit(
                 symbol, tgt_dir, volume,
                 suggested_tp,
-                comment=f"PRIMNET_TGT_{ticket}",
+                comment=f"TGT_{ticket}",
             )
             if tgt_result is not None:
                 target_order_ticket = tgt_result["order_ticket"]
@@ -1024,8 +1024,8 @@ class HEngine:
 
             if self._use_stop_limit:
                 # 3a. Eski PRIMNET emirlerini iptal et
-                trail_comment = f"PRIMNET_TRAIL_{hp.ticket}"
-                tgt_comment = f"PRIMNET_TGT_{hp.ticket}"
+                trail_comment = f"TRL_{hp.ticket}"
+                tgt_comment = f"TGT_{hp.ticket}"
                 pending = self.mt5.get_pending_orders(hp.symbol)
                 for order in (pending or []):
                     cmt = str(order.get("comment", ""))
@@ -1053,7 +1053,7 @@ class HEngine:
                     trail_result = self.mt5.send_stop_limit(
                         hp.symbol, trail_dir, mt5_volume,
                         new_sl, trail_limit,
-                        comment=f"PRIMNET_TRAIL_{hp.ticket}",
+                        comment=f"TRL_{hp.ticket}",
                     )
                     if trail_result is not None:
                         new_trail_ticket = trail_result["order_ticket"]
@@ -1076,7 +1076,7 @@ class HEngine:
                         tgt_result = self.mt5.send_limit(
                             hp.symbol, tgt_dir, mt5_volume,
                             new_tp,
-                            comment=f"PRIMNET_TGT_{hp.ticket}",
+                            comment=f"TGT_{hp.ticket}",
                         )
                         if tgt_result is not None:
                             new_tgt_ticket = tgt_result["order_ticket"]
@@ -1167,8 +1167,8 @@ class HEngine:
 
             if self._use_stop_limit:
                 # Eski emirleri sil
-                trail_comment = f"PRIMNET_TRAIL_{hp.ticket}"
-                tgt_comment = f"PRIMNET_TGT_{hp.ticket}"
+                trail_comment = f"TRL_{hp.ticket}"
+                tgt_comment = f"TGT_{hp.ticket}"
                 pending = self.mt5.get_pending_orders(hp.symbol)
                 for order in (pending or []):
                     cmt = str(order.get("comment", ""))
@@ -1198,7 +1198,7 @@ class HEngine:
                     trail_result = self.mt5.send_stop_limit(
                         hp.symbol, trail_dir, mt5_volume,
                         hp.current_sl, trail_limit,
-                        comment=f"PRIMNET_TRAIL_{hp.ticket}",
+                        comment=f"TRL_{hp.ticket}",
                     )
                     if trail_result is not None:
                         new_trail_ticket = trail_result["order_ticket"]
@@ -1219,7 +1219,7 @@ class HEngine:
                         tgt_result = self.mt5.send_limit(
                             hp.symbol, tgt_dir, mt5_volume,
                             hp.current_tp,
-                            comment=f"PRIMNET_TGT_{hp.ticket}",
+                            comment=f"TGT_{hp.ticket}",
                         )
                         if tgt_result is not None:
                             new_tgt_ticket = tgt_result["order_ticket"]
@@ -1516,10 +1516,32 @@ class HEngine:
 
         # Yeni emir gönder (ilk kez veya eski iptal edilmiş)
         if hp.trailing_order_ticket == 0:
+            # v5.9.2 — Defansif orphan temizliği: yeni emir göndermeden ÖNCE
+            # MT5'teki aynı comment prefix ile bekleyen TÜM emirleri iptal et.
+            # Kural: "eğer emir değişirse eski emiri sil" → önce sil, sonra yerleştir.
+            trail_comment_prefix = f"TRL_{hp.ticket}"
+            orphans = self._find_orders_by_comment(hp.symbol, trail_comment_prefix)
+            for orphan in orphans:
+                o_ticket = orphan.get("ticket", 0)
+                if o_ticket == 0:
+                    continue
+                cancel_result = self.mt5.cancel_pending_order(o_ticket)
+                if cancel_result is not None:
+                    logger.warning(
+                        f"Orphan trailing emri yeni emir öncesi iptal: "
+                        f"order={o_ticket} {hp.symbol} "
+                        f"comment='{orphan.get('comment', '')}'"
+                    )
+                else:
+                    logger.error(
+                        f"Orphan trailing emri iptal edilemedi: "
+                        f"order={o_ticket} {hp.symbol}"
+                    )
+
             result = self.mt5.send_stop_limit(
                 hp.symbol, order_direction, hp.volume,
                 stop_price, limit_price,
-                comment=f"PRIMNET_TRAIL_{hp.ticket}",
+                comment=f"TRL_{hp.ticket}",
             )
             if result is not None:
                 hp.trailing_order_ticket = result["order_ticket"]
@@ -1610,7 +1632,7 @@ class HEngine:
                 hp.trailing_order_ticket = 0
             return
 
-        trail_comment = f"PRIMNET_TRAIL_{hp.ticket}"
+        trail_comment = f"TRL_{hp.ticket}"
 
         # ── v5.9.1: Duplikat trailing emir temizliği ───────────────
         # Sembol için TÜM PRIMNET_TRAIL emirlerini bul
@@ -1620,18 +1642,40 @@ class HEngine:
         ]
 
         if len(trail_orders) > 1:
-            # Duplikat! En eski emri (en küçük ticket) koru, gerisini sil
-            trail_orders.sort(key=lambda o: o.get("ticket", 0))
-            kept = trail_orders[0]
-            for dup in trail_orders[1:]:
+            # v5.9.2 — Duplikat! Önceki mantık en eski ticket'ı koruyordu;
+            # ama orphan TİPİK olarak daha eski. Artık:
+            #   1) Bellekteki hp.trailing_order_ticket bir eşleşme ise onu tut
+            #   2) Yoksa EN YENİ ticket'ı (en büyük) tut
+            # Diğerleri iptal edilir.
+            kept: dict | None = None
+            if hp.trailing_order_ticket > 0:
+                kept = next(
+                    (o for o in trail_orders
+                     if o.get("ticket") == hp.trailing_order_ticket),
+                    None,
+                )
+            if kept is None:
+                trail_orders_sorted = sorted(
+                    trail_orders,
+                    key=lambda o: o.get("ticket", 0),
+                    reverse=True,
+                )
+                kept = trail_orders_sorted[0]
+
+            kept_ticket = kept.get("ticket", 0)
+            for dup in trail_orders:
                 dup_ticket = dup.get("ticket", 0)
+                if dup_ticket == kept_ticket or dup_ticket == 0:
+                    continue
                 self.mt5.cancel_pending_order(dup_ticket)
                 logger.warning(
                     f"Duplikat trailing emir silindi: order={dup_ticket} "
-                    f"{hp.symbol} (toplam {len(trail_orders)} emir vardı)"
+                    f"{hp.symbol} comment='{dup.get('comment', '')}' "
+                    f"(toplam {len(trail_orders)} emir vardı, "
+                    f"yenisi order={kept_ticket} tutuldu)"
                 )
             # Kalan emri sahiplen
-            hp.trailing_order_ticket = kept.get("ticket", 0)
+            hp.trailing_order_ticket = kept_ticket
             logger.info(
                 f"Duplikat temizliği sonrası trailing emir: "
                 f"order={hp.trailing_order_ticket} {hp.symbol}"
@@ -1649,7 +1693,7 @@ class HEngine:
                 return
         else:
             # ── Durum 2: Restart sonrası yetim emir tarama ─────────
-            # Comment alanında PRIMNET_TRAIL_{ticket} ara
+            # Comment alanında TRL_{ticket} ara
             order = next(
                 (o for o in pending
                  if trail_comment in str(o.get("comment", ""))),
@@ -1831,9 +1875,77 @@ class HEngine:
             # Stop Limit mod: bekleyen emirleri eşleştir
             if self._use_stop_limit:
                 self._restore_stop_limit_tickets()
+            else:
+                # v5.9.2 — TRADE_ACTION_SLTP modunda bile: önceki session
+                # stop_limit modunda olabilir ve MT5'te PRIMNET_TRAIL/TGT
+                # comment'li orphan emirler bırakmış olabilir. Bu emirler
+                # yönetilmeden MT5'te duruyor ve tetiklenirse pozisyonu
+                # kapatıp yönün tersine emir açabilir (directional flip risk).
+                # Unconditional cleanup: mod fark etmez, orphan'ları temizle.
+                self._cleanup_primnet_orphans_on_restart()
 
         # Günlük PnL'yi DB'den yükle
         self._refresh_daily_pnl()
+
+    def _cleanup_primnet_orphans_on_restart(self) -> None:
+        """Restart sonrası PRIMNET orphan bekleyen emirleri temizle.
+
+        İki aşamalı temizlik:
+
+        1) **Comment bazlı temizlik:** TRL_*/TGT_* comment'li
+           bekleyen emirler bulunur ve iptal edilir.
+
+        2) **Yön bazlı savunma (fallback):** Comment eşleşmesi başarısız
+           olduğunda (broker comment'i sildiğinde) devreye girer. Pozisyonun
+           tersi yönündeki tüm izlenmeyen bekleyen emirler iptal edilir.
+           Bu directional flip riskini engelleyen son savunma katmanıdır.
+
+        Sadece AKTİF hybrid pozisyonlar için temizlik yapılır.
+        """
+        for hp in self.hybrid_positions.values():
+            if hp.state != "ACTIVE":
+                continue
+
+            # ── 1) Comment bazlı temizlik ──
+            for label, comment_prefix in [
+                ("trailing", f"TRL_{hp.ticket}"),
+                ("hedef", f"TGT_{hp.ticket}"),
+            ]:
+                matches = self._find_orders_by_comment(hp.symbol, comment_prefix)
+                if not matches:
+                    continue
+
+                logger.warning(
+                    f"Önceki session'dan {label} orphan bulundu: "
+                    f"pozisyon={hp.ticket} {hp.symbol} "
+                    f"({len(matches)} orphan emir) — temizleniyor"
+                )
+                for orphan in matches:
+                    o_ticket = orphan.get("ticket", 0)
+                    if o_ticket == 0:
+                        continue
+                    cancel_result = self.mt5.cancel_pending_order(o_ticket)
+                    if cancel_result is not None:
+                        logger.info(
+                            f"Orphan {label} emri iptal edildi: "
+                            f"order={o_ticket} {hp.symbol} "
+                            f"comment='{orphan.get('comment', '')}'"
+                        )
+                    else:
+                        logger.error(
+                            f"Orphan {label} emri iptal edilemedi: "
+                            f"order={o_ticket} {hp.symbol}"
+                        )
+
+            # ── 2) Yön bazlı savunma (fallback) ──
+            # Comment temizliği sonrası kalan izlenmeyen ters-yön orphan'ları
+            # yakala. Broker comment'i silmiş olabilir.
+            remaining = self._cancel_orphan_pendings_by_direction(hp)
+            if remaining > 0:
+                logger.warning(
+                    f"Yön bazlı fallback: pozisyon={hp.ticket} {hp.symbol} "
+                    f"{hp.direction} için {remaining} ek orphan iptal edildi"
+                )
 
     # ═════════════════════════════════════════════════════════════════
     #  DAHİLİ YARDIMCILAR
@@ -2253,10 +2365,32 @@ class HEngine:
             tgt_dir = "BUY"
             tgt_price = self._prim_to_price(target_prim, ref_price)
 
+        # v5.9.2 — Defansif orphan temizliği: yeni hedef emri göndermeden ÖNCE
+        # MT5'teki aynı comment prefix ile bekleyen TÜM emirleri iptal et.
+        # Kural: "eğer emir değişirse eski emiri sil" → önce sil, sonra yerleştir.
+        tgt_comment_prefix = f"TGT_{hp.ticket}"
+        orphans = self._find_orders_by_comment(hp.symbol, tgt_comment_prefix)
+        for orphan in orphans:
+            o_ticket = orphan.get("ticket", 0)
+            if o_ticket == 0:
+                continue
+            cancel_result = self.mt5.cancel_pending_order(o_ticket)
+            if cancel_result is not None:
+                logger.warning(
+                    f"Orphan hedef emri yeni emir öncesi iptal: "
+                    f"order={o_ticket} {hp.symbol} "
+                    f"comment='{orphan.get('comment', '')}'"
+                )
+            else:
+                logger.error(
+                    f"Orphan hedef emri iptal edilemedi: "
+                    f"order={o_ticket} {hp.symbol}"
+                )
+
         result = self.mt5.send_limit(
             hp.symbol, tgt_dir, hp.volume,
             tgt_price,
-            comment=f"PRIMNET_TGT_{hp.ticket}",
+            comment=f"TGT_{hp.ticket}",
         )
         if result is not None:
             hp.target_order_ticket = result["order_ticket"]
@@ -2405,7 +2539,7 @@ class HEngine:
                 trail_res = self.mt5.send_stop_limit(
                     hp.symbol, trail_dir, hp.volume,
                     new_sl, trail_limit,
-                    comment=f"PRIMNET_TRAIL_{ticket}",
+                    comment=f"TRL_{ticket}",
                 )
                 if trail_res is not None:
                     hp.trailing_order_ticket = trail_res["order_ticket"]
@@ -2477,12 +2611,125 @@ class HEngine:
 
         logger.info("PRİMNET günlük yenileme tamamlandı")
 
+    def _find_orders_by_comment(
+        self, symbol: str, comment_prefix: str,
+    ) -> list[dict]:
+        """Bekleyen emirler içinde comment substring eşleşmesi yap.
+
+        Broker comment'i kırpabilir, boşluk ekleyebilir veya değiştirebilir.
+        Bu nedenle strict `==` yerine substring `in` kullanılır. Bu sayede
+        restart sonrası orphan emirler de bulunur.
+
+        Eşleşme bulunamadığında tanı amaçlı TÜM bekleyen emirlerin gerçek
+        comment değerleri DEBUG seviyede loglanır — broker'ın comment'i
+        nasıl sakladığını öğrenmek için.
+
+        Args:
+            symbol: Kontrat sembolü.
+            comment_prefix: Aranacak comment substring (ör. "TRL_123").
+
+        Returns:
+            Eşleşen emir sözlüklerinin listesi. Boşsa liste döner.
+        """
+        pending = self.mt5.get_pending_orders(symbol)
+        if not pending:
+            return []
+        matches = [
+            o for o in pending
+            if comment_prefix in str(o.get("comment", ""))
+        ]
+        if not matches:
+            # Tanı: eşleşme yoksa gerçek comment değerlerini logla
+            actual_comments = [
+                f"ticket={o.get('ticket', 0)} "
+                f"type={o.get('type', '?')} "
+                f"vol={o.get('volume', 0)} "
+                f"comment='{o.get('comment', '')}'"
+                for o in pending
+            ]
+            logger.debug(
+                f"_find_orders_by_comment: aranan='{comment_prefix}' "
+                f"{symbol} eşleşme yok. "
+                f"Mevcut bekleyen emirler: {actual_comments}"
+            )
+        return matches
+
+    def _cancel_orphan_pendings_by_direction(
+        self, hp: "HybridPosition",
+    ) -> int:
+        """Pozisyonun TERS yönündeki izlenmeyen bekleyen emirleri iptal et.
+
+        Comment tabanlı eşleşme başarısız olduğunda (broker comment'i sildi
+        veya değiştirdi) devreye giren savunma katmanı. Directional flip
+        riskini engeller:
+
+        - SELL pozisyon → BUY_STOP_LIMIT / BUY_LIMIT / BUY_STOP orphan'ları
+        - BUY pozisyon  → SELL_STOP_LIMIT / SELL_LIMIT / SELL_STOP orphan'ları
+
+        Pozisyonun trailing_order_ticket / target_order_ticket alanında
+        kayıtlı olan emirler KORUNUR. Yalnızca izlenmeyen (orphan) emirler
+        iptal edilir.
+
+        Args:
+            hp: Hibrit pozisyon.
+
+        Returns:
+            İptal edilen orphan sayısı.
+        """
+        pending = self.mt5.get_pending_orders(hp.symbol)
+        if not pending:
+            return 0
+
+        # Pozisyonun tersi yönündeki emir tipleri (kapatıcı yön)
+        if hp.direction == "SELL":
+            dangerous_types = {"BUY_STOP_LIMIT", "BUY_LIMIT", "BUY_STOP"}
+        else:  # BUY
+            dangerous_types = {"SELL_STOP_LIMIT", "SELL_LIMIT", "SELL_STOP"}
+
+        # İzlenen (tracked) ticket'lar — bunlara dokunma
+        tracked: set[int] = set()
+        if getattr(hp, "trailing_order_ticket", 0) > 0:
+            tracked.add(hp.trailing_order_ticket)
+        if getattr(hp, "target_order_ticket", 0) > 0:
+            tracked.add(hp.target_order_ticket)
+
+        cancelled = 0
+        for order in pending:
+            o_type = str(order.get("type", ""))
+            if o_type not in dangerous_types:
+                continue
+            o_ticket = order.get("ticket", 0)
+            if o_ticket == 0 or o_ticket in tracked:
+                continue
+            o_comment = order.get("comment", "")
+            o_vol = order.get("volume", 0)
+            logger.warning(
+                f"Yön bazlı orphan tespit edildi: "
+                f"pozisyon={hp.ticket} {hp.symbol} {hp.direction} → "
+                f"orphan ticket={o_ticket} type={o_type} vol={o_vol} "
+                f"comment='{o_comment}' — iptal ediliyor"
+            )
+            result = self.mt5.cancel_pending_order(o_ticket)
+            if result is not None:
+                cancelled += 1
+                logger.info(
+                    f"Yön bazlı orphan iptal edildi: "
+                    f"order={o_ticket} {hp.symbol} type={o_type}"
+                )
+            else:
+                logger.error(
+                    f"Yön bazlı orphan iptal edilemedi: "
+                    f"order={o_ticket} {hp.symbol} type={o_type}"
+                )
+        return cancelled
+
     def _cancel_stop_limit_orders(self, hp: HybridPosition) -> None:
         """Pozisyona ait bekleyen emirleri (STOP/LIMIT) iptal et.
 
         Önce ticket ile iptal dener. Ticket eski/geçersizse comment
-        deseni ile MT5'teki tüm eşleşen emirleri bulur ve iptal eder.
-        Bu sayede restart sonrası kalan eski emirler de temizlenir.
+        substring eşleştirmesi ile MT5'teki TÜM eşleşen emirleri bulur ve
+        iptal eder. Bu sayede restart sonrası kalan eski emirler,
+        broker'ın comment'i kırptığı durumlar ve orphan'lar da temizlenir.
 
         Args:
             hp: Hibrit pozisyon.
@@ -2491,11 +2738,11 @@ class HEngine:
             return
 
         for attr_name, label, comment_prefix in [
-            ("trailing_order_ticket", "trailing", f"PRIMNET_TRAIL_{hp.ticket}"),
-            ("target_order_ticket", "hedef", f"PRIMNET_TGT_{hp.ticket}"),
+            ("trailing_order_ticket", "trailing", f"TRL_{hp.ticket}"),
+            ("target_order_ticket", "hedef", f"TGT_{hp.ticket}"),
         ]:
             order_ticket = getattr(hp, attr_name, 0)
-            cancelled = False
+            cancelled_tickets: set[int] = set()
 
             # 1) Ticket ile iptal dene
             if order_ticket > 0:
@@ -2505,79 +2752,116 @@ class HEngine:
                         f"Bekleyen {label} emri iptal edildi: "
                         f"order={order_ticket} {hp.symbol}"
                     )
-                    cancelled = True
+                    cancelled_tickets.add(order_ticket)
                 else:
                     logger.warning(
                         f"Bekleyen {label} emri ticket ile iptal edilemedi: "
                         f"order={order_ticket} {hp.symbol} — comment ile aranacak"
                     )
 
-            # 2) Comment deseni ile MT5'teki TÜM eşleşen emirleri bul ve iptal et
-            #    (eski ticket kalmış olabilir, restart sonrası iki emir oluşmuş olabilir)
-            pending = self.mt5.get_pending_orders(hp.symbol)
-            if pending:
-                for order in pending:
-                    o_ticket = order.get("ticket", 0)
-                    o_comment = order.get("comment", "")
-                    if o_comment == comment_prefix and o_ticket != order_ticket:
-                        result = self.mt5.cancel_pending_order(o_ticket)
-                        if result is not None:
-                            logger.info(
-                                f"Eski {label} emri comment ile bulunup iptal edildi: "
-                                f"order={o_ticket} {hp.symbol} comment='{o_comment}'"
-                            )
-                        else:
-                            logger.warning(
-                                f"Eski {label} emri comment ile bulunamadı/iptal edilemedi: "
-                                f"order={o_ticket} {hp.symbol}"
-                            )
+            # 2) Comment substring eşleştirmesi ile TÜM eşleşen emirleri temizle
+            #    (orphan'lar, broker'ın comment'i kırptığı durumlar, restart
+            #    sonrası kalan eski emirler dahil)
+            matches = self._find_orders_by_comment(hp.symbol, comment_prefix)
+            for order in matches:
+                o_ticket = order.get("ticket", 0)
+                if o_ticket == 0 or o_ticket in cancelled_tickets:
+                    continue
+                o_comment = order.get("comment", "")
+                result = self.mt5.cancel_pending_order(o_ticket)
+                if result is not None:
+                    cancelled_tickets.add(o_ticket)
+                    logger.info(
+                        f"Eski {label} emri comment ile bulunup iptal edildi: "
+                        f"order={o_ticket} {hp.symbol} comment='{o_comment}'"
+                    )
+                else:
+                    logger.warning(
+                        f"Eski {label} emri comment ile iptal edilemedi: "
+                        f"order={o_ticket} {hp.symbol} comment='{o_comment}'"
+                    )
 
             setattr(hp, attr_name, 0)
 
     def _restore_stop_limit_tickets(self) -> None:
         """Restart sonrası bekleyen Stop Limit emirlerini hibrit pozisyonlarla eşleştir.
 
-        MT5'teki bekleyen emirlerin comment alanından PRIMNET_TRAIL_<ticket> ve
-        PRIMNET_TGT_<ticket> bilgisi çıkarılır, ilgili pozisyonla eşlenir.
-        Eşleşmeyen emirler loglanır.
+        MT5'teki bekleyen emirlerin comment alanından TRL_<ticket> ve
+        TGT_<ticket> bilgisi çıkarılır, ilgili pozisyonla eşlenir.
+        Comment substring eşleştirmesi kullanılır — broker'ın comment'i kırpmış
+        olma ihtimalini tolere eder.
+
+        Birden fazla eşleşme varsa (duplikat / orphan senaryosu): EN YÜKSEK
+        ticket'lı (en yeni) emir sahiplenilir, diğerleri iptal edilir.
+
+        Comment eşleşmesi HİÇ bulunamazsa (broker comment'i sildi), yön bazlı
+        savunma devreye girer: pozisyonun ters yönündeki izlenmeyen tüm
+        bekleyen emirler iptal edilir (directional flip koruması).
         """
         for hp in self.hybrid_positions.values():
             if hp.state != "ACTIVE":
                 continue
-            pending = self.mt5.get_pending_orders(hp.symbol)
-            if not pending:
-                continue
 
-            for order in pending:
-                comment = order.get("comment", "")
-                order_ticket = order.get("ticket", 0)
-                if not order_ticket:
+            comment_match_found = False
+
+            for attr_name, label, comment_prefix in [
+                ("trailing_order_ticket", "Trailing", f"TRL_{hp.ticket}"),
+                ("target_order_ticket", "Hedef", f"TGT_{hp.ticket}"),
+            ]:
+                matches = self._find_orders_by_comment(hp.symbol, comment_prefix)
+
+                if not matches:
+                    logger.warning(
+                        f"{label} Stop Limit bulunamadı: pozisyon={hp.ticket} "
+                        f"{hp.symbol} — sonraki cycle'da yeniden yerleştirilecek"
+                    )
+                    setattr(hp, attr_name, 0)
                     continue
 
-                if comment == f"PRIMNET_TRAIL_{hp.ticket}":
-                    hp.trailing_order_ticket = order_ticket
-                    logger.info(
-                        f"Trailing Stop Limit eşleştirildi: order={order_ticket} "
-                        f"← pozisyon={hp.ticket} {hp.symbol}"
-                    )
-                elif comment == f"PRIMNET_TGT_{hp.ticket}":
-                    hp.target_order_ticket = order_ticket
-                    logger.info(
-                        f"Hedef Stop Limit eşleştirildi: order={order_ticket} "
-                        f"← pozisyon={hp.ticket} {hp.symbol}"
-                    )
+                comment_match_found = True
 
-            # Emir bulunamadıysa: yeniden yerleştir
-            if hp.trailing_order_ticket == 0:
-                logger.warning(
-                    f"Trailing Stop Limit bulunamadı: pozisyon={hp.ticket} "
-                    f"{hp.symbol} — sonraki cycle'da yeniden yerleştirilecek"
+                # Birden fazla eşleşme → EN YENİ ticket'ı (en büyük) tut
+                matches.sort(key=lambda o: o.get("ticket", 0), reverse=True)
+                kept = matches[0]
+                kept_ticket = kept.get("ticket", 0)
+
+                # Orphan / duplikat'ları iptal et
+                for dup in matches[1:]:
+                    dup_ticket = dup.get("ticket", 0)
+                    if dup_ticket == 0:
+                        continue
+                    cancel_result = self.mt5.cancel_pending_order(dup_ticket)
+                    if cancel_result is not None:
+                        logger.warning(
+                            f"Orphan {label} emri iptal edildi: "
+                            f"order={dup_ticket} {hp.symbol} "
+                            f"comment='{dup.get('comment', '')}' "
+                            f"(toplam {len(matches)} duplikat bulundu, "
+                            f"yenisi order={kept_ticket} tutuldu)"
+                        )
+                    else:
+                        logger.error(
+                            f"Orphan {label} emri iptal edilemedi: "
+                            f"order={dup_ticket} {hp.symbol}"
+                        )
+
+                setattr(hp, attr_name, kept_ticket)
+                logger.info(
+                    f"{label} Stop Limit eşleştirildi: order={kept_ticket} "
+                    f"← pozisyon={hp.ticket} {hp.symbol}"
                 )
-            if hp.target_order_ticket == 0:
-                logger.warning(
-                    f"Hedef Stop Limit bulunamadı: pozisyon={hp.ticket} "
-                    f"{hp.symbol} — sonraki cycle'da yeniden yerleştirilecek"
-                )
+
+            # Comment eşleşmesi HİÇ bulunamadıysa → yön bazlı savunma
+            # Broker comment'i silmiş olabilir. Directional flip riskini
+            # engellemek için ters yöndeki izlenmeyen tüm orphan'ları iptal et.
+            if not comment_match_found:
+                fallback_cancelled = self._cancel_orphan_pendings_by_direction(hp)
+                if fallback_cancelled > 0:
+                    logger.warning(
+                        f"Yön bazlı fallback (restore): pozisyon={hp.ticket} "
+                        f"{hp.symbol} {hp.direction} için {fallback_cancelled} "
+                        f"izlenmeyen orphan iptal edildi (comment eşleşmesi yoktu)"
+                    )
 
     def _handle_external_close(self, hp: HybridPosition) -> None:
         """MT5'te kapatılmış (harici kapanış) hibrit pozisyonu işle.
