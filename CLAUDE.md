@@ -554,6 +554,44 @@ Adımlar:
 - Build sonrası uygulamayı yeniden başlat: `python .agent/claude_bridge.py restart_app`
 - Değişikliğin ekranda göründüğünü doğrula (ekran görüntüsü veya kullanıcı teyidi)
 
+### ADIM 1.5: KRİTİK AKIŞ TESTLERİ — ZORUNLU KORUMA HALKASI
+
+**⚠️ NEDEN ZORUNLU:** "Bir yeri tamir ederken başka bir yeri bozmamak" anayasal bir gerekliliktir. Bu adım atlandığı için geçmişte hibrit devir akışı, TopBar banner, send_order SL/TP gibi kritik davranışlar sessizce bozuldu. Artık HER değişiklik sonrası `tests/critical_flows` YEŞİLE dönmek zorundadır.
+
+**Çalıştırma:**
+```bash
+python -m pytest tests/critical_flows -q --tb=short
+```
+
+**Beklenen çıktı:** `N passed` — başarısız test VARSA commit YASAK.
+
+**Kapsam (12 kritik akış):**
+1. `send_order` 2-aşamalı SL/TP ekleme (mt5_bridge)
+2. SL/TP başarısız → korumasız pozisyon kapatma (ogul.py Anayasa 4.4)
+3. EOD 17:45 zorunlu kapanış (ogul `_check_end_of_day`)
+4. Hard drawdown ≥%15 → L3 (baba `_check_hard_drawdown`)
+5. Kill-switch L2 — `_close_ogul_and_hybrid` (manuel dokunulmaz)
+6. Kill-switch L3 — `_close_all_positions`
+7. BABA `can_trade` kapısı OĞUL'da kontrol (`_execute_signal`)
+8. Circuit breaker 5 ardışık timeout
+9. heartbeat `terminal_info` → `_trade_allowed` yakalaması
+10. Main loop sırası: BABA önce, OĞUL sonra
+11. Config'den sihirli sayı kullanımı (`self.config.get` ile)
+12. `mt5.initialize()` evrensel koruma (bridge dışı yasak)
+
+**Eksik akış ekleme kuralı:** Yeni bir kritik davranış eklendiğinde (ör. yeni kill-switch katmanı, yeni koruma fonksiyonu) `tests/critical_flows/test_static_contracts.py` içinde statik sözleşme testi yazılır. Test yazılmadan commit YASAK.
+
+**Pre-commit entegrasyonu:** `.githooks/pre-commit` bu testleri otomatik çalıştırır. Kurulum:
+```bash
+git config core.hooksPath .githooks
+```
+
+**Etki analizi aracı:** Kırmızı Bölge dosyasına dokunmadan ÖNCE:
+```bash
+python tools/impact_map.py <dosya_yolu>
+python tools/impact_map.py <dosya>::<fonksiyon>  # Fonksiyon çağrı zinciri
+```
+
 ### ADIM 2: Gelişim Tarihçesine Yaz
 `docs/USTAT_GELISIM_TARIHCESI.md` dosyasına giriş ekle (Keep a Changelog formatı):
 - İlgili versiyon bloğuna (#N numaralı, 1-2 satır madde)
