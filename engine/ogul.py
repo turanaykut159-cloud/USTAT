@@ -792,11 +792,26 @@ class Ogul:
 
             if prev_atr > 0 and recent_atr > prev_atr:
                 result["atr_expanding"] = True
-                if buy_votes > sell_votes:
-                    buy_votes += 1
-                elif sell_votes > buy_votes:
-                    sell_votes += 1
-                # Beraberlikte ATR oy vermez — tiebreaker ağırlıklı skorla çözülür
+                # O-4/O-5: ATR yon bilgisi vermez. Son 3 mum yon konsensusu
+                # ile birlestirilerek oy verilir. Pozitif/negatif bar sayimi
+                # 2+ ise o yone, karisiksa ATR oyu verilmez.
+                if len(close) >= 3:
+                    last3_up = sum(
+                        1 for i in range(-3, 0)
+                        if close[i] > close[i - 1]
+                    )
+                    last3_down = sum(
+                        1 for i in range(-3, 0)
+                        if close[i] < close[i - 1]
+                    )
+                    if last3_up >= 2:
+                        buy_votes += 1
+                        result["atr_direction"] = "BUY"
+                    elif last3_down >= 2:
+                        sell_votes += 1
+                        result["atr_direction"] = "SELL"
+                    else:
+                        result["atr_direction"] = "NOTR"
             elif _vol_regime == "LOW" and prev_atr > 0:
                 # Düşük volatilite: ATR genişlemese bile stabil ise kabul et
                 # (sıkışma bölgesinde sinyal kaçırmamak için)
