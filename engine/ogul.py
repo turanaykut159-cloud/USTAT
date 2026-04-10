@@ -2169,22 +2169,23 @@ class Ogul:
                 )
                 continue
             closed = False
-            for attempt in range(1, 6):
+            # C-5: 5x1s -> 3x0.5s. Worst-case bloklama 5sn -> 1.5sn.
+            for attempt in range(1, 4):
                 try:
                     result = self.mt5.close_position(ticket)
                     if result:
                         logger.info(
                             f"EOD doğrulama — ticket={ticket} kapatıldı "
-                            f"(deneme {attempt}/5)"
+                            f"(deneme {attempt}/3)"
                         )
                         closed = True
                         break
                 except Exception as exc:
                     logger.error(
                         f"EOD doğrulama — close hatası ticket={ticket} "
-                        f"deneme {attempt}/5: {exc}"
+                        f"deneme {attempt}/3: {exc}"
                     )
-                _time.sleep(1)
+                _time.sleep(0.5)
             if not closed:
                 still_open.append(ticket)
 
