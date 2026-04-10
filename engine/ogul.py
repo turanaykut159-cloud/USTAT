@@ -2763,7 +2763,9 @@ class Ogul:
         else:
             profit = trade.entry_price - current_price
 
-        if profit < -0.3 * atr_val:
+        # O-14: -0.3*ATR cok hassas idi; trailing SL 1-1.5*ATR'de bekledigi
+        # icin 0.8*ATR aleyhe daha gercekci panik esigi.
+        if profit < -0.8 * atr_val:
             # Hacim patlaması + pozisyon aleyhine → anında kapat
             logger.warning(
                 f"Hacim patlaması (aleyhine) [{symbol}]: "
