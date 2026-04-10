@@ -236,3 +236,117 @@ def test_no_rogue_mt5_initialize_calls():
         "Anayasa Kural 16 ihlal ediliyor — tum MT5 bagliligi "
         "mt5_bridge.connect() uzerinden yapilmali."
     )
+
+
+# ── Flow 13: main.js singleton conflict kesin cikis ──────────────
+def test_mainjs_singleton_conflict_exits_with_code_42():
+    """desktop/main.js singleton lock basarisiz olunca app.exit(42).
+
+    Bug: Onceki surumde 'app.quit()' asenkron oldugu icin
+    whenReady() promise'i yine fire ediyor, createWindow() cagriliyor
+    ve bir hayalet pencere olusup Chromium userData mutex'i tutuyordu.
+    Sonraki her baslatma denemesi bu mutex yuzunden bloke oluyordu.
+
+    Koruma: Singleton catismasinda app.exit(42) ile SENKRON cikis
+    yapilmali — exit code 42 parent Python'a 'singleton catismasi'
+    sinyali gonderir, boylece parent ProcessGuard sweep + retry
+    uygulayabilir.
+    """
+    main_js = ROOT / "desktop" / "main.js"
+    assert main_js.exists(), "desktop/main.js bulunamadi"
+    src = main_js.read_text(encoding="utf-8", errors="ignore")
+
+    # gotTheLock kontrolu var
+    assert "gotTheLock" in src, "requestSingleInstanceLock kontrolu bulunamadi"
+
+    # Singleton conflict branch'inde app.exit(42) olmali
+    # Bolgeyi isolate et: 'if (!gotTheLock)' ile baslayan blok
+    m = re.search(r"if\s*\(\s*!\s*gotTheLock\s*\)\s*\{([^}]*)\}", src, re.DOTALL)
+    assert m, "'if (!gotTheLock) {...}' blogu bulunamadi"
+    block = m.group(1)
+
+    # Blokta app.exit(42) olmali (app.quit() yalniz degil — quit async!)
+    assert re.search(r"app\.exit\s*\(\s*42\s*\)", block), (
+        f"Singleton conflict blogunda 'app.exit(42)' bulunamadi. "
+        f"Blok icerigi: {block!r}. "
+        "BUG: app.quit() asenkron oldugu icin whenReady() fire eder ve "
+        "hayalet pencere olusur — app.exit(42) ile senkron cikis zorunlu."
+    )
+
+
+# ── Flow 14: ustat_agent.py Electron killer gercek ───────────────
+def test_agent_stop_app_kills_electron_reliably():
+    """ustat_agent.py handle_stop_app psutil ile Electron'u oldurur.
+
+    Bug: Eski surum PowerShell 'Get-Process | Where CommandLine -match' kullaniyordu.
+    Get-Process Windows'ta CommandLine property'sini POPULATE ETMEZ —
+    regex asla eslesmiyor, Electron asla oldurulmuyordu. Her restart_app
+    bir zombi Electron yaratiyor, 3 restart sonrasi singleton kilidi bloke
+    oluyordu.
+
+    Koruma: handle_stop_app icinde psutil.process_iter ile electron.exe
+    cmdline'i USTAT iceren process'ler bulunup taskkill ile oldurulmeli.
+    """
+    agent_py = ROOT / "ustat_agent.py"
+    assert agent_py.exists(), "ustat_agent.py bulunamadi"
+    src = agent_py.read_text(encoding="utf-8", errors="ignore")
+
+    # handle_stop_app fonksiyonunu izole et
+    m = re.search(
+        r"def handle_stop_app\([^)]*\)[^:]*:(.*?)(?=\n(?:def |class )\w)",
+        src, re.DOTALL,
+    )
+    assert m, "handle_stop_app fonksiyonu bulunamadi"
+    body = m.group(1)
+
+    # psutil + electron + USTAT cmdline filtresi ile kill marker
+    assert "psutil" in body, (
+        "handle_stop_app'ta 'psutil' referansi yok — "
+        "PowerShell Get-Process.CommandLine calismadigi icin psutil zorunlu"
+    )
+    assert "electron" in body.lower(), (
+        "handle_stop_app'ta 'electron' filtresi yok"
+    )
+    # Marker: yeni reliable kill cagrisi
+    assert "_kill_ustat_electrons" in body or "kill_electron_processes" in body, (
+        "handle_stop_app icinde USTAT Electron kill helper cagrisi bulunamadi. "
+        "_kill_ustat_electrons(...) veya kill_electron_processes(...) marker'i gerekli."
+    )
+
+
+# ── Flow 15: start_ustat singleton exit code 42 retry ────────────
+def test_start_ustat_handles_electron_exit_42():
+    """start_ustat.py run_webview_process, Electron exit code 42'yi yakalar.
+
+    Koruma: Electron singleton catismasi (exit 42) durumunda parent
+    Python ProcessGuard ile orphan sweep yapmali ve en cok 1 kez retry
+    denemeli. Ardisik 2 catisma sonrasi durulmali (sonsuz dongu korumasi).
+
+    Bu koruma run_webview_process Siyah Kapi fonksiyonuna SADECE ADDITIVE
+    bir katmandir — mevcut kapanis zinciri degismez.
+    """
+    start_py = ROOT / "start_ustat.py"
+    assert start_py.exists(), "start_ustat.py bulunamadi"
+    src = start_py.read_text(encoding="utf-8", errors="ignore")
+
+    # run_webview_process fonksiyonunu izole et
+    m = re.search(
+        r"def run_webview_process\([^)]*\)[^:]*:(.*?)(?=\n(?:def |_\w+\s*=\s*None))",
+        src, re.DOTALL,
+    )
+    assert m, "run_webview_process fonksiyonu bulunamadi"
+    body = m.group(1)
+
+    # Exit code 42 handling
+    assert "42" in body, (
+        "run_webview_process'ta exit code 42 referansi bulunamadi"
+    )
+    # Retry sayaci marker
+    assert re.search(r"singleton_retry|SINGLETON_RETRY|_singleton_retries", body), (
+        "run_webview_process'ta singleton retry sayaci marker'i bulunamadi. "
+        "'singleton_retry' veya '_singleton_retries' degiskeni gerekli."
+    )
+    # Pre-flight sweep: ProcessGuard icin marker
+    assert "_find_orphan_electrons" in body or "ProcessGuard" in body, (
+        "run_webview_process'ta orphan Electron sweep marker'i bulunamadi"
+    )
