@@ -55,7 +55,10 @@
 
 ---
 
-## [5.9.0] — 2026-03-28 / 2026-04-09
+## [5.9.0] — 2026-03-28 / 2026-04-10
+
+### Fixed
+- #147 — PRİMNET netting SYNC atomik refactor: lot ekleme/çıkarma senkronizasyonunda state desync (retcode 10019 NO MONEY sonrası hp.volume eski pending emirlerle uyumsuz kalıyordu) giderildi. Margin ön kontrolü (free_margin ≥ 2000, margin_level ≥ 150%), atomik commit (hp.volume/entry_price SADECE emir başarısı sonrası güncellenir), trailing→hedef rollback mekanizması, lot çıkarmada entry_price/SL/TP koruması (netting mode MT5 davranışıyla birebir uyum). Config: `primnet.netting_sync_min_free_margin`, `primnet.netting_sync_min_margin_level` (h_engine.py, tests/test_hybrid_100.py)
 
 ### Added
 - #139 — Kill-Switch bilgi modalı: Risk Yönetimi sayfasında Kill-Switch kartına tıklanınca seviye, neden, tetiklenme zamanı ve engelli kontratları gösteren modal pencere açılıyor (RiskManagement.jsx, api/routes/risk.py, api/schemas.py)

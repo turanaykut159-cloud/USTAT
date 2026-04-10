@@ -154,6 +154,18 @@ class MockMT5:
     def get_symbol_info(self, symbol):
         return MockSymbolInfo()
 
+    def get_account_info(self):
+        """v5.9.2 netting sync için — test fallback (None = margin check skip)."""
+        return None
+
+    def get_pending_orders(self, symbol=None):
+        """v5.9.2 netting sync — test ortamında pending emir yok."""
+        return []
+
+    def cancel_pending_order(self, order_ticket):
+        """v5.9.2 netting sync — test ortamında no-op."""
+        return {"retcode": 0}
+
     def modify_position(self, ticket, sl=None, tp=None):
         self.modify_calls.append({"ticket": ticket, "sl": sl, "tp": tp})
         if self._modify_fail:
