@@ -1538,8 +1538,8 @@ class Ogul:
             return None
         price = tick.ask if direction == SignalType.BUY else tick.bid
 
-        # SL / TP — ÜSTAT strateji havuzundan dinamik parametre
-        bo_sl_mult = self._get_ustat_param("sl_atr_mult", BO_SL_ATR_MULT)
+        # SL / TP — YAPISAL (O-9): konsolidasyon low/high - 0.2*ATR buffer
+        # Eski: sabit 1.5*ATR mesafe → yapı ile ilgisiz, false BO'da gec cikis
         range_width = high_20 - low_20
         # Fix M15: Çok dar range → TP=entry olur, anlamsız işlem → reddet
         if range_width < atr_val * 0.5:
@@ -1550,11 +1550,14 @@ class Ogul:
             )
             return None
 
+        sl_buffer = 0.2 * atr_val
         if direction == SignalType.BUY:
-            sl = last_close - bo_sl_mult * atr_val
+            # BUY: konsolidasyon tabanı (low_20) altına 0.2*ATR buffer
+            sl = low_20 - sl_buffer
             tp = price + range_width
         else:
-            sl = last_close + bo_sl_mult * atr_val
+            # SELL: konsolidasyon tavanı (high_20) üstüne 0.2*ATR buffer
+            sl = high_20 + sl_buffer
             tp = price - range_width
 
         # Sinyal gücü: hacim patlaması (0-0.5) + ATR genişleme (0-0.3) + kırılım büyüklüğü (0-0.2)
