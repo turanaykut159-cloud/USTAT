@@ -385,15 +385,17 @@ export default function Dashboard() {
       if (result.success) {
         setHybridTickets((prev) => new Set([...prev, ticket]));
       } else {
+        // Backend zaten enrich_message() ile cok satirli zengin metin dondurur
+        // (Neden + Nasil duzeltilir + retcode). Prefix eklemeden ham mesaji goster.
         setErrorModal({
           title: 'Devir Hatası',
-          message: 'Devir hatası: ' + (result.message || 'Bilinmeyen hata'),
+          message: result.message || 'Bilinmeyen hata — devir tamamlanamadı.',
         });
       }
     } catch (err) {
       setErrorModal({
         title: 'Devir Hatası',
-        message: 'Devir hatası: ' + (err?.message ?? String(err)),
+        message: 'Devir isteği gönderilemedi: ' + (err?.message ?? String(err)),
       });
     } finally {
       setTransferringTicket(null);

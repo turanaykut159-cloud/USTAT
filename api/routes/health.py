@@ -81,6 +81,19 @@ async def get_health():
         orders_data = snap.get("orders", {})
         alarms_data = snap.get("alarms", {})
 
+    # ── 1b. MT5 Algo Trading durumu ───────────────────────────────
+    # terminal_info().trade_allowed heartbeat'te guncellenir. False ise
+    # retcode 10027 riski — TopBar uyari banner'i icin frontend okur.
+    try:
+        mt5_bridge = getattr(engine, "mt5", None) if engine else None
+        if mt5_bridge and hasattr(mt5_bridge, "is_trade_allowed"):
+            mt5_data["trade_allowed"] = bool(mt5_bridge.is_trade_allowed())
+        else:
+            mt5_data["trade_allowed"] = True  # bilinmiyor => varsayilan ACIK
+    except Exception as exc:
+        logger.debug(f"trade_allowed okunamadi: {exc}")
+        mt5_data["trade_allowed"] = True
+
     # ── 2. Katman durumları ───────────────────────────────────────
     layers = _build_layers()
 

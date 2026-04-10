@@ -6,7 +6,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { getStatus, getAccount, acknowledgeKillSwitch, getAgentStatus } from '../services/api';
+import { getStatus, getAccount, acknowledgeKillSwitch, getAgentStatus, getHealth } from '../services/api';
 import { formatMoney } from '../utils/formatters';
 
 // ── Faz etiketleri ──────────────────────────────────────────────
@@ -35,6 +35,7 @@ export default function TopBar() {
   const [ksResetting, setKsResetting] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [agentAlive, setAgentAlive] = useState(false);
+  const [tradeAllowed, setTradeAllowed] = useState(true);
   const [isMaximized, setIsMaximized] = useState(false);
   // ── v5.9: Pencere durumu kontrolü ────────────────────────────
   useEffect(() => {
@@ -74,6 +75,25 @@ export default function TopBar() {
     };
     checkAgent();
     const iv = setInterval(checkAgent, 10000);
+    return () => clearInterval(iv);
+  }, []);
+
+  // ── Health / trade_allowed polling (10sn) ────────────────────
+  // MT5 terminalindeki "Algo Trading" butonu KAPALI ise emir gonderimi
+  // retcode 10027 ile reddedilir. Kullaniciya banner ile gosterilir.
+  useEffect(() => {
+    const checkHealth = async () => {
+      try {
+        const h = await getHealth();
+        const allowed = h?.mt5?.trade_allowed;
+        // undefined => bilinmiyor, varsayilan ACIK. Sadece kesin false'ta uyari.
+        setTradeAllowed(allowed !== false);
+      } catch {
+        // sessizce gecildi — bagimsiz uyari
+      }
+    };
+    checkHealth();
+    const iv = setInterval(checkHealth, 10000);
     return () => clearInterval(iv);
   }, []);
 
@@ -181,6 +201,19 @@ export default function TopBar() {
           <span className="tb-conn-dot" />
           {agentAlive ? 'AJAN' : 'Ajan Yok'}
         </span>
+
+        {isConnected && !tradeAllowed && (
+          <span
+            className="tb-algo-warn"
+            title={
+              'MT5 terminalinde Algo Trading butonu KAPALI — ÜSTAT emir gönderemez.\n\n' +
+              'Çözüm: MT5 penceresini açın, üstteki araç çubuğunda "Algo Trading" butonuna ' +
+              'tıklayın (veya Ctrl+E). Buton yeşil olduğunda ÜSTAT otomatik tekrar devreye girer.'
+            }
+          >
+            ⚠ ALGO KAPALI
+          </span>
+        )}
       </div>
 
       {/* ── SAĞ: Finansal veriler + Pin + Saat ─────────────────── */}
