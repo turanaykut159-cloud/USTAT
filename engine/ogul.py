@@ -1427,13 +1427,16 @@ class Ogul:
         # SL / TP — ÜSTAT strateji havuzundan dinamik parametre
         mr_sl_mult = self._get_ustat_param("sl_atr_mult", MR_SL_ATR_MULT)
 
-        # v14: TP hedefi BB_mid + 0.3×ATR (BB_mid tek başına çok konservatif)
+        # Y-5: Mean reversion TP = BB orta bandi (gercek reversion hedefi).
+        # Onceden +/- 0.3*ATR eklenmisti - BB orta bandini astiriyor ve
+        # expectancy dusuruyordu. Trailing TP zaten asildiginda devam
+        # ettiriyor, sabit TP BB_mid'de birakildi.
         if direction == SignalType.BUY:
             sl = bb_low - mr_sl_mult * atr_val
-            tp = bb_mid + 0.3 * atr_val
+            tp = bb_mid
         else:
             sl = bb_up + mr_sl_mult * atr_val
-            tp = bb_mid - 0.3 * atr_val
+            tp = bb_mid
 
         # Sinyal gücü: RSI aşırılık (0-0.5) + BB temas (0-0.3) + ADX zayıflık (0-0.2)
         if direction == SignalType.BUY:
