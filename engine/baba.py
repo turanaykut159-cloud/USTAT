@@ -1372,9 +1372,12 @@ class Baba:
             verdict.kill_switch_level = KILL_SWITCH_L2
             verdict.reason = "KILL_SWITCH L2 aktif — sistem durduruldu"
             # v5.9.2: L2 nedenine göre kısıtlı risk_multiplier
+            # v5.9.3 — BULGU #1 fix: Anayasa Kural 7 gereği OLAY rejimi
+            # risk_multiplier 0.0 olmalı ("yeni işlem açılmaz, mevcutlar kapatılır").
+            # Önceden yanlış olarak 0.15 verilmişti.
             ks_reason = self._kill_switch_details.get("reason", "")
             if ks_reason == "olay_regime":
-                verdict.risk_multiplier = 0.15  # OLAY: çok küçük pozisyon
+                verdict.risk_multiplier = 0.0   # OLAY: Anayasa Kural 7 — tam blok
             elif ks_reason in ("daily_loss", "consecutive_loss"):
                 verdict.risk_multiplier = 0.0   # Kayıp bazlı: tam blok
             else:
@@ -2167,7 +2170,10 @@ class Baba:
         # Manuel pozisyonlar ManuelMotor'un sorumluluğunda — dokunulmaz.
         # Eskiden bu iş OĞUL _check_advanced_risk_rules'in işiydi;
         # tek merkezi kapanış yeri olarak BABA'ya taşındı.
-        elif level == KILL_SWITCH_L2 and reason in ("daily_loss", "monthly_loss"):
+        # v5.9.3 — BULGU #1 fix: OLAY rejimi L2 de OĞUL + H-Engine pozisyonlarını
+        # kapatır (Anayasa Kural 7: "Yeni işlem açılmaz, mevcutlar kapatılır").
+        # Manuel pozisyonlar yine dokunulmaz.
+        elif level == KILL_SWITCH_L2 and reason in ("daily_loss", "monthly_loss", "olay_regime"):
             try:
                 self._close_ogul_and_hybrid(f"KILL_SWITCH_L2_{reason}")
             except Exception as exc:
