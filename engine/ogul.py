@@ -3415,11 +3415,28 @@ class Ogul:
                 # Eski davranış: pop → aynı sembole tekrar emir → kontrolsüz birikim
                 orphan_count += 1
                 trade.orphan = True
-                logger.warning(
-                    f"Yetim pozisyon [{symbol}]: ticket={ticket} "
+                # Y-9: warning -> CRITICAL + event_bus emit.
+                # Yetim pozisyon = ciddi durum, operatör dikkati gerekli.
+                logger.critical(
+                    f"YETIM POZISYON [{symbol}]: ticket={ticket} "
                     f"{direction} {pos.get('volume', 0)} lot — "
-                    f"active_trades'te TUTULUYOR (duplicate engeli)"
+                    f"DB eslesmesi YOK, active_trades'te TUTULUYOR "
+                    f"(duplicate engeli). OPERATOR KONTROLU GEREKLI."
                 )
+                try:
+                    from engine.event_bus import emit as _emit_orphan
+                    _emit_orphan("orphan_detected", {
+                        "symbol": symbol,
+                        "ticket": ticket,
+                        "direction": direction,
+                        "volume": pos.get("volume", 0),
+                        "message": (
+                            f"{symbol} yetim pozisyon tespit edildi "
+                            f"(ticket={ticket}). DB eslesmesi yok."
+                        ),
+                    })
+                except Exception:
+                    pass
                 continue
 
         # ── v5.8: Post-restore manuel pozisyon doğrulama ──────────────
