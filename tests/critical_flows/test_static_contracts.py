@@ -102,6 +102,36 @@ def test_baba_has_hard_drawdown_check():
     )
 
 
+# ── Flow 4b: L2 aktifken hard drawdown eskalasyonu (Anayasa Kural #6) ──
+# v5.9.4 — Widget Denetimi B1 fix: Onceki kodda L2 early return nedeniyle
+# _check_hard_drawdown L0/L1 seviyesinde cagriliyordu. L2 aktifken drawdown
+# %15'i asarsa L3'e otomatik yukselme zorunlu.
+def test_check_risk_limits_escalates_l2_to_l3_on_hard_drawdown():
+    from engine.baba import Baba
+
+    src = inspect.getsource(Baba.check_risk_limits)
+    # L2 blogu icinde _check_hard_drawdown cagrisi olmali
+    # ve "hard" durumda L3 aktivasyonu olmali
+    assert "KILL_SWITCH_L2" in src, "check_risk_limits L2 blogu kaybolmus"
+    assert "_check_hard_drawdown" in src, (
+        "check_risk_limits icinde _check_hard_drawdown cagrisi yok."
+    )
+    # L2 kontrolunden sonra dd_check_l2 ve L3 eskalasyonu kontrol et
+    l2_block_start = src.find("KILL_SWITCH_L2:")
+    assert l2_block_start > 0
+    l2_block = src[l2_block_start:l2_block_start + 2500]
+    assert "_check_hard_drawdown" in l2_block, (
+        "L2 blogunda _check_hard_drawdown cagrisi yok — L2 aktifken "
+        "drawdown %15'i asarsa L3'e otomatik yukselmiyor (Anayasa Kural #6)."
+    )
+    assert "KILL_SWITCH_L3" in l2_block, (
+        "L2 blogunda L3 eskalasyon yolu yok — Anayasa Kural #6 olu."
+    )
+    assert "hard_drawdown" in l2_block, (
+        "L2 blogunda hard_drawdown reason ile _activate_kill_switch yok."
+    )
+
+
 # ── Flow 5: Kill-switch L2 _close_ogul_and_hybrid manuel dokunmaz ──
 def test_baba_l2_only_closes_ogul_and_hybrid():
     from engine.baba import Baba

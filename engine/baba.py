@@ -1507,6 +1507,26 @@ class Baba:
         # 2. Kill-switch L2 → sistem pause (can_trade=False kalır)
         # v5.9.2: risk_multiplier ile kısıtlı işlem imkanı
         if self._kill_switch_level == KILL_SWITCH_L2:
+            # v5.9.4 — Anayasa Kural #6 ESKALASYON FIX (Widget Denetimi B1):
+            # Önceki kodda bu blok koşulsuz return ediyordu → _check_hard_drawdown
+            # sadece L0/L1 seviyesinde çalışıyordu → L2 aktifken drawdown
+            # %15'i aşsa bile L3'e otomatik yükselmiyordu. Kural #3 monotonluk
+            # SADECE düşürmeyi yasaklar; yukarı yönde eskalasyon (L2→L3) zorunludur.
+            dd_check_l2 = self._check_hard_drawdown(risk_params, snap=snap)
+            if dd_check_l2 == "hard":
+                self._activate_kill_switch(
+                    KILL_SWITCH_L3, "hard_drawdown",
+                    f"L2→L3 eskalasyon: hard drawdown limiti aşıldı "
+                    f"(>{risk_params.hard_drawdown*100:.0f}%)",
+                )
+                verdict.can_trade = False
+                verdict.lot_multiplier = 0.0
+                verdict.risk_multiplier = 0.0
+                verdict.kill_switch_level = KILL_SWITCH_L3
+                verdict.reason = "Hard drawdown — L2→L3 tam kapanış"
+                verdict.blocked_symbols = list(self._killed_symbols)
+                return verdict
+
             verdict.can_trade = False
             verdict.lot_multiplier = 0.0
             verdict.kill_switch_level = KILL_SWITCH_L2
