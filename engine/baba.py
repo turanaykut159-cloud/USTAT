@@ -1162,14 +1162,32 @@ class Baba:
         return round(lot, 2)
 
     def check_drawdown_limits(self, risk_params: RiskParams, snap: dict | None = None) -> bool:
-        """Günlük ve toplam drawdown limitlerini kontrol et.
+        """Günlük kayıp + toplam drawdown limitlerini kontrol et.
+
+        NOT (v5.9.3 — BULGU #6): Fonksiyonun tarihsel ismi sadece "drawdown"
+        çağrıştırır ama AKTIF OLARAK İKİ FARKLI EŞİĞİ kontrol eder:
+
+        1. **Günlük kayıp** — ``risk_params.max_daily_loss`` (varsayılan %1.8).
+           Tetiklendiğinde ``check_risk_limits`` çağrı tarafında L2 kill-switch
+           aktive edilir (``daily_loss`` reason).
+        2. **Toplam drawdown** — ``risk_params.max_total_drawdown`` (varsayılan
+           %10). Tetiklendiğinde aynı şekilde False döner.
+
+        Hard drawdown (%15) kontrolü AYRI bir fonksiyondadır:
+        ``_check_hard_drawdown`` (Siyah Kapı #6). Bu metod yumuşak/günlük
+        eşikleri kontrol eder; hard eşik hard fonksiyonun tekelindedir.
+
+        Fonksiyon adı geriye-uyumluluk için korunur (Siyah Kapı #5 + tools/
+        impact_map.py kayıtlı). Yeniden adlandırma önerilirse ``check_loss_and_drawdown``
+        veya ``check_soft_loss_limits`` daha doğru olurdu.
 
         Args:
             risk_params: Risk parametreleri.
             snap: Önceden alınmış risk snapshot'ı. None ise DB'den çekilir.
 
         Returns:
-            True → trading devam, False → durdur.
+            True → trading devam, False → günlük kayıp veya toplam DD limiti
+            aşıldı, çağıran taraf L2/L3 kill-switch tetikler.
         """
         if snap is None:
             snap = self._db.get_latest_risk_snapshot()
@@ -1348,7 +1366,7 @@ class Baba:
         Kontrol sırası (öncelik):
             1. Kill-switch aktif mi?
             2. Aylık kayıp durumu
-            3. Günlük kayıp (mevcut check_drawdown_limits)
+            3. Günlük kayıp + toplam drawdown (check_drawdown_limits)
             4. Haftalık kayıp
             5. Hard drawdown
             6. Aylık kayıp
@@ -1412,7 +1430,7 @@ class Baba:
             verdict.reason = "Aylık kayıp limiti — manuel onay bekleniyor"
             return verdict
 
-        # 4. Günlük kayıp (mevcut metod)
+        # 4. Günlük kayıp + toplam drawdown (check_drawdown_limits)
         if not self.check_drawdown_limits(risk_params, snap=snap):
             self._activate_kill_switch(
                 KILL_SWITCH_L2, "daily_loss",
