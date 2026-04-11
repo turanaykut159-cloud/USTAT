@@ -110,6 +110,7 @@ class Engine:
             max_monthly_loss=self.config.get("risk.max_monthly_loss_pct", 0.07),
             max_floating_loss=self.config.get("risk.max_floating_loss_pct", 0.015),
             max_daily_trades=self.config.get("risk.max_daily_trades", 5),
+            max_daily_manual_trades=self.config.get("risk.max_daily_manual_trades", 10),
             consecutive_loss_limit=self.config.get("risk.consecutive_loss_limit", 3),
             cooldown_hours=self.config.get("risk.cooldown_hours", 4),
         )

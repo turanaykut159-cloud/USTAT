@@ -191,6 +191,10 @@ class ManuelMotor:
             "kill_switch_level": self.baba.kill_switch_level,
             "daily_trade_count": self.baba.daily_trade_count,
             "max_daily_trades": self.risk_params.max_daily_trades,
+            "daily_manual_trade_count": self.baba._risk_state.get(
+                "daily_manual_trade_count", 0,
+            ),
+            "max_daily_manual_trades": self.risk_params.max_daily_manual_trades,
             "consecutive_losses": self.baba.consecutive_losses,
             "lot_multiplier": verdict.lot_multiplier,
             "can_trade": verdict.can_trade,
@@ -205,6 +209,19 @@ class ManuelMotor:
         )
         if not corr.can_trade:
             result["reason"] = corr.reason
+            return result
+
+        # 6.5. Günlük manuel işlem limiti (v5.9.3 — BULGU #3)
+        # Manuel işlemler için ayrı günlük sayac. Otomatik işlem bütçesi
+        # (max_daily_trades) eritilmez, manuel işlemler kendi bütçesinden
+        # düşer (max_daily_manual_trades, varsayılan 10).
+        max_manual = self.risk_params.max_daily_manual_trades
+        manual_count = self.baba._risk_state.get("daily_manual_trade_count", 0)
+        if manual_count >= max_manual:
+            result["reason"] = (
+                f"Günlük manuel işlem limiti doldu "
+                f"({manual_count}/{max_manual})"
+            )
             return result
 
         # 7. Eş zamanlı manuel pozisyon limiti
@@ -513,9 +530,9 @@ class ManuelMotor:
         # 8.1. Dosya marker güncelle (v5.8.1: DB-bağımsız koruma)
         self._save_marker()
 
-        # 9. BABA sayaç güncelle
+        # 9. BABA sayaç güncelle (v5.9.3 — BULGU #3: manuel olarak işaretle)
         if self.baba:
-            self.baba.increment_daily_trade_count()
+            self.baba.increment_daily_trade_count(trade_type="manual")
 
         # 10. Event kaydet
         self.db.insert_event(

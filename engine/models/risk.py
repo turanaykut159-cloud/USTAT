@@ -29,7 +29,8 @@ class RiskParams:
     max_monthly_loss: float = 0.07      # %7 aylık → sistem dur
     hard_drawdown: float = 0.15         # %15 hard drawdown → tam kapanış
     max_floating_loss: float = 0.020    # v14: %1.5→%2.0 floating loss → yeni işlem engeli
-    max_daily_trades: int = 8           # v14: 5→8 günlük max işlem sayısı
+    max_daily_trades: int = 8           # v14: 5→8 günlük max işlem sayısı (sadece otomatik)
+    max_daily_manual_trades: int = 10   # v5.9.3 — BULGU #3: manuel işlemler için ayrı günlük sayac
     max_risk_per_trade_hard: float = 0.02  # tek işlem max %2 (hard cap)
     consecutive_loss_limit: int = 3     # üst üste kayıp → cooldown
     cooldown_hours: int = 2             # v14: 4→2 saat cool-down süresi
