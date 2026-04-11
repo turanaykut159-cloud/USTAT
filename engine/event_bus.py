@@ -25,8 +25,25 @@ _MAX_PENDING = 500
 
 
 def emit(event: str, data: dict[str, Any] | None = None) -> None:
-    """Event yayınla — tüm listener'ları çağır + pending kuyruğa ekle."""
-    payload = {"type": event, **(data or {})}
+    """Event yayınla — tüm listener'ları çağır + pending kuyruğa ekle.
+
+    Dup-key koruması (Widget Denetimi B-finding): Eski versiyon outer
+    event'i önce yazıp inner data'yı spread ediyordu — iç ``data`` sözlüğünde
+    ``type`` anahtarı varsa (h_engine bildirim alt tipleri gibi ``hybrid_eod``,
+    ``hybrid_direction_flip``, ``hybrid_daily_reset``), dict spread iç
+    ``type``'ı dış ``event``'in üstüne yazıyordu. Sonuç: payload
+    inner type ile çıkıyor, Dashboard'daki notification WS branch'i hiçbir
+    zaman eşleşmiyor, bildirim drawer'a düşmüyordu (ölü kod).
+
+    Yeni mantık: İç ``data``'da ``type`` varsa ``notif_type`` olarak taşınır
+    (Dashboard `msg.notif_type || msg.type` zaten okuyor), dış ``event`` her
+    zaman ``type`` olarak yazılır. Mevcut ``notif_type`` override EDİLMEZ.
+    """
+    payload: dict[str, Any] = dict(data or {})
+    if "type" in payload:
+        inner_type = payload.pop("type")
+        payload.setdefault("notif_type", inner_type)
+    payload["type"] = event
 
     # Senkron listener'ları çağır
     with _lock:

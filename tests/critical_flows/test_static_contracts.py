@@ -296,6 +296,69 @@ def test_monitor_modstatus_not_hardcoded():
     )
 
 
+# ── Flow 4f: event_bus.emit dup-key koruma ───────────────────────
+def test_event_bus_emit_preserves_outer_type():
+    """Widget Denetimi B-finding: event_bus.emit dup-key bug'i.
+
+    Eski kod `{"type": event, **(data or {})}` kullaniyordu — ic data'da
+    'type' varsa dict spread dis event type'ini eziyordu. Sonuc: h_engine
+    `emit("notification", {"type": "hybrid_eod", ...})` cagrisi payload'i
+    `{"type": "hybrid_eod", ...}` olarak uretiyor, Dashboard WS branch'i
+    `msg.type === 'notification'` hicbir zaman eslesmiyor (olu kod).
+
+    Yeni mantik: ic 'type' notif_type'a tasinir, dis event her zaman
+    'type' olarak yazilir. Bu test hem RUNTIME davranisi hem de
+    KAYNAK KOD desenini kontrol eder.
+    """
+    from engine import event_bus
+    import inspect
+
+    # 1. Runtime davranisi — drain sonrasi outer type korunmali
+    with event_bus._pending_lock:
+        event_bus._pending.clear()
+    event_bus.emit("notification", {
+        "type": "hybrid_eod",
+        "title": "Test",
+        "message": "test msg",
+        "severity": "warning",
+    })
+    events = event_bus.drain()
+    assert len(events) == 1, f"drain 1 event beklendi, {len(events)} alindi"
+    ev = events[0]
+    assert ev["type"] == "notification", (
+        f"Outer type dup-key ile ezildi! Beklenen 'notification', alinan "
+        f"'{ev.get('type')}'. Dup-key bug geri donmus."
+    )
+    assert ev.get("notif_type") == "hybrid_eod", (
+        f"Inner type notif_type'a tasinmamis. event: {ev}"
+    )
+    assert ev.get("message") == "test msg", (
+        "Diger data alanlari kayboldu."
+    )
+
+    # 2. notif_type override edilmemeli (caller zaten notif_type set ettiyse)
+    with event_bus._pending_lock:
+        event_bus._pending.clear()
+    event_bus.emit("notification", {
+        "type": "inner_should_be_ignored",
+        "notif_type": "explicit_value",
+    })
+    events = event_bus.drain()
+    assert events[0].get("notif_type") == "explicit_value", (
+        "Explicit notif_type caller tarafindan set edildiyse override edilmemeli."
+    )
+
+    # 3. Statik kaynak kontrolu — eski dup-key kalip YASAK
+    src = inspect.getsource(event_bus.emit)
+    assert '{"type": event, **' not in src, (
+        "Eski dup-key dict literal kalip geri dondu — "
+        '`{"type": event, **(data or {})}` kullanimi YASAK.'
+    )
+    assert "notif_type" in src, (
+        "emit icinde notif_type dup-key korumasi yok."
+    )
+
+
 # ── Flow 5: Kill-switch L2 _close_ogul_and_hybrid manuel dokunmaz ──
 def test_baba_l2_only_closes_ogul_and_hybrid():
     from engine.baba import Baba
