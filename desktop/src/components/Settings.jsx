@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.9 — Ayarlar ekranı.
+ * ÜSTAT Plus V6.0 — Ayarlar ekranı.
  *
  * Bölümler:
  *   1. MT5 Bağlantı Bilgileri (sunucu, hesap, şifre maskeli)
@@ -19,7 +19,7 @@ import { getAccount, getStatus, getEvents, getRiskBaseline, updateRiskBaseline, 
 
 // ── Sabitler ──────────────────────────────────────────────────────
 
-const VERSION = '5.9.0';
+const VERSION = '6.0.0';
 const BUILD_DATE = '2026-03-29';
 
 const DEFAULT_PREFS = {
@@ -352,7 +352,7 @@ export default function Settings() {
               <h3>Hakkında</h3>
             </div>
             <div className="st-version-grid">
-              <FieldRow label="Uygulama" value="ÜSTAT Desktop" />
+              <FieldRow label="Uygulama" value="ÜSTAT Plus V6.0 Desktop" />
               <FieldRow label="Versiyon" value={`v${VERSION}`} />
               <FieldRow label="Build Tarihi" value={BUILD_DATE} />
               <FieldRow label="Engine" value={status?.engine_running ? 'Çalışıyor' : 'Durduruldu'} cls={status?.engine_running ? 'profit' : 'loss'} />

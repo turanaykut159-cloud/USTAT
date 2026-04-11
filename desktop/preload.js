@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.9 Desktop — Electron preload script.
+ * ÜSTAT Plus V6.0 Desktop — Electron preload script.
  * Güvenli IPC köprüsü sağlar (contextIsolation + sandbox).
  *
  * Renderer tarafında window.electronAPI üzerinden erişilir.

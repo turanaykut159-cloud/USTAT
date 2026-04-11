@@ -1,3 +1,3 @@
 """ÜSTAT Engine — VİOP algoritmik işlem motoru."""
 
-VERSION = "5.9.0"
+VERSION = "6.0.0"

@@ -1,4 +1,4 @@
-"""ÜSTAT v5.9 API — FastAPI Sunucu.
+"""ÜSTAT Plus V6.0 API — FastAPI Sunucu.
 
 Desktop uygulamasına REST API + WebSocket köprüsü sağlar.
 
@@ -61,7 +61,7 @@ from api.routes import (
 logger = logging.getLogger("ustat.api")
 
 # Tek kaynak: OpenAPI ve root endpoint aynı versiyonu kullanır
-API_VERSION = "5.9.0"
+API_VERSION = "6.0.0"
 
 
 # ── Lifespan: Engine başlat / durdur ─────────────────────────────
@@ -187,7 +187,7 @@ async def lifespan(app: FastAPI):
 # ── FastAPI Uygulama ──────────────────────────────────────────────
 
 app = FastAPI(
-    title="ÜSTAT API",
+    title="ÜSTAT Plus V6.0 API",
     version=API_VERSION,
     description="VİOP Algorithmic Trading — REST & WebSocket API",
     lifespan=lifespan,
@@ -263,7 +263,7 @@ else:
     async def root():
         """API kök endpoint (dist/ yoksa fallback)."""
         return {
-            "name": "ÜSTAT API",
+            "name": "ÜSTAT Plus V6.0 API",
             "version": API_VERSION,
             "docs": "/docs",
         }
