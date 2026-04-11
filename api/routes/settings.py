@@ -22,8 +22,12 @@ from api.schemas import (
     RiskBaselineUpdateResponse,
 )
 
-# Bildirim tercihleri bellekte tutulur (process süresi boyunca kalıcı)
-_notification_prefs: dict = {
+# v6.0 — Widget Denetimi A3/S1: Bildirim tercihleri artık config/default.json
+# üzerinden kalıcıdır (eski bellek tabanlı `_notification_prefs` kaldırıldı).
+# Kaynak: config.ui.notification_prefs → config.save() ile dosyaya yazılır.
+# DEFAULT_PREFS yalnızca config okunamadığında fallback olarak kullanılır;
+# frontend default'ları Settings.jsx::DEFAULT_PREFS ile senkron tutulmalıdır.
+DEFAULT_NOTIFICATION_PREFS: dict = {
     "soundEnabled": True,
     "killSwitchAlert": True,
     "tradeAlert": True,
@@ -147,15 +151,61 @@ async def update_risk_baseline(req: RiskBaselineUpdateRequest):
     )
 
 
+def _read_notification_prefs_from_config() -> dict:
+    """Config'den bildirim tercihlerini oku; eksik anahtarları default ile doldur.
+
+    Engine yoksa veya config okunamazsa DEFAULT_NOTIFICATION_PREFS döner.
+    Kısmi config (örn. sadece soundEnabled) gelirse eksik anahtarlar default
+    ile tamamlanır — frontend her zaman 5 anahtarlı tam payload görür.
+    """
+    engine = get_engine()
+    if not engine:
+        return dict(DEFAULT_NOTIFICATION_PREFS)
+    raw = engine.config.get("ui.notification_prefs", None)
+    if not isinstance(raw, dict):
+        return dict(DEFAULT_NOTIFICATION_PREFS)
+    merged = dict(DEFAULT_NOTIFICATION_PREFS)
+    for key in DEFAULT_NOTIFICATION_PREFS:
+        if key in raw and isinstance(raw[key], bool):
+            merged[key] = raw[key]
+    return merged
+
+
 @router.get("/settings/notification-prefs", response_model=NotificationPrefsResponse)
 async def get_notification_prefs():
-    """Mevcut bildirim tercihlerini döndür."""
-    return NotificationPrefsResponse(success=True, prefs=dict(_notification_prefs))
+    """Mevcut bildirim tercihlerini döndür (config.ui.notification_prefs)."""
+    return NotificationPrefsResponse(
+        success=True, prefs=_read_notification_prefs_from_config()
+    )
 
 
 @router.post("/settings/notification-prefs", response_model=NotificationPrefsResponse)
 async def update_notification_prefs(req: NotificationPrefsRequest):
-    """Bildirim tercihlerini güncelle."""
-    _notification_prefs.update(req.model_dump())
-    logger.info(f"Bildirim tercihleri güncellendi: {_notification_prefs}")
-    return NotificationPrefsResponse(success=True, prefs=dict(_notification_prefs))
+    """Bildirim tercihlerini güncelle ve config dosyasına kalıcı yaz.
+
+    Kaydetme zinciri:
+        1. Engine/config hazır mı kontrol et
+        2. Mevcut prefs'i oku (kısmi payload için merge tabanı)
+        3. Yeni değerleri merge et
+        4. `config.set("ui.notification_prefs", ...)` + `config.save()`
+        5. Başarı durumunda güncel payload'ı döndür
+    """
+    engine = get_engine()
+    if not engine:
+        logger.warning("Bildirim tercihleri güncellenemedi: engine yok")
+        return NotificationPrefsResponse(
+            success=False, prefs=dict(DEFAULT_NOTIFICATION_PREFS)
+        )
+
+    current = _read_notification_prefs_from_config()
+    current.update(req.model_dump())
+
+    try:
+        engine.config.set("ui.notification_prefs", current)
+        engine.config.save()
+    except Exception as exc:
+        logger.error(f"Bildirim tercihleri config kayıt hatası: {exc}")
+        return NotificationPrefsResponse(success=False, prefs=current)
+
+    logger.info(f"Bildirim tercihleri güncellendi (persist): {current}")
+    return NotificationPrefsResponse(success=True, prefs=current)

@@ -396,34 +396,50 @@ export default function Settings() {
             <div className="st-section-header">
               <h3>Bildirim Tercihleri</h3>
             </div>
+            {/* v6.0 — Widget Denetimi A3/S1: dürüst kapsam uyarısı */}
+            <div className="st-info-note" style={{
+              padding: '8px 12px',
+              marginBottom: '10px',
+              background: 'rgba(255, 193, 7, 0.08)',
+              border: '1px solid rgba(255, 193, 7, 0.3)',
+              borderRadius: '4px',
+              fontSize: '12px',
+              color: 'var(--text-secondary, #aaa)',
+              lineHeight: '1.5',
+            }}>
+              <strong>Kapsam:</strong> Şu an yalnızca <strong>İşlem & Hibrit Uyarıları</strong> toggle'ı
+              Dashboard bildirim çekmecesinde (zil ikonu) gerçek davranışa bağlıdır.
+              Diğer toggle'lar tercihleriniz sunucuda kalıcı olarak saklanır, ancak henüz bağlı oldukları bir
+              tetikleme mekanizması yoktur.
+            </div>
             <div className="st-toggle-group">
               <ToggleRow
                 label="Ses bildirimleri"
-                desc="İşlem ve uyarı sesleri"
+                desc="İşlem ve uyarı sesleri (henüz aktif değil)"
                 checked={prefs.soundEnabled}
                 onChange={() => togglePref('soundEnabled')}
               />
               <ToggleRow
                 label="Kill-Switch uyarısı"
-                desc="L1/L2/L3 tetiklendiğinde bildirim"
+                desc="L1/L2/L3 tetiklendiğinde bildirim (henüz aktif değil)"
                 checked={prefs.killSwitchAlert}
                 onChange={() => togglePref('killSwitchAlert')}
               />
               <ToggleRow
-                label="İşlem bildirimi"
-                desc="Yeni işlem açıldığında / kapandığında"
+                label="İşlem & Hibrit Uyarıları"
+                desc="Hibrit pozisyon, EOD ve yön değişimi bildirimleri"
                 checked={prefs.tradeAlert}
                 onChange={() => togglePref('tradeAlert')}
               />
               <ToggleRow
                 label="Drawdown uyarısı"
-                desc="Risk limitlerine yaklaşıldığında"
+                desc="Risk limitlerine yaklaşıldığında (henüz aktif değil)"
                 checked={prefs.drawdownAlert}
                 onChange={() => togglePref('drawdownAlert')}
               />
               <ToggleRow
                 label="Rejim değişikliği"
-                desc="Piyasa rejimi değiştiğinde"
+                desc="Piyasa rejimi değiştiğinde (henüz aktif değil)"
                 checked={prefs.regimeAlert}
                 onChange={() => togglePref('regimeAlert')}
               />

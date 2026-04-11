@@ -132,6 +132,47 @@ export default function Dashboard() {
   const [showNotifPanel, setShowNotifPanel] = useState(false);
   const unreadCount = notifications.filter((n) => !n.read).length;
 
+  // v6.0 — Widget Denetimi A3/S1: Bildirim tercihleri (Settings ile aynı anahtar).
+  // `tradeAlert` kapalıysa hybrid_* WS bildirimleri drawer'a eklenmez.
+  // Storage event dinleyicisi Settings sayfasında toggle değişince otomatik
+  // güncelleme sağlar.
+  const NOTIF_PREFS_KEY = 'ustat_notification_prefs';
+  const NOTIF_PREFS_DEFAULT = {
+    soundEnabled: true,
+    killSwitchAlert: true,
+    tradeAlert: true,
+    drawdownAlert: true,
+    regimeAlert: false,
+  };
+  const readNotifPrefs = () => {
+    try {
+      const saved = localStorage.getItem(NOTIF_PREFS_KEY);
+      return saved ? { ...NOTIF_PREFS_DEFAULT, ...JSON.parse(saved) } : NOTIF_PREFS_DEFAULT;
+    } catch {
+      return NOTIF_PREFS_DEFAULT;
+    }
+  };
+  const notifPrefsRef = useRef(readNotifPrefs());
+  useEffect(() => {
+    const onStorage = (e) => {
+      if (e.key === NOTIF_PREFS_KEY) {
+        notifPrefsRef.current = readNotifPrefs();
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+  // Bildirim tipini tercih anahtarına eşler. Şu an sadece hybrid_* aktif
+  // (gerçek davranışa bağlı tek kategori). Diğer tipler filtrelenmez.
+  const shouldShowNotification = (msg) => {
+    const prefs = notifPrefsRef.current || NOTIF_PREFS_DEFAULT;
+    const t = msg?.notif_type || msg?.type || '';
+    if (typeof t === 'string' && t.startsWith('hybrid_')) {
+      return prefs.tradeAlert !== false;
+    }
+    return true;
+  };
+
   // Süre yenileme tetikleyici (30sn)
   const [, setTick] = useState(new Date());
 
@@ -259,7 +300,9 @@ export default function Dashboard() {
     // DB'den bildirimleri yükle (başlangıç)
     getNotifications({ limit: 50 }).then((resp) => {
       if (resp.notifications) {
-        setNotifications(resp.notifications.map((n) => ({
+        // v6.0 — Widget Denetimi A3/S1: tercihler DB kaynaklı bildirimleri de kapılar.
+        const filtered = resp.notifications.filter((n) => shouldShowNotification({ type: n.type, notif_type: n.type }));
+        setNotifications(filtered.map((n) => ({
           id: n.id,
           type: n.type,
           title: n.title,
@@ -334,6 +377,10 @@ export default function Dashboard() {
             fetchTradeData();
           }
           if (msg.type === 'notification') {
+            // v6.0 — Widget Denetimi A3/S1: tercihler drawer'ı kapılar.
+            if (!shouldShowNotification(msg)) {
+              return;
+            }
             setNotifications((prev) => [
               { id: Date.now(), read: false, ...msg },
               ...prev,

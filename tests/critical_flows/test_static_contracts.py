@@ -195,6 +195,62 @@ def test_trade_stats_excludes_sign_mismatch_from_best_worst():
     )
 
 
+# ── Flow 4d: Bildirim tercihleri config uzerinden kalicilasir ────
+def test_notification_prefs_persists_via_config():
+    """Widget Denetimi A3/S1: Eski `_notification_prefs` modul dict'i process
+    bellegindeydi, restart edince kayboluyordu. Artik config.ui.notification_prefs
+    uzerinden kalicilastirildi. Bu test hem eski dict'in kaldirildigini hem de
+    yeni persistence zincirinin (config.set + config.save) kullanildigini
+    garanti eder.
+    """
+    from api.routes import settings as settings_route
+    import inspect
+
+    src = inspect.getsource(settings_route)
+
+    # 1. Eski bellek tabanli dict TANIMI kaldirilmis olmali (module-level assignment)
+    assert "_notification_prefs: dict" not in src, (
+        "Eski bellek tabanli _notification_prefs dict'i hala tanimli — "
+        "restart sonrasi tercihler kaybolur."
+    )
+    assert "_notification_prefs.update(" not in src, (
+        "Eski _notification_prefs.update cagrisi hala var — POST endpoint "
+        "config'e yazmiyor olabilir."
+    )
+
+    # 2. DEFAULT fallback sabiti var
+    assert hasattr(settings_route, "DEFAULT_NOTIFICATION_PREFS"), (
+        "DEFAULT_NOTIFICATION_PREFS fallback sabiti yok."
+    )
+    defaults = settings_route.DEFAULT_NOTIFICATION_PREFS
+    assert isinstance(defaults, dict), "DEFAULT_NOTIFICATION_PREFS dict degil."
+    # Frontend DEFAULT_PREFS ile senkron 5 anahtar
+    for key in ("soundEnabled", "killSwitchAlert", "tradeAlert",
+                "drawdownAlert", "regimeAlert"):
+        assert key in defaults, f"DEFAULT_NOTIFICATION_PREFS icinde {key} yok."
+
+    # 3. Read helper var ve config uzerinden okur
+    assert hasattr(settings_route, "_read_notification_prefs_from_config"), (
+        "_read_notification_prefs_from_config helper'i yok."
+    )
+    read_src = inspect.getsource(settings_route._read_notification_prefs_from_config)
+    assert "ui.notification_prefs" in read_src, (
+        "Read helper config.ui.notification_prefs key'ini kullanmiyor."
+    )
+
+    # 4. POST endpoint config.set + config.save cagriyor
+    update_src = inspect.getsource(settings_route.update_notification_prefs)
+    assert 'config.set("ui.notification_prefs"' in update_src or \
+           "config.set('ui.notification_prefs'" in update_src, (
+        "POST /settings/notification-prefs config.set cagrmiyor — "
+        "kalicilasmiyor."
+    )
+    assert "config.save()" in update_src, (
+        "POST /settings/notification-prefs config.save() cagrmiyor — "
+        "disk'e yazilmayan in-memory degisiklik kaliyor."
+    )
+
+
 # ── Flow 5: Kill-switch L2 _close_ogul_and_hybrid manuel dokunmaz ──
 def test_baba_l2_only_closes_ogul_and_hybrid():
     from engine.baba import Baba

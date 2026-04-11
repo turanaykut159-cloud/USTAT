@@ -41,6 +41,15 @@
     "host": "127.0.0.1",
     "port": 8000
   },
+  "ui": {
+    "notification_prefs": {
+      "soundEnabled": true,
+      "killSwitchAlert": true,
+      "tradeAlert": true,
+      "drawdownAlert": true,
+      "regimeAlert": false
+    }
+  },
   "indicators": {
     "ema_fast": 9,
     "ema_slow": 21,
