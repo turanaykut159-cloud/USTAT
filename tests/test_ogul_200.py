@@ -653,14 +653,11 @@ class TestExecuteSignal:
         ogul._execute_signal(signal, regime)
         ogul.mt5.send_order.assert_not_called()
 
-    def test_11_monthly_dd_blocks(self):
-        """Aylık drawdown limiti → iptal."""
-        ogul = make_ogul()
-        ogul._monthly_dd_warn = True
-        regime = make_regime()
-        signal = self._make_signal()
-        ogul._execute_signal(signal, regime)
-        ogul.mt5.send_order.assert_not_called()
+    # test_11_monthly_dd_blocks KALDIRILDI (commit B1).
+    # Anayasa Kural 10: OĞUL artık kendi günlük/aylık kayıp check'i yapmaz;
+    # sorumluluk BABA._check_monthly_loss + _close_ogul_and_hybrid'e devredildi.
+    # Eski test `_monthly_dd_warn` attribute'u arıyordu — kodda yok.
+    # Bu kural tests/critical_flows/test_static_contracts.py içinde zaten korunuyor.
 
     def test_12_db_trade_inserted(self):
         """DB'ye trade kaydedilmeli."""
