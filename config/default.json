@@ -9,6 +9,7 @@
     "max_total_positions": 8,
     "max_lot_per_contract": 1.0,
     "margin_reserve_pct": 0.2,
+    "regime_hysteresis_cycles": 2,
     "paper_mode": false
   },
   "risk": {

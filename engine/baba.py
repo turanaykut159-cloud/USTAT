@@ -403,6 +403,10 @@ class Baba:
         self._confirmed_regime: RegimeType | None = None   # Son onaylanmış rejim
         self._pending_regime: RegimeType | None = None      # Aday rejim (henüz onaylanmamış)
         self._pending_regime_count: int = 0                 # Aday kaç cycle devam etti
+        # v5.9.3 — BULGU #11: hysteresis eşiği config'den (sihirli sayı yasağı Anayasa)
+        self._regime_hysteresis_cycles: int = int(
+            self._config.get("engine.regime_hysteresis_cycles", 2)
+        )
 
         # v5.8/CEO-FAZ2: Margin reserve kontrolü — config'den oku
         self._margin_reserve_pct: float = float(
@@ -626,8 +630,61 @@ class Baba:
     def detect_regime(self) -> Regime:
         """Piyasa rejimini algıla — öncelik: OLAY > VOLATILE > TREND > RANGE.
 
+        Anayasa: Siyah Kapı #8 — mantık değiştirilemez (kanıtlı bug fix hariç).
+
+        İşlem zinciri:
+            1) ``_check_olay()`` — takvim/kur/haber tetikleyicileri. Truthy dönerse
+               REJİM EARLY-RETURN İLE OLAY (aşağıdaki hysteresis state machine'i
+               atlanır). Bu kasıtlıdır: OLAY güvenlik kritiktir, multiplier=0.0
+               etkisi gecikemez (yeni işlem yasak + mevcut pozisyon kapanış).
+            2) Sembol bazlı oylama — her sembol için ``_classify_symbol()``
+               (TREND/RANGE/VOLATILE), likidite sınıfına göre ağırlıklı oy.
+            3) VOLATILE oranı ≥ ``VOLATILE_VOTE_PCT`` → tüm piyasa VOLATILE.
+               Aksi halde en çok oy alan rejim winner.
+            4) ADX çapraz kontrol — RANGE + ADX > ``ADX_TREND_THRESHOLD`` →
+               TREND override.
+            5) Hysteresis state machine (aşağıda).
+
+        Hysteresis state machine (ping-pong önleme):
+            Üç state değişkeni:
+              ``_confirmed_regime``     — son onaylanmış teknik rejim
+              ``_pending_regime``       — aday rejim (henüz onaylanmamış)
+              ``_pending_regime_count`` — aday kaç ardışık cycle devam etti
+
+            Geçiş tablosu:
+              winner == _confirmed_regime  → pending temizlenir, winner kullanılır
+              winner != _confirmed_regime VE winner == _pending_regime
+                                            → _pending_regime_count += 1
+              winner != _confirmed_regime VE winner != _pending_regime
+                                            → _pending_regime = winner, count = 1
+              _pending_regime_count >= self._regime_hysteresis_cycles
+                                            → ONAYLA: _confirmed_regime = winner
+              Aksi halde                    → ESKİ _confirmed_regime kullanılır,
+                                              ham winner ``details["hysteresis"]``
+                                              içinde ``"bekleme(<raw>)"`` olarak
+                                              loglanır
+
+            İlk-cycle davranışı: ``_confirmed_regime is None`` → hysteresis
+            atlanır, winner ansızın onaylanır (soğuk başlatma).
+
+        Önemli invariant (kasıtlı):
+            ``_confirmed_regime`` ASLA ``RegimeType.OLAY`` olmaz. Çünkü OLAY
+            tetiklendiğinde fonksiyon adım 1'de early return yapar ve state
+            machine güncellenmez. Sonuç: hysteresis durumu her zaman SON
+            TEKNİK rejimi yansıtır. OLAY bitişinde sistem teknik hafızaya
+            geri döner; pending sayacı OLAY periyodu boyunca değişmez.
+
+        Hysteresis eşiği konfigürasyonu:
+            ``self._regime_hysteresis_cycles`` (``__init__``'te yüklenir,
+            kaynağı: ``config/default.json engine.regime_hysteresis_cycles``,
+            varsayılan 2). Kullanıcı daha agresif/temkinli rejim geçişi
+            isterse config'den ayarlayabilir. v5.9.3 BULGU #11'de eklenen
+            sihirli sayı yasağı düzeltmesi.
+
         Returns:
-            Algılanan Regime nesnesi.
+            Algılanan ``Regime`` nesnesi (regime_type, confidence, ADX/ATR/BB
+            metrikleri, details). OLAY case'inde details ``_check_olay``’dan
+            gelir; teknik case'lerde per-sembol sınıflandırma + oy haritası.
         """
         # ── 1) OLAY (takvim + kur, sembolden bağımsız) ───────────────
         olay_result = self._check_olay()
@@ -711,8 +768,11 @@ class Baba:
         )
 
         # v5.8/CEO-FAZ1: Regime hysteresis — ping-pong önleme
-        # OLAY hariç, rejim değişimi 2 ardışık cycle aynı sonucu verdiğinde onaylanır
-        HYSTERESIS_CYCLES = 2
+        # NOT (v5.9.3 — BULGU #11): OLAY zaten yukarıda (satır ~643)
+        # early return ile hysteresis'i atlar; bu blok yalnız teknik
+        # rejimler (TREND/RANGE/VOLATILE) için çalışır. Detay için
+        # detect_regime docstring'ine bak.
+        hysteresis_cycles = self._regime_hysteresis_cycles
         raw_winner = winner
 
         if self._confirmed_regime is not None and winner != self._confirmed_regime:
@@ -723,7 +783,7 @@ class Baba:
                 self._pending_regime = winner
                 self._pending_regime_count = 1
 
-            if self._pending_regime_count >= HYSTERESIS_CYCLES:
+            if self._pending_regime_count >= hysteresis_cycles:
                 # Yeterince tekrar etti — onayla
                 logger.info(
                     f"Rejim hysteresis onay: {self._confirmed_regime.value}"
@@ -737,7 +797,7 @@ class Baba:
                 logger.debug(
                     f"Rejim hysteresis bekleme: ham={winner.value}, "
                     f"korunan={self._confirmed_regime.value} "
-                    f"(sayaç={self._pending_regime_count}/{HYSTERESIS_CYCLES})"
+                    f"(sayaç={self._pending_regime_count}/{hysteresis_cycles})"
                 )
                 winner = self._confirmed_regime
                 confidence = round(votes.get(winner, 0) / total, 3) if total > 0 else 0.5
