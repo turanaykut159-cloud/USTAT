@@ -154,8 +154,21 @@ class ErrorTracker:
         self._total_warnings = 0
         self._total_critical = 0
 
-        # Çözümlenmiş hata tipleri (bellekte tutulan set — hızlı kontrol)
+        # ── Widget Denetimi A15 (B18) — Çözümleme granülaritesi ────
+        # İki seviyeli bastırma:
+        #   _resolved_types: message_prefix BOŞ iken çözümlenen tüm tip
+        #     (wildcard). resolve_all ve message_prefix=='' ile resolve_group
+        #     çağrıldığında kullanılır.
+        #   _resolved_keys: (error_type, message[:80]) çifti bazlı spesifik
+        #     bastırma. Frontend "Çözümle" butonu mesaj bazlı prefix gönderdiği
+        #     için kullanıcı tek satırı çözümlese aynı tipin farklı mesajlı
+        #     satırları görünmeye devam eder. Bu A15'in kök fix'i.
+        # Eski davranış: sadece _resolved_types vardı — aynı tipin tüm
+        # mesajları sessizce bastırılıyordu (audit bulgusu B18). Artık
+        # resolve_group(type, prefix) spesifik, resolve_group(type, '') veya
+        # resolve_all wildcard.
         self._resolved_types: set[str] = set()
+        self._resolved_keys: set[tuple[str, str]] = set()
 
         # DB tabloları + mevcut hataları yükle
         if db:
@@ -219,7 +232,16 @@ class ErrorTracker:
 
                     # Çözümlenmiş tip ise gruplara EKLEME
                     # NOT: CRITICAL ve ERROR seviyesi asla bastırılmaz
-                    if etype in self._resolved_types and sev not in ("CRITICAL", "ERROR"):
+                    # Widget Denetimi A15 (B18): İki seviyeli bastırma:
+                    #   wildcard (_resolved_types) veya spesifik (_resolved_keys)
+                    msg_prefix_load = msg[:80].strip() if msg else ""
+                    if (
+                        (
+                            etype in self._resolved_types
+                            or (etype, msg_prefix_load) in self._resolved_keys
+                        )
+                        and sev not in ("CRITICAL", "ERROR")
+                    ):
                         continue
 
                     key = self._group_key(etype, msg)
@@ -264,8 +286,15 @@ class ErrorTracker:
 
         # Çözümlenmiş tip ise → DB'ye yaz ama dashboard'a ekleme
         # NOT: CRITICAL ve ERROR seviyesi asla bastırılmaz (risk olayları görünmeli)
+        # Widget Denetimi A15 (B18): İki seviyeli bastırma kontrolü:
+        #   - error_type _resolved_types içinde (wildcard) → bastır
+        #   - (error_type, message[:80]) _resolved_keys içinde (spesifik) → bastır
+        prefix_for_check = message[:80].strip() if message else ""
         is_suppressed = (
-            error_type in self._resolved_types
+            (
+                error_type in self._resolved_types
+                or (error_type, prefix_for_check) in self._resolved_keys
+            )
             and severity not in ("CRITICAL", "ERROR")
         )
 
@@ -311,49 +340,144 @@ class ErrorTracker:
     # ── Çözümleme (DB kalıcı) ──
 
     def _load_resolved_types(self) -> None:
-        """DB'den çözümlenmiş hata tiplerini belleğe yükle."""
+        """DB'den çözümlenmiş hata tiplerini + (tip, prefix) çiftlerini belleğe yükle.
+
+        Widget Denetimi A15 (B18): Eski davranış sadece error_type bazlı
+        bir set döndürüyordu. Artık iki seviyeli:
+          - message_prefix == ''    → wildcard → _resolved_types'a ekle
+          - message_prefix != ''    → spesifik → _resolved_keys'e ekle
+        """
         resolutions = self._load_resolutions()
-        self._resolved_types = set(resolutions.keys())
-        if self._resolved_types:
-            logger.info(f"ErrorTracker: {len(self._resolved_types)} çözümlenmiş tip yüklendi")
+        self._resolved_types = set()
+        self._resolved_keys = set()
+        for (etype, prefix), _res in resolutions.items():
+            if prefix:
+                self._resolved_keys.add((etype, prefix))
+            else:
+                self._resolved_types.add(etype)
+        total = len(self._resolved_types) + len(self._resolved_keys)
+        if total:
+            logger.info(
+                f"ErrorTracker: {len(self._resolved_types)} wildcard tip + "
+                f"{len(self._resolved_keys)} spesifik (tip, prefix) yüklendi"
+            )
 
     def _ensure_resolution_table(self) -> None:
-        """error_resolutions tablosunu oluştur (yoksa)."""
+        """error_resolutions tablosunu oluştur (yoksa) + A15 göçü.
+
+        Widget Denetimi A15 (B18): Eski şema (error_type TEXT PRIMARY KEY)
+        message_prefix kolonu içermiyordu. Yeni şema:
+
+            error_resolutions(
+                error_type      TEXT NOT NULL,
+                message_prefix  TEXT NOT NULL DEFAULT '',
+                resolved_at     TEXT NOT NULL,
+                resolved_by     TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (error_type, message_prefix)
+            )
+
+        Göç mantığı:
+          1. Tablo yoksa → yeni şema ile oluştur (normal path)
+          2. Varsa ve message_prefix kolonu eksikse → rebuild:
+             rename old → create new → copy (prefix='') → drop old
+          3. Varsa ve message_prefix kolonu mevcutsa → no-op
+        """
         if not self._db:
             return
         try:
+            # Tablo varlığını kontrol et
+            rows = self._db._fetch_all(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name='error_resolutions'"
+            )
+            table_exists = bool(rows)
+
+            if not table_exists:
+                self._db._execute(
+                    """CREATE TABLE error_resolutions (
+                           error_type      TEXT NOT NULL,
+                           message_prefix  TEXT NOT NULL DEFAULT '',
+                           resolved_at     TEXT NOT NULL,
+                           resolved_by     TEXT NOT NULL DEFAULT '',
+                           PRIMARY KEY (error_type, message_prefix)
+                       )""",
+                    (),
+                )
+                logger.info("error_resolutions tablosu oluşturuldu (A15 şeması).")
+                return
+
+            # Kolon listesi
+            col_rows = self._db._fetch_all("PRAGMA table_info(error_resolutions)")
+            col_names = {r["name"] for r in col_rows}
+
+            if "message_prefix" in col_names:
+                return  # Zaten yeni şema
+
+            # A15 göçü — eski şemayı yeni şemaya taşı
+            logger.info("error_resolutions A15 göçü başlıyor...")
             self._db._execute(
-                """CREATE TABLE IF NOT EXISTS error_resolutions (
-                       error_type  TEXT PRIMARY KEY,
-                       resolved_at TEXT NOT NULL,
-                       resolved_by TEXT NOT NULL DEFAULT ''
+                "ALTER TABLE error_resolutions RENAME TO error_resolutions_old",
+                (),
+            )
+            self._db._execute(
+                """CREATE TABLE error_resolutions (
+                       error_type      TEXT NOT NULL,
+                       message_prefix  TEXT NOT NULL DEFAULT '',
+                       resolved_at     TEXT NOT NULL,
+                       resolved_by     TEXT NOT NULL DEFAULT '',
+                       PRIMARY KEY (error_type, message_prefix)
                    )""",
                 (),
             )
-            logger.info("error_resolutions tablosu hazır.")
+            self._db._execute(
+                """INSERT INTO error_resolutions
+                   (error_type, message_prefix, resolved_at, resolved_by)
+                   SELECT error_type, '', resolved_at, resolved_by
+                   FROM error_resolutions_old""",
+                (),
+            )
+            self._db._execute("DROP TABLE error_resolutions_old", ())
+            logger.info("error_resolutions A15 göçü tamamlandı.")
         except Exception as exc:
-            logger.warning(f"error_resolutions tablo hatası: {exc}")
+            logger.warning(f"error_resolutions tablo/göç hatası: {exc}")
 
-    def _load_resolutions(self) -> dict[str, dict]:
-        """DB'den çözümleme kayıtlarını oku."""
+    def _load_resolutions(self) -> dict[tuple[str, str], dict]:
+        """DB'den çözümleme kayıtlarını oku. Anahtar (error_type, message_prefix) tuple.
+
+        Widget Denetimi A15 (B18): Eski dönüş dict[str, dict] (sadece tip)
+        idi; şimdi dict[tuple[str, str], dict] (tip + prefix).
+        """
         if not self._db:
             return {}
         try:
             rows = self._db._fetch_all(
-                "SELECT error_type, resolved_at, resolved_by FROM error_resolutions"
+                "SELECT error_type, message_prefix, resolved_at, resolved_by "
+                "FROM error_resolutions"
             )
-            return {r["error_type"]: r for r in rows}
+            return {(r["error_type"], r.get("message_prefix", "") or ""): r for r in rows}
         except Exception:
             return {}
 
     def _apply_resolutions(self) -> None:
-        """DB'deki çözümleme kayıtlarını bellek gruplarına uygula."""
+        """DB'deki çözümleme kayıtlarını bellek gruplarına uygula.
+
+        Widget Denetimi A15 (B18): İki seviyeli eşleştirme:
+          - (error_type, prefix) spesifik çözümleme: SADECE aynı grup
+          - (error_type, '') wildcard çözümleme: tip altındaki tüm gruplar
+        """
         resolutions = self._load_resolutions()
         if not resolutions:
             return
+        # Wildcard ve spesifik ayrıştırma
+        wildcards = {etype: res for (etype, p), res in resolutions.items() if not p}
+        specifics = {(etype, p): res for (etype, p), res in resolutions.items() if p}
         with self._lock:
             for key, group in self._groups.items():
-                res = resolutions.get(group.error_type)
+                # Grup key formatı: "error_type::prefix"
+                g_prefix = key.split("::", 1)[1] if "::" in key else ""
+                res = specifics.get((group.error_type, g_prefix))
+                if res is None:
+                    res = wildcards.get(group.error_type)
                 if res:
                     res_time = res["resolved_at"]
                     if group.last_seen.isoformat() <= res_time:
@@ -364,17 +488,34 @@ class ErrorTracker:
     def resolve_group(self, error_type: str, message_prefix: str = "", by: str = "operator") -> bool:
         """Hata grubunu çözümlendi olarak işaretle — DB'ye kalıcı yaz + eski event'leri sil.
 
-        Çözümlenen tip, _resolved_types set'ine eklenir.
-        Bundan sonra engine bu tipi üretse bile dashboard'da gösterilmez.
+        Widget Denetimi A15 (B18): İki davranış modu:
+          - message_prefix BOŞ → wildcard: aynı tipin TÜM gruplarını çözümler;
+            (error_type, '') satırı DB'ye yazılır; _resolved_types'a eklenir.
+          - message_prefix DOLU → spesifik: SADECE (error_type, prefix[:80])
+            eşleşen grup çözümlenir; (error_type, prefix[:80]) DB'ye yazılır;
+            _resolved_keys'e eklenir. Aynı tipin farklı mesajlı satırları
+            görünmeye devam eder.
+
+        Eski davranış: prefix dolu olsa bile DB'ye sadece error_type yazılıyor,
+        suppression yine tüm tip bastırıyordu. Bu audit bulgusu.
         """
         resolved_any = False
+        prefix_key = message_prefix[:80].strip() if message_prefix else ""
+
         with self._lock:
             keys_to_remove = []
             for key, group in list(self._groups.items()):
                 if group.error_type == error_type:
-                    # Eşleşme: message_prefix boşsa tüm grubu çözümle,
-                    # doluysa mesajın başında aranır (key formatı: "type::msg_prefix")
-                    if not message_prefix or message_prefix[:80] in key or message_prefix[:80] in (group.message or ""):
+                    # Eşleşme: prefix boşsa tüm grubu çözümle,
+                    # doluysa grup key'indeki prefix ile tam eşleşmesi gerekir.
+                    # Grup key formatı: "error_type::prefix"
+                    g_prefix = key.split("::", 1)[1] if "::" in key else ""
+                    matches = (
+                        not prefix_key
+                        or prefix_key == g_prefix
+                        or prefix_key in (group.message or "")[:80].strip()
+                    )
+                    if matches:
                         group.resolve(by)
                         keys_to_remove.append(key)
                         resolved_any = True
@@ -383,22 +524,36 @@ class ErrorTracker:
             for k in keys_to_remove:
                 del self._groups[k]
 
-            # Suppression set'ine ekle
+            # Suppression set'ine ekle (wildcard vs spesifik)
             if resolved_any:
-                self._resolved_types.add(error_type)
+                if prefix_key:
+                    self._resolved_keys.add((error_type, prefix_key))
+                else:
+                    self._resolved_types.add(error_type)
 
         if resolved_any and self._db:
             now_str = datetime.now().isoformat(timespec="seconds")
             try:
                 self._db._execute(
                     """INSERT OR REPLACE INTO error_resolutions
-                       (error_type, resolved_at, resolved_by) VALUES (?, ?, ?)""",
-                    (error_type, now_str, by),
+                       (error_type, message_prefix, resolved_at, resolved_by)
+                       VALUES (?, ?, ?, ?)""",
+                    (error_type, prefix_key, now_str, by),
                 )
-                self._db._execute(
-                    "DELETE FROM events WHERE type = ? AND timestamp <= ?",
-                    (error_type, now_str),
-                )
+                # Eski event'leri temizle — prefix varsa sadece eşleşen
+                # mesajlı event'leri siliyoruz, yoksa tüm tipi.
+                if prefix_key:
+                    self._db._execute(
+                        "DELETE FROM events WHERE type = ? "
+                        "AND substr(trim(message), 1, 80) = ? "
+                        "AND timestamp <= ?",
+                        (error_type, prefix_key, now_str),
+                    )
+                else:
+                    self._db._execute(
+                        "DELETE FROM events WHERE type = ? AND timestamp <= ?",
+                        (error_type, now_str),
+                    )
             except Exception as exc:
                 logger.error(f"Çözümleme DB yazma hatası: {exc}")
 
@@ -429,9 +584,11 @@ class ErrorTracker:
             now_str = datetime.now().isoformat(timespec="seconds")
             try:
                 for etype in resolved_types:
+                    # Widget Denetimi A15 (B18): wildcard satır → message_prefix=''
                     self._db._execute(
                         """INSERT OR REPLACE INTO error_resolutions
-                           (error_type, resolved_at, resolved_by) VALUES (?, ?, ?)""",
+                           (error_type, message_prefix, resolved_at, resolved_by)
+                           VALUES (?, '', ?, ?)""",
                         (etype, now_str, by),
                     )
                     self._db._execute(

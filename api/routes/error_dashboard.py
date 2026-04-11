@@ -227,7 +227,16 @@ def _fetch_events_from_db(
 
 
 def _get_resolution_map() -> dict[str, dict]:
-    """error_resolutions tablosundan çözümleme kayıtlarını oku.
+    """error_resolutions tablosundan WILDCARD çözümleme kayıtlarını oku.
+
+    Widget Denetimi A15 (B18): Tablo artık (error_type, message_prefix)
+    composite PK'ya sahip. Route /groups endpoint'i sadece error_type
+    bazında grupluyor (mesaj prefix'i frontend grubuna girmiyor), bu yüzden
+    route-level "type resolved" semantiği SADECE wildcard satırlarla
+    (message_prefix == '') eşleşir. Spesifik (type, prefix) çözümlemeler
+    engine-side ErrorTracker tarafından bellek içinde uygulanır ve route'a
+    "tip çözümlü" şeklinde sızdırılmaz; aksi halde tek mesaj çözümlemesi
+    aynı tipin diğer mesajlarını da gizlerdi (audit bulgusu B18).
 
     Returns:
         {error_type: {"resolved_at": str, "resolved_by": str}}
@@ -236,12 +245,21 @@ def _get_resolution_map() -> dict[str, dict]:
     if not db:
         return {}
     try:
+        # Yeni şema: message_prefix sütunu var → sadece wildcard'ları al
         rows = db._fetch_all(
-            "SELECT error_type, resolved_at, resolved_by FROM error_resolutions"
+            "SELECT error_type, resolved_at, resolved_by FROM error_resolutions "
+            "WHERE message_prefix = ''"
         )
         return {r["error_type"]: r for r in rows}
     except Exception:
-        return {}
+        # Eski şema fallback (migration henüz çalışmadıysa, ör. test kontekstinde)
+        try:
+            rows = db._fetch_all(
+                "SELECT error_type, resolved_at, resolved_by FROM error_resolutions"
+            )
+            return {r["error_type"]: r for r in rows}
+        except Exception:
+            return {}
 
 
 def _is_resolved(error_type: str, last_seen: str, resolutions: dict) -> tuple[bool, str | None, str]:
@@ -586,12 +604,16 @@ async def resolve_error_group(req: ResolveRequest):
     db = get_db()
 
     # 1. DB'ye çözümleme kaydı yaz (kalıcı)
+    # Widget Denetimi A15 (B18): message_prefix kolonu da yazılır.
+    # Boş prefix → wildcard (tüm tip), dolu prefix → spesifik mesaj.
+    prefix_key = (req.message_prefix or "")[:80].strip()
     if db:
         try:
             db._execute(
                 """INSERT OR REPLACE INTO error_resolutions
-                   (error_type, resolved_at, resolved_by) VALUES (?, ?, ?)""",
-                (req.error_type, now_str, req.resolved_by),
+                   (error_type, message_prefix, resolved_at, resolved_by)
+                   VALUES (?, ?, ?, ?)""",
+                (req.error_type, prefix_key, now_str, req.resolved_by),
             )
         except Exception as exc:
             logger.error("resolve DB yazma hatası: %s", exc)
@@ -642,13 +664,15 @@ async def resolve_all_errors(req: ResolveRequest | None = None, resolved_by: str
             open_types.append(etype)
 
     # DB'ye yaz
+    # Widget Denetimi A15 (B18): wildcard satır → message_prefix=''
     resolved_count = 0
     if db and open_types:
         try:
             for etype in open_types:
                 db._execute(
                     """INSERT OR REPLACE INTO error_resolutions
-                       (error_type, resolved_at, resolved_by) VALUES (?, ?, ?)""",
+                       (error_type, message_prefix, resolved_at, resolved_by)
+                       VALUES (?, '', ?, ?)""",
                     (etype, now_str, by),
                 )
                 resolved_count += 1

@@ -2268,6 +2268,106 @@ def test_hybrid_sltp_visibility_in_positions_response():
     )
 
 
+# ── Flow 4zc: Error resolve message_prefix DB yazimi (A15 / B18) ──
+def test_error_resolve_message_prefix_persistence():
+    """Widget Denetimi A15 (B18): Hata Takip Paneli "Cozumle" butonu
+    spesifik mesaj icin tiklandiginda DB'ye message_prefix kolonuyla yazilmali.
+    Eski davranis: sadece error_type yaziliyordu, ayni tipin tum mesajlari
+    sessizce bastiriliyordu (frontend'de "tek satir cozumledim" yanilsamasi).
+
+    Bu test 5 sozlesme noktasini dogrular:
+      1. error_tracker.py: _resolved_keys field + _ensure_resolution_table
+         icinde message_prefix migration mantigi
+      2. error_tracker.py: resolve_group icinde prefix_key dallanmasi +
+         INSERT'in 4 kolonlu olmasi
+      3. error_tracker.py: record_error icinde iki seviyeli suppression
+         kontrolu (_resolved_types VEYA _resolved_keys)
+      4. error_dashboard.py: /resolve endpoint INSERT'i message_prefix dahil
+         + _get_resolution_map sadece wildcard satirlari okur
+      5. Audit markerlari (A15 + B18) error_tracker.py + error_dashboard.py
+    """
+    et_path = ROOT / "engine" / "error_tracker.py"
+    rd_path = ROOT / "api" / "routes" / "error_dashboard.py"
+    et_src = et_path.read_text(encoding="utf-8")
+    rd_src = rd_path.read_text(encoding="utf-8")
+
+    # 1. _resolved_keys field + migration mantigi
+    assert "_resolved_keys" in et_src, (
+        "engine/error_tracker.py icinde _resolved_keys field tanimli degil — "
+        "iki seviyeli (wildcard + spesifik) bastirma yok."
+    )
+    assert "message_prefix" in et_src, (
+        "engine/error_tracker.py icinde message_prefix kolonu adi yok — "
+        "A15 fix uygulanmamis."
+    )
+    assert "ALTER TABLE error_resolutions RENAME" in et_src, (
+        "engine/error_tracker.py icinde error_resolutions A15 gocu yok — "
+        "eski sema sessizce kalir, frontend yanilsamasi devam eder."
+    )
+    assert "PRIMARY KEY (error_type, message_prefix)" in et_src, (
+        "engine/error_tracker.py icinde composite PK tanimi yok — "
+        "ayni tip + farkli prefix satiri eklenemez."
+    )
+
+    # 2. resolve_group prefix_key dallanmasi + 4 kolonlu INSERT
+    assert "prefix_key" in et_src, (
+        "engine/error_tracker.py::resolve_group icinde prefix_key degiskeni "
+        "yok — spesifik vs wildcard ayrimi yapilmaz."
+    )
+    et_insert_pattern = re.compile(
+        r"INSERT\s+OR\s+REPLACE\s+INTO\s+error_resolutions\s*"
+        r"\(\s*error_type\s*,\s*message_prefix\s*,\s*resolved_at\s*,\s*resolved_by\s*\)",
+        re.IGNORECASE,
+    )
+    assert et_insert_pattern.search(et_src), (
+        "engine/error_tracker.py icinde 4 kolonlu INSERT (error_type, "
+        "message_prefix, resolved_at, resolved_by) yok — kalici DB yazimi "
+        "eski semada kaliyor."
+    )
+    # DELETE events de prefix duyarli olmali
+    assert "substr(trim(message), 1, 80)" in et_src, (
+        "engine/error_tracker.py::resolve_group DELETE statement'i "
+        "substr(trim(message), 1, 80) prefix eslestirmesi yapmiyor — "
+        "spesifik cozumlemede ayni tipin diger mesajli event'leri de silinir."
+    )
+
+    # 3. record_error iki seviyeli suppression
+    assert "_resolved_keys" in et_src and "in self._resolved_keys" in et_src, (
+        "engine/error_tracker.py::record_error icinde "
+        "(error_type, prefix) in self._resolved_keys kontrolu yok — "
+        "spesifik cozumlemeler bastirilmaz."
+    )
+
+    # 4. error_dashboard.py route fix
+    rd_insert_pattern = re.compile(
+        r"INSERT\s+OR\s+REPLACE\s+INTO\s+error_resolutions\s*"
+        r"\(\s*error_type\s*,\s*message_prefix\s*,\s*resolved_at\s*,\s*resolved_by\s*\)",
+        re.IGNORECASE,
+    )
+    assert rd_insert_pattern.search(rd_src), (
+        "api/routes/error_dashboard.py icinde 4 kolonlu INSERT yok — "
+        "/resolve ve /resolve-all endpoint'leri eski semada yazmaya devam eder."
+    )
+    assert "WHERE message_prefix = ''" in rd_src, (
+        "api/routes/error_dashboard.py::_get_resolution_map sadece wildcard "
+        "satirlari okumuyor — spesifik cozumleme tum tipi 'cozulmus' "
+        "gosterir, audit bulgusu B18 tekrarlar."
+    )
+    assert "prefix_key" in rd_src, (
+        "api/routes/error_dashboard.py::resolve_error_group icinde prefix_key "
+        "yok — message_prefix kolonu DB'ye sifir uzunluk gibi yazilir."
+    )
+
+    # 5. Audit markerlari
+    assert "A15" in et_src and "B18" in et_src, (
+        "engine/error_tracker.py icinde 'A15' veya 'B18' audit markerlari yok."
+    )
+    assert "A15" in rd_src and "B18" in rd_src, (
+        "api/routes/error_dashboard.py icinde 'A15' veya 'B18' audit "
+        "markerlari yok."
+    )
+
+
 # ── Flow 5: Kill-switch L2 _close_ogul_and_hybrid manuel dokunmaz ──
 def test_baba_l2_only_closes_ogul_and_hybrid():
     from engine.baba import Baba
