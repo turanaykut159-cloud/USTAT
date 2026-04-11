@@ -132,6 +132,69 @@ def test_check_risk_limits_escalates_l2_to_l3_on_hard_drawdown():
     )
 
 
+# ── Flow 4c: Trade stats SIGN_MISMATCH anomalilerini best/worst disinda birakir ──
+def test_trade_stats_excludes_sign_mismatch_from_best_worst():
+    """Widget Denetimi A2: MT5 netting sync'te parcali pozisyonlar
+    weighted avg entry/exit ile MT5 raw pnl arasinda tutarsiz olabilir.
+    get_trade_stats bu kayitlari best_trade/worst_trade secimi disinda
+    birakir ki kullanici UI'da yanlis "en karli islem" gormesin.
+    """
+    from api.routes import trades as trades_route
+    from api.schemas import TradeItem, TradeStatsResponse
+
+    # Helper fonksiyon var mi
+    assert hasattr(trades_route, "_check_trade_consistency"), (
+        "_check_trade_consistency yardimci fonksiyonu yok."
+    )
+
+    # TradeItem schema'sinda data_warning alani olmali
+    assert "data_warning" in TradeItem.model_fields, (
+        "TradeItem.data_warning alani yok — SIGN_MISMATCH raporlanamiyor."
+    )
+    # TradeStatsResponse'ta anomaly_count olmali
+    assert "anomaly_count" in TradeStatsResponse.model_fields, (
+        "TradeStatsResponse.anomaly_count alani yok — hariç tutulan sayi "
+        "UI'a iletilmez."
+    )
+
+    # get_trade_stats source'unda clean_items filtresi kullanilmali
+    stats_src = inspect.getsource(trades_route.get_trade_stats)
+    assert "data_warning" in stats_src, (
+        "get_trade_stats icinde data_warning filtresi yok — best_trade "
+        "secimi hala anomalileri iceriyor."
+    )
+    assert "clean_items" in stats_src or "data_warning is None" in stats_src, (
+        "get_trade_stats'ta anomaly filtresi best/worst secimine "
+        "uygulanmamis."
+    )
+    # Helper'in dogru mantiksal sonuc uretmesi
+    # BUY + exit<entry + pnl>0 → SIGN_MISMATCH
+    assert (
+        trades_route._check_trade_consistency("BUY", 259.87, 257.80, 2705.0)
+        == "SIGN_MISMATCH"
+    ), "BUY + exit<entry + pnl>0 anomali olarak tespit edilmedi."
+    # SELL + exit>entry + pnl>0 → SIGN_MISMATCH
+    assert (
+        trades_route._check_trade_consistency("SELL", 104.26, 104.40, 485.0)
+        == "SIGN_MISMATCH"
+    ), "SELL + exit>entry + pnl>0 anomali olarak tespit edilmedi."
+    # BUY + exit>entry + pnl>0 → None (tutarli)
+    assert (
+        trades_route._check_trade_consistency("BUY", 100.0, 101.0, 50.0)
+        is None
+    ), "Tutarli BUY trade yanlislikla anomali sayildi."
+    # SELL + exit<entry + pnl>0 → None (tutarli)
+    assert (
+        trades_route._check_trade_consistency("SELL", 101.0, 100.0, 50.0)
+        is None
+    ), "Tutarli SELL trade yanlislikla anomali sayildi."
+    # pnl=None → None (kontrol edilemez)
+    assert (
+        trades_route._check_trade_consistency("BUY", 100.0, 101.0, None)
+        is None
+    )
+
+
 # ── Flow 5: Kill-switch L2 _close_ogul_and_hybrid manuel dokunmaz ──
 def test_baba_l2_only_closes_ogul_and_hybrid():
     from engine.baba import Baba

@@ -135,6 +135,11 @@ class TradeItem(BaseModel):
     exit_reason: str | None = None
     entry_time: str | None = None
     exit_time: str | None = None
+    # v6.0 — Widget Denetimi A2: Trade veri tutarlılık uyarısı.
+    # "SIGN_MISMATCH" → MT5 pnl işareti ile direction×(exit-entry) işareti
+    # çelişiyor (parçalı/ters netting pozisyon şüphesi). Stats endpoint bu
+    # trade'leri best_trade/worst_trade seçiminden hariç tutar; UI rozetle bildirir.
+    data_warning: str | None = None
 
 
 class TradesResponse(BaseModel):
@@ -158,6 +163,10 @@ class TradeStatsResponse(BaseModel):
     avg_duration_minutes: float = 0.0
     by_strategy: dict[str, StrategyStats] = {}
     by_symbol: dict[str, SymbolStats] = {}
+    # v6.0 — Widget Denetimi A2: best_trade/worst_trade seçimi dışında bırakılan
+    # tutarsız trade sayısı (SIGN_MISMATCH). UI "N işlem anomali nedeniyle hariç"
+    # banner'ı gösterebilir. total_pnl/win_rate/avg_pnl bu filtreden etkilenmez.
+    anomaly_count: int = 0
 
 
 class StrategyStats(BaseModel):

@@ -30,19 +30,70 @@ from api.schemas import (
 router = APIRouter()
 
 
+# ── Yardımcı: Trade tutarlılık kontrolü (Widget Denetimi A2) ─────
+
+def _check_trade_consistency(
+    direction: str | None,
+    entry_price: float | None,
+    exit_price: float | None,
+    pnl: float | None,
+) -> str | None:
+    """Trade kaydının işaret tutarlılığını kontrol eder.
+
+    MT5 netting mod'da aynı position_id altında scale-in/out veya ters
+    dönüşler tek pozisyon olarak toplandığında `get_history_for_sync`
+    weighted avg entry/exit üretir, pnl ise MT5 raw profit toplamıdır.
+    Bu iki değer bazı parçalı pozisyonlarda matematiksel olarak
+    tutarsızlaşır (örn. BUY olarak kaydedilmiş ama exit<entry olduğu
+    halde pnl pozitif). Stats endpoint bu trade'leri best/worst
+    seçiminden hariç tutar; kullanıcı yanlışlıkla "en kârlı işlem"
+    olarak anomali görmez.
+
+    Args:
+        direction: "BUY" / "SELL" / ""
+        entry_price: ağırlıklı ortalama giriş
+        exit_price: ağırlıklı ortalama çıkış
+        pnl: MT5 raw profit (ground truth)
+
+    Returns:
+        "SIGN_MISMATCH" — pnl işareti (direction × price_diff) işaretiyle çelişiyor
+        None — tutarlı veya kontrol için yeterli veri yok
+    """
+    if pnl is None or entry_price is None or exit_price is None:
+        return None
+    if direction not in ("BUY", "SELL"):
+        return None
+    # pnl == 0 (komisyon-wash) tutarsız sayılmaz
+    if pnl == 0:
+        return None
+    price_diff = exit_price - entry_price
+    if price_diff == 0:
+        return None
+    expected_sign = 1 if direction == "BUY" else -1
+    # BUY: pnl ve price_diff aynı işaretli olmalı
+    # SELL: pnl ve -price_diff aynı işaretli olmalı
+    if (pnl > 0) != ((expected_sign * price_diff) > 0):
+        return "SIGN_MISMATCH"
+    return None
+
+
 # ── Yardımcı: DB dict → TradeItem ────────────────────────────────
 
 def _to_trade_item(row: dict) -> TradeItem:
     """Veritabanı satırını TradeItem'a dönüştür."""
+    entry_price = row.get("entry_price")
+    exit_price = row.get("exit_price")
+    direction = row.get("direction", "")
+    pnl = row.get("pnl")
     return TradeItem(
         id=row.get("id", 0),
         symbol=row.get("symbol", ""),
-        direction=row.get("direction", ""),
+        direction=direction,
         strategy=row.get("strategy", ""),
         lot=row.get("lot", 0.0),
-        entry_price=row.get("entry_price"),
-        exit_price=row.get("exit_price"),
-        pnl=row.get("pnl"),
+        entry_price=entry_price,
+        exit_price=exit_price,
+        pnl=pnl,
         slippage=row.get("slippage"),
         commission=row.get("commission"),
         swap=row.get("swap"),
@@ -51,6 +102,9 @@ def _to_trade_item(row: dict) -> TradeItem:
         exit_reason=row.get("exit_reason"),
         entry_time=row.get("entry_time"),
         exit_time=row.get("exit_time"),
+        data_warning=_check_trade_consistency(
+            direction, entry_price, exit_price, pnl,
+        ),
     )
 
 
@@ -140,9 +194,20 @@ async def get_trade_stats(
     avg_pnl = total_pnl / len(pnl_values) if pnl_values else 0.0
     win_rate = len(winning) / len(pnl_values) * 100 if pnl_values else 0.0
 
-    # En kârlı / en zararlı
-    best_trade = max(items, key=lambda t: t.pnl or 0.0) if items else None
-    worst_trade = min(items, key=lambda t: t.pnl or 0.0) if items else None
+    # v6.0 — Widget Denetimi A2: En kârlı / en zararlı seçiminde
+    # SIGN_MISMATCH anomalileri hariç tutulur. MT5 netting sync'te
+    # parçalı pozisyonlar weighted avg entry/exit ile pnl işareti çelişebilir;
+    # bu kayıtlar "best_trade" olarak UI'a çıkarsa kullanıcıyı yanıltır.
+    # total_pnl / win_rate / avg_pnl dahil diğer tüm metrikler ETKİLENMEZ —
+    # pnl değeri MT5 ground truth olarak kalır.
+    clean_items = [t for t in items if t.data_warning is None]
+    anomaly_count = sum(1 for t in items if t.data_warning is not None)
+    best_trade = (
+        max(clean_items, key=lambda t: t.pnl or 0.0) if clean_items else None
+    )
+    worst_trade = (
+        min(clean_items, key=lambda t: t.pnl or 0.0) if clean_items else None
+    )
 
     # En uzun / en kısa (süre bazlı)
     durations: list[tuple[float, TradeItem]] = []
@@ -206,6 +271,7 @@ async def get_trade_stats(
         avg_duration_minutes=avg_duration,
         by_strategy=by_strategy,
         by_symbol=by_symbol,
+        anomaly_count=anomaly_count,
     )
 
 
