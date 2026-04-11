@@ -13,6 +13,7 @@ from datetime import date, datetime
 
 from fastapi import APIRouter
 
+from api.constants import STATS_BASELINE, get_stats_baseline
 from api.deps import get_baba, get_db, get_engine
 from api.schemas import (
     NotificationPrefsRequest,
@@ -21,6 +22,7 @@ from api.schemas import (
     RiskBaselineUpdateRequest,
     RiskBaselineUpdateResponse,
     SessionHoursResponse,
+    StatsBaselineResponse,
 )
 
 # v6.0 — Widget Denetimi A17: BIST VİOP seans saatleri (fallback).
@@ -230,6 +232,49 @@ async def get_session_hours():
         market_close=hours["market_close"],
         eod_close=hours["eod_close"],
         source=source,
+    )
+
+
+@router.get("/settings/stats-baseline", response_model=StatsBaselineResponse)
+async def get_stats_baseline_endpoint():
+    """İstatistik ve risk baseline tarihlerini birlikte döndür (Widget Denetimi A7).
+
+    Frontend Performance, TradeHistory ve Dashboard istatistik kartları
+    bu endpoint'ten aktif baseline'ı çeker ve küçük bir etiket olarak
+    gösterir. İki kavram ayrıdır:
+
+    * stats_baseline → win_rate, profit_factor, best_trade gibi istatistiklerin
+      başlangıç tarihi. Kaynak: risk.stats_baseline_date (fallback STATS_BASELINE).
+    * risk_baseline → BABA peak_equity/drawdown hesaplamasının başlangıcı.
+      Kaynak: risk.baseline_date. Kullanıcı Settings sayfasından değiştirir.
+    """
+    stats_val = get_stats_baseline()
+    stats_source = "config" if stats_val != STATS_BASELINE else "default"
+
+    engine = get_engine()
+    risk_val = ""
+    risk_source = "unavailable"
+    if engine is not None and hasattr(engine, "config"):
+        try:
+            raw = engine.config.get("risk.baseline_date", "")
+        except Exception:
+            raw = ""
+        if isinstance(raw, str) and raw.strip():
+            risk_val = raw.strip()
+            risk_source = "config"
+        else:
+            baba = get_baba()
+            if baba is not None and hasattr(baba, "_risk_baseline_date"):
+                fallback = getattr(baba, "_risk_baseline_date", "")
+                if isinstance(fallback, str) and fallback.strip():
+                    risk_val = fallback.strip()
+                    risk_source = "default"
+
+    return StatsBaselineResponse(
+        stats_baseline=stats_val,
+        risk_baseline=risk_val,
+        stats_source=stats_source,
+        risk_source=risk_source,
     )
 
 

@@ -12,7 +12,15 @@ import axios from 'axios';
 const API_BASE = '/api';
 const WS_BASE = `ws://${window.location.host}`;
 
-/** İstatistik hesaplamalarının başlangıç tarihi (backend _STATS_BASELINE ile eşleşmeli). */
+/**
+ * İstatistik hesaplamalarının başlangıç tarihi (fallback).
+ *
+ * Widget Denetimi A7 — Tek kaynak: backend /api/settings/stats-baseline
+ * endpoint'i. Aşağıdaki sabit yalnızca endpoint okunamadığında (erken
+ * mount, network hatası, servis yok) fallback olarak kullanılır. Yeni
+ * bileşenler `STATS_BASELINE` yerine `getStatsBaseline()` helper'ı
+ * kullanmalı ve etkin değeri state'te tutmalıdır.
+ */
 export const STATS_BASELINE = '2026-02-01';
 
 const client = axios.create({
@@ -191,6 +199,28 @@ export async function getSession() {
       market_close: '18:15',
       eod_close: '17:45',
       source: 'error',
+    };
+  }
+}
+
+// ── Settings — Stats Baseline (Widget Denetimi A7) ───────────────
+// Backend config/default.json::risk.stats_baseline_date ve
+// risk.baseline_date değerlerini birlikte döndürür. Performance,
+// TradeHistory ve Dashboard istatistik kartları bu endpoint'ten
+// aktif baseline'ı çeker; hem getTrades çağrılarında since parametresi
+// olarak kullanılır, hem de UI'da küçük bir etiketle gösterilir.
+// Hata durumunda STATS_BASELINE fallback'i döner — UI asla kırılmaz.
+export async function getStatsBaseline() {
+  try {
+    const { data } = await client.get('/settings/stats-baseline');
+    return data;
+  } catch (err) {
+    console.error('[ÜSTAT API] getStatsBaseline:', err?.message ?? err);
+    return {
+      stats_baseline: STATS_BASELINE,
+      risk_baseline: '',
+      stats_source: 'error',
+      risk_source: 'error',
     };
   }
 }

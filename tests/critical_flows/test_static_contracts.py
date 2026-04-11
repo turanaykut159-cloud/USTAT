@@ -653,6 +653,152 @@ def test_session_hours_from_config_to_frontend():
     )
 
 
+# ── Flow 4j: Stats baseline config->api->frontend tek kaynak zinciri (A7) ──
+def test_stats_baseline_single_source_chain():
+    """Widget Denetimi A7 — STATS_BASELINE artik
+    config/default.json::risk.stats_baseline_date'den okunur, frontend
+    /settings/stats-baseline endpoint'inden ceker ve Performance+TradeHistory
+    sayfalarinda label olarak gosterir. Iki ayri baseline (stats vs risk)
+    ayni API response'unda birlikte doner.
+    """
+    import json
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+
+    # 1) config/default.json → risk.stats_baseline_date var mi?
+    cfg_path = root / "config" / "default.json"
+    with open(cfg_path, encoding="utf-8") as f:
+        cfg = json.load(f)
+    assert "risk" in cfg, "config/default.json 'risk' blogu eksik"
+    assert "stats_baseline_date" in cfg["risk"], (
+        "config/default.json::risk.stats_baseline_date yok — A7 tek kaynak "
+        "ilkesi bozulmus."
+    )
+    assert isinstance(cfg["risk"]["stats_baseline_date"], str), (
+        "risk.stats_baseline_date string olmali (YYYY-MM-DD)."
+    )
+    assert re.match(r"^\d{4}-\d{2}-\d{2}", cfg["risk"]["stats_baseline_date"]), (
+        "risk.stats_baseline_date ISO tarih formatinda olmali."
+    )
+    # risk.baseline_date korunmali (ayri kavram)
+    assert "baseline_date" in cfg["risk"], (
+        "risk.baseline_date korundu mu? A7 yanlislikla risk baseline'i "
+        "silmis olabilir."
+    )
+
+    # 2) api/constants.py → get_stats_baseline helper var mi?
+    constants_src = (root / "api" / "constants.py").read_text(encoding="utf-8")
+    assert "def get_stats_baseline" in constants_src, (
+        "api/constants.py::get_stats_baseline helper'i yok — A7 tek kaynak "
+        "ilkesi bozulmus."
+    )
+    assert 'risk.stats_baseline_date' in constants_src, (
+        "api/constants.py get_stats_baseline() config anahtarini okumuyor."
+    )
+    assert "STATS_BASELINE = " in constants_src, (
+        "api/constants.py STATS_BASELINE fallback sabiti kaldirildi — A7 "
+        "geri uyumluluk bozulmus."
+    )
+
+    # 3) api/schemas.py → StatsBaselineResponse modeli
+    schemas_src = (root / "api" / "schemas.py").read_text(encoding="utf-8")
+    assert "class StatsBaselineResponse" in schemas_src, (
+        "api/schemas.py StatsBaselineResponse sinifi yok."
+    )
+    assert "stats_baseline" in schemas_src and "risk_baseline" in schemas_src, (
+        "StatsBaselineResponse alanlari eksik — (stats_baseline, risk_baseline) "
+        "ikisi de olmalidir."
+    )
+
+    # 4) api/routes/settings.py → /settings/stats-baseline endpoint
+    settings_src = (root / "api" / "routes" / "settings.py").read_text(encoding="utf-8")
+    assert 'get_stats_baseline_endpoint' in settings_src or 'stats-baseline' in settings_src, (
+        "api/routes/settings.py stats-baseline endpoint'i yok."
+    )
+    assert "/settings/stats-baseline" in settings_src, (
+        "/settings/stats-baseline route'u eksik."
+    )
+    assert "get_stats_baseline()" in settings_src, (
+        "settings.py endpoint get_stats_baseline() helper'ini cagirmiyor — "
+        "fallback davranisi kirilmis."
+    )
+
+    # 5) api/routes/performance.py → helper kullanimi
+    perf_py = (root / "api" / "routes" / "performance.py").read_text(encoding="utf-8")
+    assert "get_stats_baseline" in perf_py, (
+        "api/routes/performance.py get_stats_baseline helper'ini import "
+        "etmiyor — hala sabit STATS_BASELINE'a bagli."
+    )
+    assert "baseline = get_stats_baseline()" in perf_py, (
+        "performance.py get_stats_baseline() cagrisi yok — config tabaninda "
+        "okumuyor."
+    )
+
+    # 6) api/routes/trades.py → /trades/stats helper fallback
+    trades_py = (root / "api" / "routes" / "trades.py").read_text(encoding="utf-8")
+    assert "get_stats_baseline" in trades_py, (
+        "trades.py get_stats_baseline helper'ini import etmiyor."
+    )
+    assert "effective_since = since if since else get_stats_baseline()" in trades_py, (
+        "trades.py /trades/stats since=None verildiginde helper fallback'i "
+        "kullanmiyor — frontend aktif baseline'i override edemez."
+    )
+
+    # 7) services/api.js → getStatsBaseline helper
+    api_js_src = (root / "desktop" / "src" / "services" / "api.js").read_text(encoding="utf-8")
+    assert "export async function getStatsBaseline" in api_js_src, (
+        "services/api.js getStatsBaseline helper'i export edilmiyor."
+    )
+    assert "/settings/stats-baseline" in api_js_src, (
+        "services/api.js getStatsBaseline /settings/stats-baseline "
+        "endpoint'ini cagirmiyor."
+    )
+    # STATS_BASELINE sabiti (fallback) korunmali — geri uyumluluk
+    assert "export const STATS_BASELINE = '2026-02-01'" in api_js_src, (
+        "services/api.js STATS_BASELINE fallback sabiti silinmis — geri "
+        "uyumluluk bozulur (import eden bilesenler patlar)."
+    )
+
+    # 8) Performance.jsx → baselineInfo state + label
+    perf_jsx_src = (
+        root / "desktop" / "src" / "components" / "Performance.jsx"
+    ).read_text(encoding="utf-8")
+    assert "getStatsBaseline" in perf_jsx_src, (
+        "Performance.jsx getStatsBaseline import'u eksik."
+    )
+    assert "baselineInfo" in perf_jsx_src, (
+        "Performance.jsx baselineInfo state'i yok — baseline backend'den "
+        "cekilmiyor."
+    )
+    assert "pf-baseline-label" in perf_jsx_src, (
+        "Performance.jsx pf-baseline-label UI bloğu yok — kullanici aktif "
+        "baseline'i gormuyor (A7 UI label gereksinimi)."
+    )
+    assert "baselineInfo.stats_baseline" in perf_jsx_src, (
+        "Performance.jsx getTrades/getTradeStats baselineInfo state'ini "
+        "kullanmiyor — hala sabit STATS_BASELINE'a bagli."
+    )
+
+    # 9) TradeHistory.jsx → baselineInfo state + label
+    th_src = (
+        root / "desktop" / "src" / "components" / "TradeHistory.jsx"
+    ).read_text(encoding="utf-8")
+    assert "getStatsBaseline" in th_src, (
+        "TradeHistory.jsx getStatsBaseline import'u eksik."
+    )
+    assert "baselineInfo" in th_src, (
+        "TradeHistory.jsx baselineInfo state'i yok."
+    )
+    assert "th-baseline-label" in th_src, (
+        "TradeHistory.jsx th-baseline-label UI blogu yok."
+    )
+    assert "baselineInfo.stats_baseline" in th_src, (
+        "TradeHistory.jsx fetchData baselineInfo state'ini kullanmiyor."
+    )
+
+
 # ── Flow 5: Kill-switch L2 _close_ogul_and_hybrid manuel dokunmaz ──
 def test_baba_l2_only_closes_ogul_and_hybrid():
     from engine.baba import Baba

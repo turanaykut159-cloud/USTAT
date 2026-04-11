@@ -12,7 +12,7 @@ from collections import defaultdict
 
 from fastapi import APIRouter, Query
 
-from api.constants import STATS_BASELINE
+from api.constants import STATS_BASELINE, get_stats_baseline
 from api.deps import get_db
 
 logger = logging.getLogger("ustat.api.routes.performance")
@@ -34,7 +34,10 @@ async def get_performance(
         return PerformanceResponse()
 
     # ── İşlemler (baseline sonrası) ────────────────────────────────
-    trades = db.get_trades(since=STATS_BASELINE, limit=5000)
+    # Widget Denetimi A7: baseline tek kaynaktan (config/default.json
+    # risk.stats_baseline_date → fallback: api.constants.STATS_BASELINE).
+    baseline = get_stats_baseline()
+    trades = db.get_trades(since=baseline, limit=5000)
     if not trades:
         return PerformanceResponse()
 
@@ -87,8 +90,10 @@ async def get_performance(
 
     # ── Sharpe Ratio (yüzde getiri bazlı, Madde 2.2) ─────────────
     sharpe_ratio = 0.0
+    # A7: Aynı baseline, tutarlılık için üstteki get_trades ile eşlenir.
+    _snap_since = baseline[:10] if baseline else STATS_BASELINE
     daily_snapshots = db.get_daily_end_snapshots(
-        since=f"{STATS_BASELINE}T00:00:00", limit=365,
+        since=f"{_snap_since}T00:00:00", limit=365,
     )
     if daily_snapshots:
         daily_returns: list[float] = []

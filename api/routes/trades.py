@@ -13,7 +13,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Query
 
-from api.constants import STATS_BASELINE
+from api.constants import STATS_BASELINE, get_stats_baseline
 from api.deps import get_db, get_engine
 
 logger = logging.getLogger("ustat.api.routes.trades")
@@ -168,7 +168,7 @@ async def get_trades(
 
 @router.get("/trades/stats", response_model=TradeStatsResponse)
 async def get_trade_stats(
-    since: str | None = Query(STATS_BASELINE, description="Başlangıç tarihi (YYYY-MM-DD)"),
+    since: str | None = Query(None, description="Başlangıç tarihi (YYYY-MM-DD); boş bırakılırsa config/default.json::risk.stats_baseline_date kullanılır"),
     limit: int = Query(500, ge=1, le=5000, description="Analiz edilecek maks kayıt"),
 ):
     """İşlem istatistiklerini hesapla.
@@ -176,12 +176,17 @@ async def get_trade_stats(
     En kârlı, en zararlı, en uzun, en kısa işlemler.
     Strateji ve sembol bazlı kırılımlar.
     Sync, engine cycle'ında event-driven yapılır (_check_position_closures).
+
+    Widget Denetimi A7: `since` parametresi verilmediğinde tek kaynak
+    olarak `config/default.json::risk.stats_baseline_date` kullanılır
+    (fallback: api.constants.STATS_BASELINE).
     """
     db = get_db()
     if not db:
         return TradeStatsResponse()
 
-    rows = db.get_trades(since=since, limit=limit)
+    effective_since = since if since else get_stats_baseline()
+    rows = db.get_trades(since=effective_since, limit=limit)
     if not rows:
         return TradeStatsResponse()
 

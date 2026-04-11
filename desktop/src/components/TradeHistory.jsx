@@ -14,7 +14,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { getTrades, getTradeStats, getPerformance, approveTrade, syncTrades, connectLiveWS, STATS_BASELINE } from '../services/api';
+import { getTrades, getTradeStats, getPerformance, approveTrade, syncTrades, connectLiveWS, getStatsBaseline, STATS_BASELINE } from '../services/api';
 import { formatMoney, formatPrice, pnlClass } from '../utils/formatters';
 
 // ── Sabitler ─────────────────────────────────────────────────────
@@ -169,6 +169,14 @@ export default function TradeHistory() {
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState(null);
 
+  // A7: Aktif stats/risk baseline tarihleri backend'den çekilir.
+  const [baselineInfo, setBaselineInfo] = useState({
+    stats_baseline: STATS_BASELINE,
+    risk_baseline: '',
+    stats_source: 'default',
+    risk_source: 'unavailable',
+  });
+
   // ── Filtre sıfırlama ──────────────────────────────────────────
   const resetFilters = useCallback(() => {
     setPeriod(DEFAULT_PERIOD);
@@ -192,14 +200,30 @@ export default function TradeHistory() {
     setSortMode((prev) => prev === value ? null : value);
   }, []);
 
+  // ── A7: Stats baseline mount'ta çekilir, fallback STATS_BASELINE ─
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const data = await getStatsBaseline();
+      if (cancelled) return;
+      setBaselineInfo({
+        stats_baseline: data?.stats_baseline || STATS_BASELINE,
+        risk_baseline: data?.risk_baseline || '',
+        stats_source: data?.stats_source || 'default',
+        risk_source: data?.risk_source || 'unavailable',
+      });
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   // ── Veri çekme ───────────────────────────────────────────────────
   const fetchData = useCallback(async () => {
     setLoading(true);
     setFetchError(false);
     try {
       const [t, s, p] = await Promise.all([
-        getTrades({ since: STATS_BASELINE, limit: 1000 }),
-        getTradeStats(1000),
+        getTrades({ since: baselineInfo.stats_baseline, limit: 1000 }),
+        getTradeStats(1000, baselineInfo.stats_baseline),
         getPerformance(365),
       ]);
       setFetchError(Boolean(t && t.error));
@@ -209,7 +233,7 @@ export default function TradeHistory() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [baselineInfo.stats_baseline]);
 
   // İlk yüklemede veri çek + WebSocket event-driven yenileme
   const wsRef = useRef(null);
@@ -357,6 +381,14 @@ export default function TradeHistory() {
   // ── Render ───────────────────────────────────────────────────────
   return (
     <div className="trade-history">
+
+      {/* A7: Aktif istatistik tabanı + risk tabanı etiketi */}
+      <div className="th-baseline-label" title="İstatistik tabanı: Aşağıdaki işlem listesi, özet kartlar ve sağ panel bu tarihten itibaren hesaplanır. Risk tabanı: BABA peak_equity ve drawdown hesaplamalarının başlangıcı — Settings sayfasından değiştirilebilir.">
+        <span>İstatistik tabanı: <b>{(baselineInfo.stats_baseline || STATS_BASELINE).slice(0, 10)}</b></span>
+        {baselineInfo.risk_baseline && (
+          <span style={{ marginLeft: 12 }}>· Risk tabanı: <b>{baselineInfo.risk_baseline.slice(0, 10)}</b></span>
+        )}
+      </div>
 
       {/* ═══ ZAMAN FİLTRE BUTONLARI (üst satır) ═════════════════ */}
       <div className="th-period-btns">

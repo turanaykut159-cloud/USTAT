@@ -783,6 +783,29 @@ class SessionHoursResponse(BaseModel):
     source: str = "config"  # config | default
 
 
+class StatsBaselineResponse(BaseModel):
+    """GET /api/settings/stats-baseline — İstatistik taban tarihleri (Widget Denetimi A7).
+
+    İki baseline birlikte döner ve anlamları UI'da net ayırt edilir:
+
+    * `stats_baseline` — Dashboard/Performans/TradeHistory istatistiklerinin
+      başlangıç tarihi. Kaynak: `config/default.json::risk.stats_baseline_date`
+      (fallback: `api.constants.STATS_BASELINE`). Bu tarihten önceki trade'ler
+      win_rate, profit_factor, best/worst trade gibi metriklere DAHİL EDİLMEZ.
+    * `risk_baseline` — BABA'nın drawdown ve peak_equity hesaplamalarında
+      kullandığı başlangıç. Kaynak: `config/default.json::risk.baseline_date`.
+      Kullanıcı bu tarihi Settings sayfasında elle değiştirebilir (POST
+      /settings/risk-baseline).
+
+    İki değer zaman zaman aynı olabilir ama farklı kavramlardır —
+    istatistik penceresi vs risk penceresi. UI'da ayrı etiket olarak gösterilir.
+    """
+    stats_baseline: str = "2026-02-01"
+    risk_baseline: str = ""
+    stats_source: str = "default"  # config | default
+    risk_source: str = "default"   # config | default | unavailable
+
+
 # ═══════════════════════════════════════════════════════════════════
 #  HABER ENTEGRASYONU (v5.7.1)
 # ═══════════════════════════════════════════════════════════════════

@@ -22,7 +22,7 @@ import {
   LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
 } from 'recharts';
-import { getPerformance, getTradeStats, getTrades, getSession, STATS_BASELINE } from '../services/api';
+import { getPerformance, getTradeStats, getTrades, getSession, getStatsBaseline, STATS_BASELINE } from '../services/api';
 
 // ── BIST VİOP seans saatleri — Widget Denetimi A17 ──
 // Heatmap saat aralığı backend config/default.json::session'dan okunur.
@@ -145,6 +145,13 @@ export default function Performance() {
   const [loading, setLoading] = useState(true);
   // A17: Heatmap saat aralığı backend session config'den çekilir.
   const [heatmapHours, setHeatmapHours] = useState(DEFAULT_HEATMAP_HOURS);
+  // A7: Aktif istatistik/risk baseline tarihleri backend'den çekilir.
+  const [baselineInfo, setBaselineInfo] = useState({
+    stats_baseline: STATS_BASELINE,
+    risk_baseline: '',
+    stats_source: 'default',
+    risk_source: 'unavailable',
+  });
 
   // ── A17: Session saatleri mount'ta çekilir, hata durumunda default ──
   useEffect(() => {
@@ -160,19 +167,35 @@ export default function Performance() {
     return () => { cancelled = true; };
   }, []);
 
+  // ── A7: Stats baseline mount'ta çekilir, fallback STATS_BASELINE ─
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const data = await getStatsBaseline();
+      if (cancelled) return;
+      setBaselineInfo({
+        stats_baseline: data?.stats_baseline || STATS_BASELINE,
+        risk_baseline: data?.risk_baseline || '',
+        stats_source: data?.stats_source || 'default',
+        risk_source: data?.risk_source || 'unavailable',
+      });
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   // ── Performans verisi ────────────────────────────────────────────
   const fetchPerfData = useCallback(async () => {
     setLoading(true);
     const [p, s, t] = await Promise.all([
       getPerformance(days),
-      getTradeStats(1000),
-      getTrades({ since: STATS_BASELINE, limit: 1000 }),
+      getTradeStats(1000, baselineInfo.stats_baseline),
+      getTrades({ since: baselineInfo.stats_baseline, limit: 1000 }),
     ]);
     setPerf(p);
     setStats(s);
     setTrades(t.trades || []);
     setLoading(false);
-  }, [days]);
+  }, [days, baselineInfo.stats_baseline]);
 
   useEffect(() => {
     fetchPerfData();
@@ -331,6 +354,14 @@ export default function Performance() {
             </button>
           ))}
         </div>
+      </div>
+
+      {/* A7: Aktif istatistik tabanı + risk tabanı etiketi */}
+      <div className="pf-baseline-label" title="İstatistik tabanı: Dashboard, Performans ve TradeHistory kartlarındaki win rate, profit factor, best/worst trade gibi metriklerin başlangıç tarihi. Risk tabanı: BABA peak_equity ve drawdown hesaplamalarının başlangıcı.">
+        <span>İstatistik tabanı: <b>{(baselineInfo.stats_baseline || STATS_BASELINE).slice(0, 10)}</b></span>
+        {baselineInfo.risk_baseline && (
+          <span style={{ marginLeft: 12 }}>· Risk tabanı: <b>{baselineInfo.risk_baseline.slice(0, 10)}</b></span>
+        )}
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════
