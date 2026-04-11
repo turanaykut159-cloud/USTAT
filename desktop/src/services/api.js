@@ -225,6 +225,24 @@ export async function getStatsBaseline() {
   }
 }
 
+// ── Settings — UI Prefs (Widget Denetimi A19 / H5) ───────────────
+// Backend config/default.json::ui blok'undan UI-layer sabitlerini oku.
+// Şu an sadece kill_hold_ms (SideNav kill-switch basılı tutma süresi)
+// alanını içerir. Hata durumunda güvenli default'la fallback —
+// kill-switch koruması asla kırılmaz (2000 ms = 2 saniye).
+export async function getUiPrefs() {
+  try {
+    const { data } = await client.get('/settings/ui-prefs');
+    return data;
+  } catch (err) {
+    console.error('[ÜSTAT API] getUiPrefs:', err?.message ?? err);
+    return {
+      kill_hold_ms: 2000,
+      source: 'error',
+    };
+  }
+}
+
 // ── Performance ──────────────────────────────────────────────────
 
 export async function getPerformance(days = 30) {

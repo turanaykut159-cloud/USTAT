@@ -783,6 +783,24 @@ class SessionHoursResponse(BaseModel):
     source: str = "config"  # config | default
 
 
+class UiPrefsResponse(BaseModel):
+    """GET /api/settings/ui-prefs — UI davranış sabitleri (Widget Denetimi A19 / H5).
+
+    Backend config/default.json::ui blok'unun frontend'e görünümü. Şu an sadece
+    kill_hold_ms alanını içerir (SideNav kill-switch basılı tutma süresi) ama
+    gelecekte UI-layer sabitleri (animation speed, auto-refresh interval, vs.)
+    bu endpoint altında toplanabilir. notification_prefs ayrı bir endpoint'te
+    (/settings/notification-prefs) — yazma API'si farklı semantik.
+
+    kill_hold_ms: Kill-switch butonunun basılı tutulması gereken süre (ms).
+    Kritik koruma parametresi — Anayasa Kural #3 (monotonluk) kapsamında kullanıcı
+    yanlışlıkla tetiklemeyi engellemek için çift aşamalı koruma sağlar (basılı
+    tutma + progress animasyonu). Varsayılan 2000 ms.
+    """
+    kill_hold_ms: int = 2000
+    source: str = "config"  # config | default | error
+
+
 class StatsBaselineResponse(BaseModel):
     """GET /api/settings/stats-baseline — İstatistik taban tarihleri (Widget Denetimi A7).
 

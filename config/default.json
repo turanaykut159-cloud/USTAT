@@ -49,7 +49,8 @@
       "tradeAlert": true,
       "drawdownAlert": true,
       "regimeAlert": false
-    }
+    },
+    "kill_hold_ms": 2000
   },
   "session": {
     "market_open": "09:30",

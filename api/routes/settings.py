@@ -23,6 +23,7 @@ from api.schemas import (
     RiskBaselineUpdateResponse,
     SessionHoursResponse,
     StatsBaselineResponse,
+    UiPrefsResponse,
 )
 
 # v6.0 — Widget Denetimi A17: BIST VİOP seans saatleri (fallback).
@@ -46,6 +47,14 @@ DEFAULT_NOTIFICATION_PREFS: dict = {
     "tradeAlert": True,
     "drawdownAlert": True,
     "regimeAlert": False,
+}
+
+# v6.0 — Widget Denetimi A19 / H5: UI-layer sabitleri config'den okunur.
+# kill_hold_ms: SideNav kill-switch butonu basılı tutma süresi (ms). Kritik
+# koruma parametresi — kullanıcı yanlışlıkla kill-switch tetiklemesini engeller.
+# Config okunamazsa fallback olarak bu sabitler kullanılır.
+DEFAULT_UI_PREFS: dict = {
+    "kill_hold_ms": 2000,
 }
 
 logger = logging.getLogger("ustat.api.routes.settings")
@@ -231,6 +240,50 @@ async def get_session_hours():
         market_open=hours["market_open"],
         market_close=hours["market_close"],
         eod_close=hours["eod_close"],
+        source=source,
+    )
+
+
+def _read_ui_prefs_from_config() -> tuple[dict, str]:
+    """Config'den UI-layer sabitlerini oku; eksik anahtarları default ile doldur.
+
+    Widget Denetimi A19 / H5. Engine yoksa veya config okunamazsa DEFAULT_UI_PREFS
+    döner. Geçersiz tipte değerler (örn. string kill_hold_ms) sessizce default'a
+    düşer. kill_hold_ms pozitif tamsayı olmalıdır; makul aralık 500-10000 ms.
+
+    Returns (merged_dict, source) — source: 'config' | 'default' | 'error'.
+    """
+    engine = get_engine()
+    if not engine:
+        return dict(DEFAULT_UI_PREFS), "default"
+    try:
+        raw = engine.config.get("ui.kill_hold_ms", None)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("ui_prefs read failed: %s", exc)
+        return dict(DEFAULT_UI_PREFS), "error"
+    merged = dict(DEFAULT_UI_PREFS)
+    # kill_hold_ms tip + aralık doğrulama: pozitif int, 500-10000 ms aralığı.
+    # Geçersiz değer sessizce default'a düşer — UI kırılmasın diye.
+    if isinstance(raw, int) and not isinstance(raw, bool) and 500 <= raw <= 10000:
+        merged["kill_hold_ms"] = raw
+    return merged, "config"
+
+
+@router.get("/settings/ui-prefs", response_model=UiPrefsResponse)
+async def get_ui_prefs():
+    """UI-layer davranış sabitlerini config'den oku (Widget Denetimi A19 / H5).
+
+    Frontend SideNav (kill-switch basılı tutma süresi) ve gelecekte diğer
+    UI-layer sabitleri bu endpoint'ten değer çeker. Hardcode'dan config'e
+    taşıma — config.save() ile kalıcı, restart sonrası korunur.
+
+    kill_hold_ms: Kill-switch butonunun basılı tutulması gereken süre (ms).
+    Çift aşamalı koruma (basılı tutma + animasyon) kullanıcı yanlışlıkla
+    kill-switch tetiklemesini engeller. Varsayılan 2000 ms.
+    """
+    prefs, source = _read_ui_prefs_from_config()
+    return UiPrefsResponse(
+        kill_hold_ms=prefs["kill_hold_ms"],
         source=source,
     )
 

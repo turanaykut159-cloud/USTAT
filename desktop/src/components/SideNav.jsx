@@ -4,9 +4,9 @@
  * 6 sayfa linki (ikonlu) + Güvenli Kapat (2 adım doğrulama) + Kill-Switch (en altta, kırmızı, 2s basılı tutma).
  */
 
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
-import { activateKillSwitch } from '../services/api';
+import { activateKillSwitch, getUiPrefs } from '../services/api';
 import ConfirmModal from './ConfirmModal';
 
 // ── Menü öğeleri ─────────────────────────────────────────────────
@@ -25,17 +25,40 @@ const NAV_ITEMS = [
   { path: '/settings',    label: 'Ayarlar',            icon: '⚙️' },
 ];
 
-// Kill-switch basılı tutma süresi (ms)
-const KILL_HOLD_DURATION = 2000;
+// Kill-switch basılı tutma süresi (ms) — fallback.
+// Widget Denetimi A19 / H5: Gerçek değer backend config/default.json::ui.kill_hold_ms
+// üzerinden GET /settings/ui-prefs endpoint'inden mount'ta çekilir. Config
+// okunamazsa bu sabit fallback olarak kullanılır. Kritik koruma parametresi:
+// kullanıcının yanlışlıkla kill-switch tetiklemesini engelleyen çift aşamalı
+// koruma (basılı tutma + progress animasyonu) için minimum süre.
+const DEFAULT_KILL_HOLD_MS = 2000;
 
 export default function SideNav() {
   // ── Kill-Switch state ──────────────────────────────────────────
   const [killHolding, setKillHolding] = useState(false);
   const [killProgress, setKillProgress] = useState(0);
   const [killFired, setKillFired] = useState(false);
+  // Widget Denetimi A19 — kill_hold_ms state'i: mount'ta backend'den çekilir.
+  const [killHoldMs, setKillHoldMs] = useState(DEFAULT_KILL_HOLD_MS);
   const holdTimerRef = useRef(null);
   const progressRef = useRef(null);
   const holdStartRef = useRef(0);
+
+  // ── UI prefs fetch (mount'ta bir kez, A19) ─────────────────────
+  useEffect(() => {
+    let cancelled = false;
+    getUiPrefs().then((prefs) => {
+      if (cancelled) return;
+      const val = Number(prefs?.kill_hold_ms);
+      // Güvenlik koruması: geçersiz veya sıra dışı değer gelirse fallback.
+      if (Number.isFinite(val) && val >= 500 && val <= 10000) {
+        setKillHoldMs(val);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // ── Güvenli Kapat modal (2 adım + hata mesajı) ─────────────────
   const [safeQuitStep, setSafeQuitStep] = useState(null);
@@ -52,11 +75,11 @@ export default function SideNav() {
     // İlerleme animasyonu (60fps)
     progressRef.current = setInterval(() => {
       const elapsed = Date.now() - holdStartRef.current;
-      const pct = Math.min(elapsed / KILL_HOLD_DURATION, 1);
+      const pct = Math.min(elapsed / killHoldMs, 1);
       setKillProgress(pct);
     }, 16);
 
-    // 2 saniye sonunda tetikle
+    // killHoldMs süresi sonunda tetikle (A19 — config'den okunur)
     holdTimerRef.current = setTimeout(async () => {
       clearInterval(progressRef.current);
       setKillProgress(1);
@@ -67,8 +90,8 @@ export default function SideNav() {
 
       // 3 saniye sonra butonu sıfırla
       setTimeout(() => setKillFired(false), 3000);
-    }, KILL_HOLD_DURATION);
-  }, [killFired]);
+    }, killHoldMs);
+  }, [killFired, killHoldMs]);
 
   // ── Güvenli Kapat: ilk tıklamada 1. modalı aç ─────────────────────
   const handleSafeQuit = useCallback(() => {

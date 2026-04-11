@@ -937,6 +937,93 @@ def test_topbar_daily_pnl_label_not_mt5():
     )
 
 
+# ── Flow 4n: SideNav kill_hold_ms config'den okunur (A19 / H5) ──
+def test_sidenav_kill_hold_ms_from_config():
+    """Widget Denetimi A19 (H5): SideNav kill-switch basili tutma suresi
+    (KILL_HOLD_DURATION) config/default.json::ui.kill_hold_ms uzerinden backend
+    endpoint /settings/ui-prefs araciligiyla frontend'e akiyor olmali. Hardcode
+    geri eklenemez; backend zinciri kopmamali.
+
+    6 asamali zincir kontrolu:
+      (a) config/default.json::ui.kill_hold_ms var + pozitif int
+      (b) api/schemas.py::UiPrefsResponse sinifi + kill_hold_ms alani mevcut
+      (c) api/routes/settings.py::_read_ui_prefs_from_config + get_ui_prefs endpoint
+      (d) services/api.js::getUiPrefs export var + '/settings/ui-prefs' endpoint
+      (e) SideNav.jsx eski KILL_HOLD_DURATION = 2000 hardcode YOK + getUiPrefs import
+      (f) SideNav.jsx killHoldMs state + useEffect fetch + setInterval/setTimeout
+    """
+    import json
+    from pathlib import Path
+    repo_root = Path(__file__).resolve().parents[2]
+
+    # (a) config
+    config_path = repo_root / "config" / "default.json"
+    with open(config_path, "r", encoding="utf-8") as f:
+        cfg = json.load(f)
+    assert "ui" in cfg, "config/default.json::ui bloku yok"
+    assert "kill_hold_ms" in cfg["ui"], "ui.kill_hold_ms ayari yok — A19 fix kaldirilmis"
+    val = cfg["ui"]["kill_hold_ms"]
+    assert isinstance(val, int) and val >= 500 and val <= 10000, (
+        f"ui.kill_hold_ms gecersiz deger: {val} (500-10000 araligi bekleniyor)"
+    )
+
+    # (b) schema
+    from api.schemas import UiPrefsResponse
+    assert hasattr(UiPrefsResponse, "model_fields"), "UiPrefsResponse Pydantic BaseModel degil"
+    assert "kill_hold_ms" in UiPrefsResponse.model_fields, (
+        "UiPrefsResponse.kill_hold_ms alani yok"
+    )
+    assert "source" in UiPrefsResponse.model_fields, (
+        "UiPrefsResponse.source alani yok"
+    )
+
+    # (c) route
+    settings_src = (repo_root / "api" / "routes" / "settings.py").read_text(encoding="utf-8")
+    assert "_read_ui_prefs_from_config" in settings_src, (
+        "settings.py::_read_ui_prefs_from_config helper fonksiyonu yok"
+    )
+    assert "/settings/ui-prefs" in settings_src, (
+        "GET /settings/ui-prefs endpoint rotasi yok"
+    )
+    assert 'config.get("ui.kill_hold_ms"' in settings_src, (
+        "_read_ui_prefs_from_config config.get('ui.kill_hold_ms') cagrisi yapmiyor"
+    )
+
+    # (d) services/api.js
+    api_src = (repo_root / "desktop" / "src" / "services" / "api.js").read_text(
+        encoding="utf-8"
+    )
+    assert "export async function getUiPrefs" in api_src, (
+        "services/api.js getUiPrefs export'u yok"
+    )
+    assert "/settings/ui-prefs" in api_src, (
+        "services/api.js '/settings/ui-prefs' endpoint cagrisi yok"
+    )
+
+    # (e) SideNav hardcode kaldirildi + import eklendi
+    sidenav_src = (repo_root / "desktop" / "src" / "components" / "SideNav.jsx").read_text(
+        encoding="utf-8"
+    )
+    assert "const KILL_HOLD_DURATION = 2000" not in sidenav_src, (
+        "SideNav.jsx KILL_HOLD_DURATION = 2000 hardcode hala mevcut — A19 fix geri alinmis"
+    )
+    assert "getUiPrefs" in sidenav_src, (
+        "SideNav.jsx getUiPrefs import/kullanimi yok"
+    )
+
+    # (f) state + effect + kullanim
+    assert "killHoldMs" in sidenav_src, (
+        "SideNav.jsx killHoldMs state'i yok"
+    )
+    assert "setKillHoldMs" in sidenav_src, (
+        "SideNav.jsx setKillHoldMs setter'i yok"
+    )
+    assert "elapsed / killHoldMs" in sidenav_src, (
+        "SideNav.jsx setInterval progress hesabi killHoldMs kullanmiyor — "
+        "hala eski hardcode'a bagli olabilir"
+    )
+
+
 # ── Flow 5: Kill-switch L2 _close_ogul_and_hybrid manuel dokunmaz ──
 def test_baba_l2_only_closes_ogul_and_hybrid():
     from engine.baba import Baba
