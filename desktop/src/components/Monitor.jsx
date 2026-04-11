@@ -38,6 +38,16 @@ const COLORS = {
 
 const POLL_MS = 10000;
 
+// ── Döngü bütçesi (Widget Denetimi A9 / B10+H14) ─────────────────
+// Backend `config/default.json::engine.cycle_interval = 10` saniyedir.
+// ResponseBar max değerleri ve DÖNGÜ SÜRESİ eşikleri bu bütçenin
+// payı olarak hesaplanır — böylece "10sn'lik bütçenin %X'i kullanıldı"
+// görsel mantığı çalışır. Eski 50/100/300ms literal eşikleri mikro-
+// benchmark değerleriydi ve canlıda tüm çubuklar daima dolu görünüyordu
+// (DataPipeline ~2600ms × 10 = gerçek akış, ama UI'da %2600 → clamp(100)).
+// Bu sabit backend ile senkron tutulmalıdır (Flow 4h statik testi).
+const CYCLE_INTERVAL_MS = 10000;
+
 // ── Modül sınıflandırıcı (Widget Denetimi B25) ───────────────────
 // Event → modül atama. Öncelik: yapısal event.type prefix >
 // serbest metin word-boundary regex. Sınıflandırılamayan event null
@@ -163,15 +173,20 @@ const Arrow = memo(function Arrow({ c1, c2, label }) {
   );
 });
 
+// ResponseBar: max = bütçe, value = ölçülen ms.
+// Görsel renk yük yüzdesine bağlı: >%70 kırmızı, >%30 turuncu, aksi temel renk.
+// Bu mantık 10sn bütçe sistemi için geçerli — mikro-benchmark ölçülerinde
+// (≤500ms max) kullanılmaz. Flow 4h testi 'pct >' literal'ini arar.
 const ResponseBar = memo(function ResponseBar({ label, value, max, color }) {
   const pct = max > 0 ? Math.min((value / max) * 100, 100) : 0;
+  const barColor = pct > 70 ? '#e74c3c' : pct > 30 ? '#f39c12' : color;
   return (
     <div style={{ marginBottom: 8 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 8, color: '#c8dae8', marginBottom: 3 }}>
-        <span>{label}</span><span style={{ color }}>{value}ms</span>
+        <span>{label}</span><span style={{ color: barColor }}>{value}ms</span>
       </div>
       <div style={{ height: 4, background: '#1a2540', borderRadius: 2, overflow: 'hidden' }}>
-        <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 2, transition: 'width 0.5s' }} />
+        <div style={{ width: `${pct}%`, height: '100%', background: barColor, borderRadius: 2, transition: 'width 0.5s' }} />
       </div>
     </div>
   );
@@ -491,8 +506,8 @@ export default function Monitor() {
         <StatCard
           label="DÖNGÜ SÜRESİ"
           value={`${cycleAvg}ms`}
-          sub="ortalama döngü"
-          color={cycleAvg > 50 ? '#e74c3c' : '#00d4aa'}
+          sub={`bütçe ${CYCLE_INTERVAL_MS}ms`}
+          color={cycleAvg > CYCLE_INTERVAL_MS * 0.9 ? '#e74c3c' : cycleAvg > CYCLE_INTERVAL_MS * 0.5 ? '#f39c12' : '#00d4aa'}
         />
         <StatCard
           label="UPTIME"
@@ -829,18 +844,18 @@ export default function Monitor() {
         {/* ── [E2] PERFORMANS ─────────────────────────────────── */}
         <div style={{ background: '#0d1220', border: '1px solid #1a2540', borderRadius: 10, padding: '14px 14px 10px' }}>
           <div style={{ fontSize: 8, letterSpacing: 3, color: '#a0bcd4', marginBottom: 12 }}>PERFORMANS · DÖNGÜ ADIMLARI</div>
-          <ResponseBar label="BABA DÖNGÜ" value={steps.baba_cycle ?? 0} max={50} color={COLORS.baba} />
-          <ResponseBar label="OĞUL SİNYAL" value={steps.ogul_signals ?? 0} max={100} color={COLORS.ogul} />
-          <ResponseBar label="ÜSTAT BEYİN" value={steps.ustat_brain ?? 0} max={50} color={COLORS.ustat} />
-          <ResponseBar label="H-ENGINE" value={steps.h_engine ?? 0} max={50} color={COLORS.hengine} />
-          <ResponseBar label="VERİ GÜNCELLEME" value={steps.data_update ?? 0} max={100} color="#8ab0d0" />
-          <ResponseBar label="TOPLAM DÖNGÜ" value={lastCycle?.total_ms ?? 0} max={300} color="#00d4aa" />
+          <ResponseBar label="BABA DÖNGÜ" value={steps.baba_cycle ?? 0} max={CYCLE_INTERVAL_MS} color={COLORS.baba} />
+          <ResponseBar label="OĞUL SİNYAL" value={steps.ogul_signals ?? 0} max={CYCLE_INTERVAL_MS} color={COLORS.ogul} />
+          <ResponseBar label="ÜSTAT BEYİN" value={steps.ustat_brain ?? 0} max={CYCLE_INTERVAL_MS} color={COLORS.ustat} />
+          <ResponseBar label="H-ENGINE" value={steps.h_engine ?? 0} max={CYCLE_INTERVAL_MS} color={COLORS.hengine} />
+          <ResponseBar label="VERİ GÜNCELLEME" value={steps.data_update ?? 0} max={CYCLE_INTERVAL_MS} color="#8ab0d0" />
+          <ResponseBar label="TOPLAM DÖNGÜ" value={lastCycle?.total_ms ?? 0} max={CYCLE_INTERVAL_MS} color="#00d4aa" />
 
           <div style={{ marginTop: 10, fontSize: 8, letterSpacing: 3, color: '#a0bcd4', marginBottom: 8 }}>DÖNGÜ İSTATİSTİK</div>
           <div style={{ display: 'flex', gap: 8 }}>
             {[
               ['ORT', `${cycle?.avg_ms ?? 0}ms`, '#8ab0d0'],
-              ['MAX', `${cycle?.max_ms ?? 0}ms`, (cycle?.max_ms ?? 0) > 100 ? '#f39c12' : '#8ab0d0'],
+              ['MAX', `${cycle?.max_ms ?? 0}ms`, (cycle?.max_ms ?? 0) > CYCLE_INTERVAL_MS * 0.9 ? '#e74c3c' : (cycle?.max_ms ?? 0) > CYCLE_INTERVAL_MS * 0.5 ? '#f39c12' : '#8ab0d0'],
               ['AŞIM', `${cycle?.overrun_count ?? 0}`, (cycle?.overrun_count ?? 0) > 0 ? '#e74c3c' : '#2ecc71'],
             ].map(([k, v, c]) => (
               <div key={k} style={{ flex: 1, background: '#0a0e18', borderRadius: 4, padding: '5px 6px', textAlign: 'center' }}>

@@ -435,6 +435,84 @@ def test_monitor_error_counts_uses_structured_classifier():
     )
 
 
+# ── Flow 4h: Monitor ResponseBar eşikleri CYCLE_INTERVAL_MS tabanlı ──
+def test_monitor_response_bars_use_cycle_interval_budget():
+    """Widget Denetimi A9 (B10+H14): Monitor.jsx'te PERFORMANS paneli
+    ResponseBar'lari eskiden hardcoded 50/100/300ms mikro-benchmark
+    max degerleri kullaniyordu. Backend `config/default.json::
+    engine.cycle_interval = 10` saniye (= 10000ms) bütçesinde çalışir;
+    canli ortamda DataPipeline ~2600ms, toplam döngü ~2800ms cıkıyor,
+    bu da UI'da tüm barlari daima dolu/kirmizi gosteriyordu.
+
+    Yeni: `CYCLE_INTERVAL_MS = 10000` sabiti tanimlandi, tüm
+    ResponseBar max'lari ve DÖNGÜ SÜRESİ StatCard eşikleri bu sabitin
+    yüzdesi olarak hesaplanir. ResponseBar'a yük-yüzdesi tabanli renk
+    mantigi eklendi (>%70 kirmizi, >%30 turuncu, aksi temel renk).
+
+    Bu test:
+      - CYCLE_INTERVAL_MS sabitinin tanimli oldugunu
+      - Eski hardcoded literal max props'un (max={50}, max={100},
+        max={300}) gitmis oldugunu
+      - ResponseBar max props'un CYCLE_INTERVAL_MS kullandigini
+      - Yük-yüzdesi renk mantiginin (pct > 70 / pct > 30) var oldugunu
+      - DÖNGÜ SÜRESİ StatCard esigi'nin CYCLE_INTERVAL_MS tabanli
+        oldugunu dogrular.
+    """
+    monitor_path = ROOT / "desktop" / "src" / "components" / "Monitor.jsx"
+    assert monitor_path.exists(), f"Monitor.jsx bulunamadi: {monitor_path}"
+    src = monitor_path.read_text(encoding="utf-8")
+
+    # 1. CYCLE_INTERVAL_MS sabiti tanimli
+    assert "CYCLE_INTERVAL_MS = 10000" in src, (
+        "CYCLE_INTERVAL_MS sabiti (10000ms) kaldirildi — ResponseBar'lar "
+        "artik backend dongu butcesiyle senkron degil."
+    )
+
+    # 2. Eski hardcoded max props YASAK (mikro-benchmark degerleri)
+    forbidden_literals = ["max={50}", "max={100}", "max={300}"]
+    for lit in forbidden_literals:
+        assert lit not in src, (
+            f"Eski mikro-benchmark max prop '{lit}' geri dondu — "
+            f"canli ortamda ResponseBar daima dolu gorunecek."
+        )
+
+    # 3. ResponseBar max props CYCLE_INTERVAL_MS kullanmali (>= 6 kullanim)
+    cycle_max_count = src.count("max={CYCLE_INTERVAL_MS}")
+    assert cycle_max_count >= 6, (
+        f"max={{CYCLE_INTERVAL_MS}} kullanimi {cycle_max_count}/6 — "
+        f"BABA/OGUL/USTAT/H-ENGINE/VERI GUNCELLEME/TOPLAM DONGU "
+        f"ResponseBar'larinin hepsi butce tabanli olmali."
+    )
+
+    # 4. Yuk-yuzdesi tabanli renk mantigi (ResponseBar icinde)
+    assert "pct > 70" in src, (
+        "ResponseBar yuk-yuzdesi kirmizi esigi (pct > 70) kaldirildi."
+    )
+    assert "pct > 30" in src, (
+        "ResponseBar yuk-yuzdesi turuncu esigi (pct > 30) kaldirildi."
+    )
+
+    # 5. DÖNGÜ SÜRESİ StatCard esigi CYCLE_INTERVAL_MS tabanli
+    # Eski: `cycleAvg > 50` sabit mikro-benchmark esigi YASAK
+    assert "cycleAvg > 50 ?" not in src, (
+        "Eski DONGU SURESI esigi 'cycleAvg > 50' geri dondu — "
+        "CYCLE_INTERVAL_MS tabanli olmalidir."
+    )
+    assert "cycleAvg > CYCLE_INTERVAL_MS" in src, (
+        "DONGU SURESI StatCard esigi CYCLE_INTERVAL_MS tabanli degil."
+    )
+
+    # 6. DONGU ISTATISTIK MAX esigi CYCLE_INTERVAL_MS tabanli
+    # Eski: `(cycle?.max_ms ?? 0) > 100` hardcoded 100ms YASAK
+    assert "> 100 ? '#f39c12'" not in src, (
+        "Eski MAX esigi '> 100' hardcoded geri dondu — "
+        "CYCLE_INTERVAL_MS tabanli olmalidir."
+    )
+    assert "cycle?.max_ms ?? 0) > CYCLE_INTERVAL_MS" in src, (
+        "DONGU ISTATISTIK MAX esigi CYCLE_INTERVAL_MS tabanli degil."
+    )
+
+
 # ── Flow 5: Kill-switch L2 _close_ogul_and_hybrid manuel dokunmaz ──
 def test_baba_l2_only_closes_ogul_and_hybrid():
     from engine.baba import Baba
