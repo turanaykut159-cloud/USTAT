@@ -1714,10 +1714,11 @@ class Ogul:
             regime_at_entry=regime.regime_type.value,
         )
 
-        # BABA onay — korelasyon kontrolü
+        # BABA onay — korelasyon kontrolü (BULGU #9: gerçek lot iletilir,
+        # endeks ağırlık skoru artık 1.0 lot varsayımıyla şişmiyor)
         if self.baba:
             corr_verdict = self.baba.check_correlation_limits(
-                symbol, direction, self.risk_params,
+                symbol, direction, self.risk_params, new_lot=lot,
             )
             if not corr_verdict.can_trade:
                 trade.state = TradeState.CANCELLED

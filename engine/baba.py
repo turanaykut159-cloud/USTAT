@@ -1957,18 +1957,28 @@ class Baba:
         symbol: str,
         direction: str,
         risk_params: RiskParams,
+        new_lot: float = 1.0,
     ) -> RiskVerdict:
         """Yeni işlem için korelasyon kontrolü.
 
         Kontroller:
             1. Aynı yönde max 3 pozisyon
             2. Aynı sektörde aynı yönde max 2 pozisyon
-            3. Endeks ağırlık skoru < 0.25
+            3. Endeks ağırlık skoru < ``risk_params.max_index_weight_score``
 
         Args:
             symbol: Açılmak istenen kontrat.
             direction: ``"BUY"`` veya ``"SELL"``.
             risk_params: Risk parametreleri.
+            new_lot: Açılacak pozisyonun gerçek lot miktarı. Endeks ağırlık
+                skoru hesabı için kullanılır. Varsayılan 1.0 — manuel motor
+                gibi lot'u henüz hesaplamamış çağıranlar için konservatif
+                (en kötü senaryo) değerlendirmedir. OĞUL için
+                ``calculate_position_size`` çıktısı geçilmelidir
+                (BULGU #9 — v5.9.3, lot-aware semantik düzeltmesi:
+                önceki sürümde ``new_lot`` her zaman default 1.0 idi,
+                küçük lot'lu sinyaller endeks skorunda 1.0 lot gibi
+                değerlendirilip yapay endeks limit aşımı üretiyordu).
 
         Returns:
             RiskVerdict — ``can_trade=False`` ise korelasyon engeli.
@@ -2007,9 +2017,9 @@ class Baba:
             )
             return verdict
 
-        # 3. Endeks ağırlık skoru
+        # 3. Endeks ağırlık skoru (BULGU #9: gerçek lot kullanılır)
         index_score = self._calculate_index_weight_score(
-            positions, symbol, direction,
+            positions, symbol, direction, new_lot=new_lot,
         )
         if index_score > risk_params.max_index_weight_score:
             verdict.can_trade = False
