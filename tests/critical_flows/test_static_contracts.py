@@ -1514,6 +1514,76 @@ def test_monitor_kill_switch_levels_are_disclosed_as_approximate():
     )
 
 
+# ── Flow 4t: RiskResponse dead field temizligi (H17) ──
+def test_risk_response_has_no_dead_graduated_lot_mult():
+    """
+    Widget Denetimi H17 — `RiskResponse.graduated_lot_mult` v5.1'de placeholder
+    olarak eklenmis bir alandi; hicbir uretici (api/routes/risk.py) populate
+    etmiyor, hicbir frontend tuketicisi yok (RiskManagement.jsx sadece
+    `lot_multiplier` okur). BABA graduated lot mantigi (0.75, 0.50, 0.25)
+    zaten `verdict.lot_multiplier` -> `resp.lot_multiplier` uzerinden UI'ya
+    akiyor ve "Lot Carpani" kartinda gorunur.
+
+    Bu test:
+      (a) api/schemas.py::RiskResponse icinde `graduated_lot_mult` alan TANIMI
+          YOK (eski placeholder geri eklenmesin)
+      (b) RiskResponse icinde `lot_multiplier` alani hala mevcut (canli yol)
+      (c) api/routes/risk.py icinde `resp.lot_multiplier =` atamasi mevcut
+          (verdict'ten populate ediliyor)
+      (d) desktop/src/components/RiskManagement.jsx icinde `risk.lot_multiplier`
+          goruntulemesi mevcut ("Lot Carpani" karti)
+      (e) RiskManagement.jsx icinde `graduated_lot_mult` dead field'ina
+          referans YOK (olasi eski placeholder UI kodu temizlenmis)
+    """
+    root = Path(__file__).resolve().parent.parent.parent
+
+    # (a) Schema dead field yok
+    schemas_path = root / "api" / "schemas.py"
+    schemas_src = schemas_path.read_text(encoding="utf-8")
+    # "graduated_lot_mult" alan tanimi var mi? (dokumantasyon yorumu disinda)
+    import re as _re_h17
+    # Alan tanimi tipi: "    graduated_lot_mult: float = ..."
+    field_def_re = _re_h17.compile(r"^\s*graduated_lot_mult\s*:\s*", _re_h17.MULTILINE)
+    assert not field_def_re.search(schemas_src), (
+        "api/schemas.py::RiskResponse hala 'graduated_lot_mult' dead field'ini "
+        "tasiyor. Bu alan hicbir yer tarafindan populate edilmiyor ve hicbir "
+        "tuketicisi yok. Graduated lot mantigi 'lot_multiplier' uzerinden "
+        "akiyor (Widget Denetimi H17)."
+    )
+
+    # (b) lot_multiplier alani hala var (canli yol)
+    assert "lot_multiplier: float" in schemas_src, (
+        "api/schemas.py::RiskResponse 'lot_multiplier' alani kaybolmus — "
+        "graduated lot degerini UI'ya tasiyan tek canli alan bu."
+    )
+
+    # (c) risk.py route'u lot_multiplier'i verdict'ten populate ediyor
+    risk_route_path = root / "api" / "routes" / "risk.py"
+    risk_route_src = risk_route_path.read_text(encoding="utf-8")
+    assert "resp.lot_multiplier = verdict.lot_multiplier" in risk_route_src, (
+        "api/routes/risk.py icinde 'resp.lot_multiplier = verdict.lot_multiplier' "
+        "atamasi yok. Graduated lot degeri UI'ya akmiyor."
+    )
+
+    # (d) RiskManagement.jsx lot_multiplier goruntulemesi
+    rm_path = root / "desktop" / "src" / "components" / "RiskManagement.jsx"
+    rm_src = rm_path.read_text(encoding="utf-8")
+    assert "risk.lot_multiplier" in rm_src, (
+        "RiskManagement.jsx 'risk.lot_multiplier' goruntulemesi yok — "
+        "kullanici graduated lot degerini goremiyor."
+    )
+    assert "Lot Çarpanı" in rm_src, (
+        "RiskManagement.jsx 'Lot Carpani' karti kaybolmus — "
+        "graduated lot UI label'i eksik."
+    )
+
+    # (e) graduated_lot_mult dead field RiskManagement.jsx'te referans alinmiyor
+    assert "graduated_lot_mult" not in rm_src, (
+        "RiskManagement.jsx 'graduated_lot_mult' dead field'ini okuyor — "
+        "bu alan artik schema'da yok, null/undefined doner."
+    )
+
+
 # ── Flow 5: Kill-switch L2 _close_ogul_and_hybrid manuel dokunmaz ──
 def test_baba_l2_only_closes_ogul_and_hybrid():
     from engine.baba import Baba

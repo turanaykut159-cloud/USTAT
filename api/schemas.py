@@ -247,8 +247,13 @@ class RiskResponse(BaseModel):
     open_positions: int = 0
     max_open_positions: int = 5
 
-    # Graduated lot (v5.1)
-    graduated_lot_mult: float = 1.0
+    # ── Not (Widget Denetimi H17) ──
+    # Eski `graduated_lot_mult: float = 1.0` v5.1'de placeholder olarak eklenmişti,
+    # hiçbir üretici tarafından populate edilmiyor, hiçbir frontend tüketicisi yok.
+    # BABA'nın graduated lot mantığı (0.75, 0.50, 0.25, vb.) zaten `lot_multiplier`
+    # alanına (line 229) `verdict.lot_multiplier` üzerinden aktarılır ve
+    # RiskManagement.jsx'te "Lot Çarpanı" kartında görünür. Dead field regression
+    # koruması: Flow 4t statik sözleşme testi.
 
 
 # ═══════════════════════════════════════════════════════════════════
