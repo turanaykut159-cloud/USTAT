@@ -152,6 +152,9 @@ def make_mock_baba(can_trade: bool = True) -> MagicMock:
     baba.is_symbol_killed.return_value = False
     baba.calculate_position_size.return_value = 1.0
     baba.increment_daily_trade_count.return_value = None
+    # Kural 10: BABA günlük/aylık DD merkezidir. L0 (güvenli varsayılan).
+    # MagicMock'un auto-attribute üretimini engeller — sayısal karşılaştırma hatalarını önler.
+    baba.kill_switch_level = 0
     return baba
 
 
