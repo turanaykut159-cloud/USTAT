@@ -112,17 +112,61 @@ async def get_performance(
                 sharpe_ratio = (mean_return / std_return) * math.sqrt(252)
 
     # ── Max Drawdown + Equity Eğrisi (günlük snapshot, Madde 2.3) ──
+    # Widget Denetimi A6 (B14): equity vs net sermaye ayrımı
+    # ──────────────────────────────────────────────────────────────
+    # Yatırım transferleri (deposit) ve çekimler (withdrawal) bakiye
+    # büyümesi olarak görünür ama "kazanç" değildir. UI bu artışı
+    # kâr trendi gibi çizmesin diye her gün için:
+    #   delta_balance      = balance[i] - balance[i-1]
+    #   explained_pnl      = trades that closed on day_i (pnl + comm + swap)
+    #   delta_unexplained  = delta_balance - explained_pnl
+    # Eğer |delta_unexplained| eşiği aşarsa → deposit/withdrawal sayılır
+    # Eşik: max(100 TRY, prev_balance * 0.5%) — komisyon/swap gürültüsünü
+    # filtreler, yatırım/çekimleri yakalar. Kümülatif toplam
+    # cumulative_deposits, net_equity = equity - cumulative_deposits.
+    # ──────────────────────────────────────────────────────────────
+
+    # Günlük net bakiye etkisi: pnl + commission + swap
+    # (commission/swap genellikle negatif, pnl gross profit)
+    daily_balance_impact: dict[str, float] = defaultdict(float)
+    for t in trades:
+        exit_time = t.get("exit_time") or t.get("entry_time")
+        if not exit_time:
+            continue
+        day = exit_time[:10]
+        impact = (t.get("pnl") or 0.0) \
+            + (t.get("commission") or 0.0) \
+            + (t.get("swap") or 0.0)
+        daily_balance_impact[day] += impact
+
     max_drawdown_pct = 0.0
     equity_curve: list[EquityPoint] = []
 
     # daily_snapshots zaten Sharpe için çekildi (ASC sıralı, gün başına 1)
     if daily_snapshots:
         peak_equity = 0.0
+        prev_balance: float | None = None
+        cumulative_deposits = 0.0
+
         for s in daily_snapshots:
             eq = s.get("equity", 0.0)
             dp = s.get("daily_pnl", 0.0)
             ts = s.get("timestamp", "")
             bal = s.get("balance", 0.0)
+            day_key = ts[:10] if ts else ""
+
+            # A6 (B14): deposit/withdrawal tespiti — bakiye değişimi
+            # işlem aktivitesiyle açıklanamıyorsa transfer say
+            if prev_balance is not None:
+                delta_balance = bal - prev_balance
+                explained = daily_balance_impact.get(day_key, 0.0)
+                delta_unexplained = delta_balance - explained
+                threshold = max(100.0, prev_balance * 0.005)
+                if abs(delta_unexplained) > threshold:
+                    cumulative_deposits += delta_unexplained
+            prev_balance = bal
+
+            net_equity = eq - cumulative_deposits
 
             if eq > peak_equity:
                 peak_equity = eq
@@ -136,6 +180,8 @@ async def get_performance(
                 equity=eq,
                 daily_pnl=dp,
                 balance=bal,
+                cumulative_deposits=round(cumulative_deposits, 2),
+                net_equity=round(net_equity, 2),
             ))
 
     max_drawdown_pct *= 100  # yüzde olarak

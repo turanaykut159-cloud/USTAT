@@ -107,6 +107,13 @@ function EquityTip({ active, payload }) {
       {d.balance > 0 && (
         <span>Bakiye: <b>{fmt(d.balance)}</b></span>
       )}
+      {/* A6 (B14): yatırım transferleri hariç net sermaye */}
+      {d.net_equity != null && d.net_equity !== d.equity && (
+        <span style={{ color: '#d29922' }}>Net Sermaye: <b>{fmt(d.net_equity)}</b></span>
+      )}
+      {d.cumulative_deposits != null && d.cumulative_deposits !== 0 && (
+        <span style={{ color: '#8b949e', fontSize: 11 }}>Yatırım: <b>{fmt(d.cumulative_deposits)}</b></span>
+      )}
       {d.daily_pnl != null && (
         <span className={pnlCls(d.daily_pnl)}>Günlük: <b>{fmt(d.daily_pnl)}</b></span>
       )}
@@ -395,6 +402,11 @@ export default function Performance() {
                   <span className="pf-legend-line pf-legend-dashed" />
                   Bakiye
                 </span>
+                {/* A6 (B14): yatırım hariç net sermaye */}
+                <span className="pf-legend-item" title="Net Sermaye = Equity − kümülatif yatırım. Yatırım transferleri kâr olarak gösterilmez.">
+                  <span className="pf-legend-line" style={{ background: '#d29922' }} />
+                  Net Sermaye
+                </span>
               </div>
             </div>
             {eq.length > 0 ? (
@@ -416,6 +428,8 @@ export default function Performance() {
                   <Tooltip content={<EquityTip />} />
                   <Area type="monotone" dataKey="balance" stroke="#3fb950" strokeWidth={1.5} strokeDasharray="4 4" fill="url(#balGrad)" dot={false} activeDot={{ r: 3 }} />
                   <Area type="monotone" dataKey="equity" stroke="#58a6ff" strokeWidth={2} fill="url(#eqGradPf)" dot={false} activeDot={{ r: 3 }} />
+                  {/* A6 (B14): Net sermaye serisi — yatırım transferleri hariç */}
+                  <Area type="monotone" dataKey="net_equity" stroke="#d29922" strokeWidth={2} fill="none" dot={false} activeDot={{ r: 3 }} />
                 </AreaChart>
               </ResponsiveContainer>
             ) : <div className="pf-empty">Equity verisi yok</div>}

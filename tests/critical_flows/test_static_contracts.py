@@ -2368,6 +2368,89 @@ def test_error_resolve_message_prefix_persistence():
     )
 
 
+# ── Flow 4zd: Performans equity vs deposit ayrimi (A6 / B14) ─────
+def test_performance_net_equity_separation():
+    """Widget Denetimi A6 (B14): Equity Egrisi yatirim transferleri
+    sayesinde sismeyecek. Backend her snapshot icin cumulative_deposits
+    ve net_equity = equity - cumulative_deposits hesaplar; frontend
+    'Net Sermaye' serisi olarak cizer.
+
+    5 sozlesme noktasi:
+      1. schemas.EquityPoint icinde net_equity + cumulative_deposits
+         alanlari
+      2. performance.py icinde delta_unexplained tespiti
+         (delta_balance - explained pnl) ve threshold dali
+      3. performance.py icinde net_equity = eq - cumulative_deposits
+         ve EquityPoint(...net_equity=) olusturma
+      4. Performance.jsx icinde dataKey="net_equity" Area + 'Net Sermaye'
+         legend etiketi
+      5. Audit markerlari (A6 + B14) hem backend hem frontend dosyalarda
+    """
+    sc_path = ROOT / "api" / "schemas.py"
+    pf_path = ROOT / "api" / "routes" / "performance.py"
+    fe_path = ROOT / "desktop" / "src" / "components" / "Performance.jsx"
+    sc_src = sc_path.read_text(encoding="utf-8")
+    pf_src = pf_path.read_text(encoding="utf-8")
+    fe_src = fe_path.read_text(encoding="utf-8")
+
+    # 1. Schema alanlari
+    assert "net_equity" in sc_src, (
+        "api/schemas.py icinde net_equity alani yok — A6 fix uygulanmamis."
+    )
+    assert "cumulative_deposits" in sc_src, (
+        "api/schemas.py icinde cumulative_deposits alani yok — yatirim "
+        "transferleri kumulatif olarak takip edilmiyor."
+    )
+
+    # 2. performance.py delta_unexplained tespiti
+    assert "delta_unexplained" in pf_src, (
+        "api/routes/performance.py icinde delta_unexplained degiskeni yok — "
+        "deposit/withdrawal tespiti eksik."
+    )
+    assert "daily_balance_impact" in pf_src, (
+        "api/routes/performance.py icinde daily_balance_impact map yok — "
+        "trade pnl + commission + swap toplami hesaplanmiyor, "
+        "komisyon gurultusu yatirim sayilir."
+    )
+    assert "cumulative_deposits" in pf_src, (
+        "api/routes/performance.py icinde cumulative_deposits degiskeni "
+        "yok — kumulatif yatirim takibi yok."
+    )
+
+    # 3. net_equity hesaplama + EquityPoint enjeksiyonu
+    assert "net_equity = eq - cumulative_deposits" in pf_src, (
+        "api/routes/performance.py icinde net_equity = eq - "
+        "cumulative_deposits formulu yok."
+    )
+    pf_eq_point_pattern = re.compile(
+        r"EquityPoint\(.*?net_equity\s*=", re.DOTALL,
+    )
+    assert pf_eq_point_pattern.search(pf_src), (
+        "api/routes/performance.py icinde EquityPoint(...net_equity=...) "
+        "kurucu cagrisi yok — alan bos donuyor."
+    )
+
+    # 4. Frontend net_equity Area + legend
+    assert 'dataKey="net_equity"' in fe_src, (
+        "desktop/src/components/Performance.jsx icinde "
+        'dataKey="net_equity" yok — UI net sermayeyi cizmiyor.'
+    )
+    assert "Net Sermaye" in fe_src, (
+        "desktop/src/components/Performance.jsx icinde 'Net Sermaye' "
+        "etiketi yok — kullanici hangi seriyi gordugunu bilmez."
+    )
+
+    # 5. Audit markerlari
+    assert "A6" in pf_src and "B14" in pf_src, (
+        "api/routes/performance.py icinde 'A6' veya 'B14' audit "
+        "markerlari yok."
+    )
+    assert "A6" in fe_src and "B14" in fe_src, (
+        "desktop/src/components/Performance.jsx icinde 'A6' veya 'B14' "
+        "audit markerlari yok."
+    )
+
+
 # ── Flow 5: Kill-switch L2 _close_ogul_and_hybrid manuel dokunmaz ──
 def test_baba_l2_only_closes_ogul_and_hybrid():
     from engine.baba import Baba

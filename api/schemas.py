@@ -292,11 +292,20 @@ class PerformanceResponse(BaseModel):
 
 
 class EquityPoint(BaseModel):
-    """Equity eğrisi noktası."""
+    """Equity eğrisi noktası.
+
+    Widget Denetimi A6 (B14): yatırım transferleri "kazanç" olarak
+    görünmesin diye her noktada cumulative_deposits türetilir ve
+    net_equity = equity - cumulative_deposits hesaplanır. Frontend
+    "Net Sermaye" serisini bu alanla çizer.
+    """
     timestamp: str
     equity: float
     daily_pnl: float = 0.0
     balance: float = 0.0
+    # A6 (B14): yatırım/çekim ayrımı
+    cumulative_deposits: float = 0.0
+    net_equity: float = 0.0
 
 
 # Forward-ref güncelle
