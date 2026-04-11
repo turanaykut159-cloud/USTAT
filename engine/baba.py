@@ -1,12 +1,19 @@
-"""BABA — Risk yönetimi ve piyasa rejim algılama (v13.0).
+"""BABA — Risk yönetimi ve piyasa rejim algılama (v5.9.x).
 
-4 rejim:
+NOT (v5.9.3 — BULGU #5): Bu modül başlığındaki tüm sayısal değerler kanıta
+dayalı olarak güncellendi. Tek doğru kaynak: ``config/default.json`` ve aşağıdaki
+modül-seviye sabitler. Kod-config tutarsızlığı görülürse config kazanır
+(``main.py`` ``RiskParams`` constructor ``self.config.get(...)`` ile yükler).
+
+4 rejim (eşikler aşağıdaki sabitlerden):
     TREND    — ADX>25 + EMA mesafesi artıyor + son 5 barın 4'ü aynı yön
     RANGE    — ADX<20 + BB genişliği < ort×0.8 + dar range
-    VOLATILE — ATR>ort×2.0 VEYA spread>normal×3 VEYA %2+ hareket
-    OLAY     — TCMB/FED günü VEYA kur hareketi>%2 VEYA vade son 2 gün
+    VOLATILE — ATR>ort×2.5 VEYA spread>normal×4 VEYA %2.5+ hareket
+               (ATR_VOLATILE_MULT, SPREAD_VOLATILE_MULT, PRICE_MOVE_PCT)
+    OLAY     — TCMB/FED günü VEYA kur hareketi>%2
+               (vade kısıtlaması v5.9'da kaldırıldı: EXPIRY_DAYS=0)
 
-Risk çarpanları:
+Risk çarpanları (engine/models/regime.py RISK_MULTIPLIERS):
     TREND=1.0  RANGE=0.7  VOLATILE=0.25  OLAY=0.0
 
 Erken uyarı tetikleyicileri (likidite sınıfına göre farklı eşik):
@@ -15,23 +22,29 @@ Erken uyarı tetikleyicileri (likidite sınıfına göre farklı eşik):
     Hacim patlaması   — 5 dk hacim > ort×5  (tüm sınıflar)
     USD/TRY şoku      — 5 dk'da %0.5+ hareket (tüm sınıflar)
 
-Risk yönetimi:
-    Günlük zarar %2.5 → tüm işlemler dur → ertesi gün 09:30 sıfırla
-    Haftalık zarar %4 → lot %50 azalt → Pazartesi 09:30 sıfırla
-    Aylık zarar %7    → sistem dur → manuel onay
+Risk yönetimi (config/default.json risk.* anahtarları):
+    Günlük zarar %1.8  → tüm işlemler dur → ertesi gün 09:30 sıfırla
+                         (max_daily_loss_pct)
+    Haftalık zarar %4  → lot %50 azalt → Pazartesi 09:30 sıfırla
+                         (max_weekly_loss_pct)
+    Aylık zarar %7     → sistem dur → manuel onay (max_monthly_loss_pct)
     Max DD %10 / Hard DD %15 → tam kapanış → manuel onay
-    3 üst üste kayıp  → 2 saat cool-down
-    Floating loss %2.0 → yeni işlem engeli
-    Günlük max işlem 8 / Tek işlem max %2
+                         (max_total_drawdown_pct / hard_drawdown_pct)
+    3 üst üste kayıp   → 4 saat cool-down
+                         (consecutive_loss_limit / cooldown_hours)
+    Floating loss %1.5 → yeni işlem engeli (max_floating_loss_pct)
+    Günlük max otomatik işlem 5  (max_daily_trades)
+    Günlük max manuel işlem 10   (max_daily_manual_trades, v5.9.3 BULGU #3)
+    Tek işlem max %2 hard cap    (MAX_RISK_PER_TRADE_HARD)
 
-Korelasyon:
+Korelasyon (modül-seviye sabitler):
     Max 3 aynı yön / Max 2 aynı sektör aynı yön
     Endeks ağırlık skoru < 0.25
 
-Kill-switch (3 seviye):
+Kill-switch (3 seviye, monotonluk: yalnız yukarı — Anayasa Kural 3):
     L1 — kontrat durdur (anomali)
-    L2 — sistem pause (risk limiti, 3 kayıp, OLAY)
-    L3 — tam kapanış (manuel + onay, DD %10+, flash crash)
+    L2 — sistem pause (risk limiti, 3 kayıp, OLAY) — _close_ogul_and_hybrid
+    L3 — tam kapanış (manuel + onay, DD %10+, flash crash) — _close_all_positions
 """
 
 from __future__ import annotations
