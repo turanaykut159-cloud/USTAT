@@ -272,6 +272,27 @@ export async function getWatchlistSymbols() {
   }
 }
 
+/**
+ * Lot giriş sınırlarını döndür (Widget Denetimi H4).
+ * Canonical kaynak: config.engine.max_lot_per_contract.
+ * Frontend Manuel İşlem lot input bu fonksiyonu tüketir, hardcoded
+ * min/max/step kalıbını ortadan kaldırır.
+ */
+export async function getTradingLimits() {
+  try {
+    const { data } = await client.get('/settings/trading-limits');
+    return data;
+  } catch (err) {
+    console.error('[ÜSTAT API] getTradingLimits:', err?.message ?? err);
+    return {
+      lot_min: 1.0,
+      lot_max: 1.0,
+      lot_step: 1.0,
+      source: 'error',
+    };
+  }
+}
+
 // ── Performance ──────────────────────────────────────────────────
 
 export async function getPerformance(days = 30) {

@@ -1326,6 +1326,135 @@ def test_manual_trade_watchlist_single_source():
     )
 
 
+# ── Flow 4r: ManualTrade lot input sinirlari config'den (H4) ──
+def test_manual_trade_lot_limits_from_config():
+    """Widget Denetimi H4: ManualTrade.jsx lot input eskiden hardcoded
+    `min=1 max=10 step=1` kullaniyordu. Canonical kaynak
+    `config/default.json.engine.max_lot_per_contract` (1.0) ile uyumsuzdu —
+    kullanici 10 girebilirdi ama manuel_motor silent truncation ile 1.0'a
+    kirpiyordu. Artik /api/settings/trading-limits endpoint'i uzerinden
+    UI config'e senkronize olur. Sessiz kirpma kapisi kapandi.
+
+    6 asamali zincir kontrolu:
+      (a) config/default.json.engine.max_lot_per_contract >0 sayi
+      (b) api/schemas.py::TradingLimitsResponse sinifi + 3 alan (lot_min,
+          lot_max, lot_step)
+      (c) api/routes/settings.py _read_trading_limits helper +
+          /settings/trading-limits route + max_lot_per_contract okumasi +
+          TradingLimitsResponse kullanimi
+      (d) services/api.js::getTradingLimits export + /settings/trading-limits
+          cagrisi + fallback objesinde lot_min/lot_max/lot_step alanlari
+      (e) ManualTrade.jsx eski `min={1}` ve `max={10}` JSX literal YASAK +
+          getTradingLimits import + lotLimits state + lot input lotLimits.*
+          ile bagli
+      (f) ManualTrade.jsx useEffect mount'ta getTradingLimits cagiriyor +
+          gelen degeri setLotLimits ile state'e yaziyor
+    """
+    import json as _json
+    import re as _re
+    from pathlib import Path
+    repo_root = Path(__file__).resolve().parents[2]
+
+    # (a) config/default.json.engine.max_lot_per_contract
+    cfg_path = repo_root / "config" / "default.json"
+    cfg = _json.loads(cfg_path.read_text(encoding="utf-8"))
+    engine_cfg = cfg.get("engine", {})
+    assert "max_lot_per_contract" in engine_cfg, (
+        "config.engine.max_lot_per_contract anahtari yok — "
+        "H4 canonical kaynak kaldirilmis"
+    )
+    max_lot = engine_cfg["max_lot_per_contract"]
+    assert isinstance(max_lot, (int, float)) and max_lot > 0, (
+        f"max_lot_per_contract tipi/degeri gecersiz: {max_lot!r}"
+    )
+
+    # (b) api/schemas.py::TradingLimitsResponse
+    schemas_src = (repo_root / "api" / "schemas.py").read_text(encoding="utf-8")
+    assert "class TradingLimitsResponse" in schemas_src, (
+        "api/schemas.py::TradingLimitsResponse sinifi yok — "
+        "/settings/trading-limits response_model'siz kalir"
+    )
+    for field in ("lot_min:", "lot_max:", "lot_step:"):
+        assert field in schemas_src, (
+            f"TradingLimitsResponse {field} alani yok — H4 yaniti eksik"
+        )
+
+    # (c) api/routes/settings.py helper + route + config okuma
+    settings_src = (repo_root / "api" / "routes" / "settings.py").read_text(
+        encoding="utf-8"
+    )
+    assert "def _read_trading_limits" in settings_src, (
+        "api/routes/settings.py _read_trading_limits helper yok"
+    )
+    assert 'engine.max_lot_per_contract' in settings_src, (
+        "_read_trading_limits config.engine.max_lot_per_contract okumuyor — "
+        "canonical kaynak atlanmis"
+    )
+    assert '@router.get("/settings/trading-limits"' in settings_src, (
+        "/settings/trading-limits route kaydi yok"
+    )
+    assert "TradingLimitsResponse" in settings_src, (
+        "settings.py TradingLimitsResponse import/kullanimi yok"
+    )
+
+    # (d) services/api.js::getTradingLimits
+    api_src = (repo_root / "desktop" / "src" / "services" / "api.js").read_text(
+        encoding="utf-8"
+    )
+    assert "export async function getTradingLimits" in api_src, (
+        "services/api.js getTradingLimits export yok"
+    )
+    get_tl_match = _re.search(
+        r"export async function getTradingLimits\(\).*?^\}",
+        api_src,
+        _re.DOTALL | _re.MULTILINE,
+    )
+    assert get_tl_match, "getTradingLimits govdesi parse edilemedi"
+    tl_body = get_tl_match.group(0)
+    assert "/settings/trading-limits" in tl_body, (
+        "getTradingLimits /settings/trading-limits endpoint'ini cagirmiyor"
+    )
+    for field in ("lot_min", "lot_max", "lot_step"):
+        assert field in tl_body, (
+            f"getTradingLimits fallback objesinde '{field}' alani yok — "
+            "backend erisilemezse ManualTrade lot input sinirsiz kalir"
+        )
+
+    # (e) ManualTrade.jsx hardcode kaldirildi + state + input binding
+    manual_src = (repo_root / "desktop" / "src" / "components" / "ManualTrade.jsx").read_text(
+        encoding="utf-8"
+    )
+    # Eski literaller kesinlikle yok (regex ile space toleransli)
+    assert not _re.search(r"min=\{\s*1\s*\}", manual_src), (
+        "ManualTrade.jsx 'min={1}' hardcode hala mevcut — H4 fix geri alinmis"
+    )
+    assert not _re.search(r"max=\{\s*10\s*\}", manual_src), (
+        "ManualTrade.jsx 'max={10}' hardcode hala mevcut — H4 fix geri alinmis"
+    )
+    assert "getTradingLimits" in manual_src, (
+        "ManualTrade.jsx getTradingLimits import/kullanimi yok"
+    )
+    assert "const [lotLimits, setLotLimits]" in manual_src, (
+        "ManualTrade.jsx lotLimits state'i yok"
+    )
+    # Lot input min/max/step lotLimits.* ile bagli olmali
+    assert "min={lotLimits.lot_min}" in manual_src, (
+        "ManualTrade.jsx lot input min={lotLimits.lot_min} bagli degil"
+    )
+    assert "max={lotLimits.lot_max}" in manual_src, (
+        "ManualTrade.jsx lot input max={lotLimits.lot_max} bagli degil"
+    )
+    assert "step={lotLimits.lot_step}" in manual_src, (
+        "ManualTrade.jsx lot input step={lotLimits.lot_step} bagli degil"
+    )
+
+    # (f) useEffect mount'ta fetch + setLotLimits
+    assert "setLotLimits" in manual_src, (
+        "ManualTrade.jsx setLotLimits setter cagrisi yok — "
+        "state hic guncellenmiyor"
+    )
+
+
 # ── Flow 5: Kill-switch L2 _close_ogul_and_hybrid manuel dokunmaz ──
 def test_baba_l2_only_closes_ogul_and_hybrid():
     from engine.baba import Baba

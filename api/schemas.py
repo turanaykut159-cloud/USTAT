@@ -819,6 +819,27 @@ class WatchlistResponse(BaseModel):
     source: str = "bridge"  # bridge | default | error
 
 
+class TradingLimitsResponse(BaseModel):
+    """GET /api/settings/trading-limits — Lot giriş sınırları (Widget Denetimi H4).
+
+    Frontend Manuel İşlem lot input'u bu endpoint'ten okur ve hardcoded
+    `min=1 max=10 step=1` kalıbını ortadan kaldırır. Backend canonical kaynak
+    `config/default.json.engine.max_lot_per_contract`. VİOP kontratları integer
+    lot ile işlem gördüğünden min/step varsayılanı 1.0'dır.
+
+    Alanlar:
+    - lot_min: İzin verilen en küçük lot (varsayılan 1.0 — VİOP integer kontrat).
+    - lot_max: İzin verilen en büyük lot (config'den `engine.max_lot_per_contract`).
+    - lot_step: Lot step (varsayılan 1.0 — VİOP integer kontrat).
+    - source: 'config' — config/default.json; 'default' — config erişilemez veya
+              anahtar yok; 'error' — beklenmeyen hata.
+    """
+    lot_min: float = 1.0
+    lot_max: float = 1.0
+    lot_step: float = 1.0
+    source: str = "config"  # config | default | error
+
+
 class StatsBaselineResponse(BaseModel):
     """GET /api/settings/stats-baseline — İstatistik taban tarihleri (Widget Denetimi A7).
 

@@ -23,6 +23,7 @@ from api.schemas import (
     RiskBaselineUpdateResponse,
     SessionHoursResponse,
     StatsBaselineResponse,
+    TradingLimitsResponse,
     UiPrefsResponse,
     WatchlistResponse,
 )
@@ -320,6 +321,73 @@ async def get_watchlist():
     """
     symbols, source = _read_watchlist_symbols()
     return WatchlistResponse(symbols=symbols, source=source)
+
+
+# v6.0 — Widget Denetimi H4: Lot giriş sınırları fallback (VİOP integer kontrat).
+# Config okunamaz veya anahtar yoksa bu değerler kullanılır. Canonical kaynak
+# `config/default.json.engine.max_lot_per_contract` — frontend Manuel İşlem
+# lot input'u hardcoded `min=1 max=10 step=1` yerine bu endpoint'i tüketir.
+DEFAULT_LOT_MIN: float = 1.0
+DEFAULT_LOT_MAX: float = 1.0
+DEFAULT_LOT_STEP: float = 1.0
+
+
+def _read_trading_limits() -> tuple[float, float, float, str]:
+    """Config'den lot giriş sınırlarını oku (Widget Denetimi H4).
+
+    Canonical kaynak `config/default.json.engine.max_lot_per_contract`.
+    Ana motor (`engine/ogul.py::OgulEngine.__init__`) ve manuel motor
+    (`engine/manuel_motor.py::MAX_LOT_PER_CONTRACT`) aynı limiti kullanır —
+    UI bu endpoint üzerinden senkron kalır. Config erişilemez veya anahtar
+    yoksa VİOP default'u (1.0/1.0/1.0) devreye girer.
+
+    Returns (lot_min, lot_max, lot_step, source).
+    """
+    try:
+        from engine.config import Config  # type: ignore
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Config import failed (trading-limits): %s", exc)
+        return DEFAULT_LOT_MIN, DEFAULT_LOT_MAX, DEFAULT_LOT_STEP, "error"
+
+    try:
+        cfg = Config()
+        raw_max = cfg.get("engine.max_lot_per_contract", None)
+        if raw_max is None:
+            return DEFAULT_LOT_MIN, DEFAULT_LOT_MAX, DEFAULT_LOT_STEP, "default"
+        lot_max = float(raw_max)
+        if lot_max <= 0:
+            return DEFAULT_LOT_MIN, DEFAULT_LOT_MAX, DEFAULT_LOT_STEP, "default"
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Config read failed (trading-limits): %s", exc)
+        return DEFAULT_LOT_MIN, DEFAULT_LOT_MAX, DEFAULT_LOT_STEP, "error"
+
+    # VİOP kontratları integer işlem gördüğünden min/step hard-defaulted.
+    # İleride symbol-özel volume_min/volume_step gerekirse buraya genişletilir.
+    return DEFAULT_LOT_MIN, lot_max, DEFAULT_LOT_STEP, "config"
+
+
+@router.get("/settings/trading-limits", response_model=TradingLimitsResponse)
+async def get_trading_limits():
+    """Lot giriş sınırlarını döndür (Widget Denetimi H4).
+
+    Frontend Manuel İşlem lot input'u hardcoded `min=1 max=10 step=1` yerine
+    bu endpoint'ten okur. Canonical kaynak
+    `config/default.json.engine.max_lot_per_contract`. Ana motor (OĞUL) ve
+    manuel motor aynı limiti uyguladığından UI, config değişikliklerine
+    otomatik senkronize olur. Drift imkansızdır.
+
+    Risk notu: config `max_lot_per_contract` değeri 1.0 ise UI max da 1.0
+    olur; kullanıcı daha büyük değer giremez. Sessiz truncation (motor
+    tarafında min(lot, MAX_LOT_PER_CONTRACT)) ile sınır çıkan yanıltıcı
+    UX ortadan kalkar.
+    """
+    lot_min, lot_max, lot_step, source = _read_trading_limits()
+    return TradingLimitsResponse(
+        lot_min=lot_min,
+        lot_max=lot_max,
+        lot_step=lot_step,
+        source=source,
+    )
 
 
 @router.get("/settings/ui-prefs", response_model=UiPrefsResponse)

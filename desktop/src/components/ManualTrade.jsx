@@ -13,7 +13,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { checkManualTrade, executeManualTrade, getTrades, getManualRiskScores, getPositions, closePosition, getWatchlistSymbols } from '../services/api';
+import { checkManualTrade, executeManualTrade, getTrades, getManualRiskScores, getPositions, closePosition, getWatchlistSymbols, getTradingLimits } from '../services/api';
 import { formatMoney, formatPrice, pnlClass, elapsed } from '../utils/formatters';
 
 // ── 15 VİOP Kontratı — Fallback (Widget Denetimi A-H3) ──────────
@@ -62,6 +62,12 @@ export default function ManualTrade() {
   // /api/settings/watchlist → engine/mt5_bridge.py::WATCHED_SYMBOLS.
   // İlk render DEFAULT_SYMBOLS ile; mount'ta backend fetch ile override.
   const [watchlist, setWatchlist] = useState(DEFAULT_SYMBOLS);
+
+  // ── Lot giriş sınırları (Widget Denetimi H4) ─────────────────
+  // /api/settings/trading-limits → config.engine.max_lot_per_contract.
+  // Hardcoded `min=1 max=10 step=1` drift'i bu state ile kapatılır.
+  // İlk render VİOP default'u (1/1/1); mount'ta backend fetch ile override.
+  const [lotLimits, setLotLimits] = useState({ lot_min: 1, lot_max: 1, lot_step: 1 });
 
   // Son manuel işlemleri çek
   const fetchRecentTrades = useCallback(async () => {
@@ -119,6 +125,31 @@ export default function ManualTrade() {
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // H4: Mount'ta lot giriş sınırlarını backend'den al — config.engine.max_lot_per_contract.
+  // Sessiz truncation (UI 10'a izin verir, motor 1.0'a kırpar) kapatılır.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await getTradingLimits();
+        if (cancelled || !resp) return;
+        const lmin = Number(resp.lot_min) > 0 ? Number(resp.lot_min) : 1;
+        const lmax = Number(resp.lot_max) > 0 ? Number(resp.lot_max) : 1;
+        const lstep = Number(resp.lot_step) > 0 ? Number(resp.lot_step) : 1;
+        setLotLimits({ lot_min: lmin, lot_max: lmax, lot_step: lstep });
+        // Mevcut lot state sınırların dışındaysa içine çek.
+        setLot((prev) => {
+          if (prev < lmin) return lmin;
+          if (prev > lmax) return lmax;
+          return prev;
+        });
+      } catch {
+        // Hata durumunda varsayılan 1/1/1 state'te zaten mevcut.
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   // ── Kontrol Et ───────────────────────────────────────────────
@@ -242,9 +273,9 @@ export default function ManualTrade() {
                   className="mt-lot-input"
                   value={lot}
                   onChange={(e) => setLot(parseFloat(e.target.value) || 0)}
-                  min={1}
-                  max={10}
-                  step={1}
+                  min={lotLimits.lot_min}
+                  max={lotLimits.lot_max}
+                  step={lotLimits.lot_step}
                 />
                 <span className="mt-price-info">
                   BABA önerisi: {checkResult.suggested_lot}
