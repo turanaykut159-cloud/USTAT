@@ -117,6 +117,7 @@ startup.log
 collector_log.txt
 rapor_*.txt
 agent_error.txt
+tree.txt
 
 # Geçici çalışma dosyaları (proje kökünde)
 *.ex5
