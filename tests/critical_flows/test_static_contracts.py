@@ -799,6 +799,81 @@ def test_stats_baseline_single_source_chain():
     )
 
 
+# ── Flow 4k: TRADE_ERROR kategori eslemesi iki kaynakta senkron (A14 / B17) ──
+def test_trade_error_category_mapping_consistent():
+    """Widget Denetimi A14 (B17): TRADE_ERROR ve MANUAL_TRADE_ERROR event tipleri
+    hem engine/error_tracker.py::ERROR_CATEGORIES hem de
+    api/routes/error_dashboard.py::EVENT_TYPE_CATEGORY sozlukerinde 'emir'
+    kategorisine eslenmelidir. Aksi halde canli hatalar 'sistem' veya 'diger'
+    kategorisine dusup emir panelinde gorunmez."""
+    # 1) engine ERROR_CATEGORIES kontrolu
+    from engine.error_tracker import ERROR_CATEGORIES
+
+    assert "TRADE_ERROR" in ERROR_CATEGORIES, (
+        "engine/error_tracker.py::ERROR_CATEGORIES sozlugunde 'TRADE_ERROR' "
+        "anahtari yok. ogul.py::_execute_signal send_order_failed durumunda "
+        "TRADE_ERROR emit ediyor; kategori 'diger' default'una dusuyor."
+    )
+    assert ERROR_CATEGORIES["TRADE_ERROR"] == "emir", (
+        f"engine/error_tracker.py::ERROR_CATEGORIES['TRADE_ERROR'] "
+        f"beklenen 'emir', gelen {ERROR_CATEGORIES['TRADE_ERROR']!r}"
+    )
+    assert "MANUAL_TRADE_ERROR" in ERROR_CATEGORIES, (
+        "engine/error_tracker.py::ERROR_CATEGORIES sozlugunde "
+        "'MANUAL_TRADE_ERROR' anahtari yok. manuel_motor.py MT5 reject "
+        "durumunda bu tipi emit ediyor."
+    )
+    assert ERROR_CATEGORIES["MANUAL_TRADE_ERROR"] == "emir", (
+        f"engine/error_tracker.py::ERROR_CATEGORIES['MANUAL_TRADE_ERROR'] "
+        f"beklenen 'emir', gelen {ERROR_CATEGORIES['MANUAL_TRADE_ERROR']!r}"
+    )
+
+    # 2) api EVENT_TYPE_CATEGORY kontrolu
+    from api.routes.error_dashboard import EVENT_TYPE_CATEGORY
+
+    assert "TRADE_ERROR" in EVENT_TYPE_CATEGORY, (
+        "api/routes/error_dashboard.py::EVENT_TYPE_CATEGORY sozlugunde "
+        "'TRADE_ERROR' anahtari yok. _categorize() default'u 'sistem' donduyor — "
+        "Hata Takip panelinde TRADE_ERROR kayitlari 'sistem' kategorisine dusup "
+        "emir kategori filtresinde gorunmuyor."
+    )
+    assert EVENT_TYPE_CATEGORY["TRADE_ERROR"] == "emir", (
+        f"api/routes/error_dashboard.py::EVENT_TYPE_CATEGORY['TRADE_ERROR'] "
+        f"beklenen 'emir', gelen {EVENT_TYPE_CATEGORY['TRADE_ERROR']!r}"
+    )
+    assert "MANUAL_TRADE_ERROR" in EVENT_TYPE_CATEGORY, (
+        "api/routes/error_dashboard.py::EVENT_TYPE_CATEGORY sozlugunde "
+        "'MANUAL_TRADE_ERROR' anahtari yok."
+    )
+    assert EVENT_TYPE_CATEGORY["MANUAL_TRADE_ERROR"] == "emir", (
+        f"api/routes/error_dashboard.py::EVENT_TYPE_CATEGORY['MANUAL_TRADE_ERROR'] "
+        f"beklenen 'emir', gelen {EVENT_TYPE_CATEGORY['MANUAL_TRADE_ERROR']!r}"
+    )
+
+    # 3) Parite kontrolu — iki sozlukte de TRADE_ERROR ayni kategoride olmali
+    assert ERROR_CATEGORIES["TRADE_ERROR"] == EVENT_TYPE_CATEGORY["TRADE_ERROR"], (
+        "ERROR_CATEGORIES ve EVENT_TYPE_CATEGORY 'TRADE_ERROR' icin farkli "
+        "kategori donduruyor — backend query tutarsizligi olusur."
+    )
+    assert ERROR_CATEGORIES["MANUAL_TRADE_ERROR"] == EVENT_TYPE_CATEGORY["MANUAL_TRADE_ERROR"], (
+        "ERROR_CATEGORIES ve EVENT_TYPE_CATEGORY 'MANUAL_TRADE_ERROR' icin "
+        "farkli kategori donduruyor."
+    )
+
+    # 4) Engine tarafinda gerekten emit ediliyor mu (regresyon)
+    from pathlib import Path
+    repo_root = Path(__file__).resolve().parents[2]
+    ogul_src = (repo_root / "engine" / "ogul.py").read_text(encoding="utf-8")
+    assert 'event_type="TRADE_ERROR"' in ogul_src, (
+        "engine/ogul.py TRADE_ERROR emit etmiyor — audit bulgusu gecersiz, "
+        "test guncellenmeli."
+    )
+    manuel_src = (repo_root / "engine" / "manuel_motor.py").read_text(encoding="utf-8")
+    assert 'event_type="MANUAL_TRADE_ERROR"' in manuel_src, (
+        "engine/manuel_motor.py MANUAL_TRADE_ERROR emit etmiyor."
+    )
+
+
 # ── Flow 5: Kill-switch L2 _close_ogul_and_hybrid manuel dokunmaz ──
 def test_baba_l2_only_closes_ogul_and_hybrid():
     from engine.baba import Baba

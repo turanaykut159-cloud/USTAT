@@ -42,6 +42,13 @@ EVENT_TYPE_CATEGORY = {
     "ORDER_TIMEOUT": "emir",
     "ORDER_FILL_PARTIAL": "emir",
     "SLTP_MODIFY_FAIL": "emir",
+    # Widget Denetimi A14 (B17) — TRADE_ERROR ve MANUAL_TRADE_ERROR
+    # ogul.py ve manuel_motor.py bu tipleri emit ediyor (emir başarısızlığı +
+    # korumasız pozisyon orphan). Önceden EVENT_TYPE_CATEGORY'de anahtar yoktu
+    # ve _categorize default'u "sistem" döndürüyordu — Hata Takip panelinde
+    # canlı TRADE_ERROR kayıtları "sistem" altında birikiyordu. Doğru kategori "emir".
+    "TRADE_ERROR": "emir",
+    "MANUAL_TRADE_ERROR": "emir",
     "TRADE": "emir",
     "TRADE_OPEN": "emir",
     "TRADE_CLOSE": "emir",

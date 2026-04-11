@@ -37,6 +37,12 @@ ERROR_CATEGORIES = {
     "ORDER_TIMEOUT": "emir",
     "ORDER_FILL_PARTIAL": "emir",
     "SLTP_MODIFY_FAIL": "emir",
+    # Widget Denetimi A14 (B17) — TRADE_ERROR ve MANUAL_TRADE_ERROR
+    # ogul.py::_execute_signal (send_order fail, orphan) ve
+    # manuel_motor.py::execute_manual_trade (MT5 reject) bu tipleri emit ediyor.
+    # Önceden "diğer" kategorisine düşüyordu; "emir" doğru kategoridir.
+    "TRADE_ERROR": "emir",
+    "MANUAL_TRADE_ERROR": "emir",
     "KILL_SWITCH": "risk",
     "DRAWDOWN_LIMIT": "risk",
     "RISK_LIMIT": "risk",
