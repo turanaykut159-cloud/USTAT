@@ -2,7 +2,7 @@
  * ÜSTAT Plus V6.0 — Üst bilgi çubuğu.
  *
  * Sol:  ÜSTAT Plus V6.0 logosu | Kill-switch (L1/L2/L3) | Bağlantı durumu (yeşil/kırmızı nokta)
- * Sağ:  Bakiye | Equity | Floating | Günlük K/Z (MT5, 2sn) | Pin | Saat
+ * Sağ:  Bakiye | Equity | Floating | Günlük K/Z (Snapshot, 2sn) | Pin | Saat
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
@@ -242,8 +242,11 @@ export default function TopBar() {
 
         <div className="tb-divider" />
 
-        <div className="tb-metric" title="MT5 günlük P/L (gerçek zamanlı)">
-          <span className="tb-metric-label">Günlük K/Z (MT5)</span>
+        {/* Widget Denetimi A10 fix — etiket "MT5" değil "Snapshot" çünkü
+            veri api/routes/account.py::get_account → db.get_latest_risk_snapshot()
+            üzerinden risk_snapshots tablosundan okunuyor, doğrudan MT5'ten değil. */}
+        <div className="tb-metric" title="Günlük P/L — risk_snapshots tablosundan (2 sn polling)">
+          <span className="tb-metric-label">Günlük K/Z (Snapshot)</span>
           <span className={`tb-metric-value ${dailyPnl >= 0 ? 'profit' : 'loss'}`}>
             {formatMoney(dailyPnl)}
           </span>

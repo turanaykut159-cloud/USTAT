@@ -907,6 +907,36 @@ def test_monitor_mt5_panel_uses_dynamic_state():
     )
 
 
+# ── Flow 4m: TopBar Günlük K/Z etiketi MT5 değil Snapshot (A10) ──
+def test_topbar_daily_pnl_label_not_mt5():
+    """Widget Denetimi A10 (B16): TopBar 'Günlük K/Z' metrik etiketinin veri kaynagi
+    /api/account endpoint'i uzerinden db.get_latest_risk_snapshot() tablosundan
+    geliyor, MT5 hesabindan degil. 'Günlük K/Z (MT5)' etiketi yaniltici. Etiket
+    'Snapshot' olarak duzeltildi. Regression korumasi — hardcode geri gelmemeli."""
+    from pathlib import Path
+    repo_root = Path(__file__).resolve().parents[2]
+    topbar_src = (repo_root / "desktop" / "src" / "components" / "TopBar.jsx").read_text(
+        encoding="utf-8"
+    )
+
+    # 1) Yanlis etiket kaldirilmis olmali
+    assert "Günlük K/Z (MT5)" not in topbar_src, (
+        "TopBar.jsx 'Günlük K/Z (MT5)' etiketi hala mevcut — A10 fix geri alinmis. "
+        "Veri risk_snapshots tablosundan geliyor, MT5 hesabindan degil; etiket yaniltici."
+    )
+
+    # 2) Dogru etiket mevcut
+    assert "Günlük K/Z (Snapshot)" in topbar_src, (
+        "TopBar.jsx 'Günlük K/Z (Snapshot)' etiketi yok — A10 duzeltmesi uygulanmamis."
+    )
+
+    # 3) Header yorumu da guncellenmis olmali
+    assert "Günlük K/Z (MT5, 2sn)" not in topbar_src, (
+        "TopBar.jsx dosya basi yorumunda 'Günlük K/Z (MT5, 2sn)' hala mevcut — "
+        "yorum ile UI etiketi tutarsiz kalmis."
+    )
+
+
 # ── Flow 5: Kill-switch L2 _close_ogul_and_hybrid manuel dokunmaz ──
 def test_baba_l2_only_closes_ogul_and_hybrid():
     from engine.baba import Baba
