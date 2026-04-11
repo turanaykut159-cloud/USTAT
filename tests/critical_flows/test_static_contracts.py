@@ -251,6 +251,51 @@ def test_notification_prefs_persists_via_config():
     )
 
 
+# ── Flow 4e: Monitor modStatus gercek sinyallere bagli ───────────
+def test_monitor_modstatus_not_hardcoded():
+    """Widget Denetimi A4/B9: Monitor.jsx `modStatus.manuel = 'ok'` sabit
+    hardcode'uydu; BABA/OGUL/H-Engine rozetleri de engine_running ve
+    errorCounts ile zenginlestirilmemisti. Bu test:
+      1. `manuel: 'ok'` literal'inin kaldirildigini,
+      2. modStatus blogunda engine_running kapisinin bulundugunu,
+      3. modStatus blogunda errorCounts referansinin oldugunu,
+      4. killLevel >= 2 icin OGUL/H-Engine err kapisinin oldugunu
+    dogrular. Pre-commit hook ile korunur.
+    """
+    monitor_path = ROOT / "desktop" / "src" / "components" / "Monitor.jsx"
+    assert monitor_path.exists(), "Monitor.jsx bulunamadi."
+    src = monitor_path.read_text(encoding="utf-8")
+
+    # modStatus blogunu izole et (kar\u0131\u015fmas\u0131n diye)
+    mod_match = re.search(r"const modStatus\s*=(.*?)\n\s*//", src, re.DOTALL)
+    assert mod_match, "modStatus tanimi Monitor.jsx icinde bulunamadi."
+    mod_block = mod_match.group(1)
+
+    # 1. Eski hardcode literal kaldirilmis olmali
+    assert "manuel: 'ok'" not in mod_block and 'manuel: "ok"' not in mod_block, (
+        "Monitor.jsx modStatus.manuel hala hardcode 'ok' — manuel motor "
+        "hatasi hicbir zaman rozete yansimaz (Widget Denetimi B9)."
+    )
+
+    # 2. engine_running kapisi modStatus hesabinda kullanilmali
+    assert "engineRunning" in mod_block, (
+        "modStatus engine_running kontrolu yapmiyor — engine oldu bile "
+        "BABA yesil gorunebilir."
+    )
+
+    # 3. errorCounts referansi modStatus blogunda olmali
+    assert "errorCounts" in mod_block, (
+        "modStatus errorCounts'u kullanmiyor — modul hatalari rozetlere "
+        "yansimiyor."
+    )
+
+    # 4. killLevel >= 2 kapisi OGUL/H-Engine icin olmali (L2 -> err)
+    assert "killLevel >= 2" in mod_block, (
+        "modStatus L2 kill-switch kontrolu yapmiyor — OGUL/H-Engine "
+        "durdugu halde yesil goruluyor olabilir."
+    )
+
+
 # ── Flow 5: Kill-switch L2 _close_ogul_and_hybrid manuel dokunmaz ──
 def test_baba_l2_only_closes_ogul_and_hybrid():
     from engine.baba import Baba

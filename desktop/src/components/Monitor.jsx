@@ -230,14 +230,41 @@ export default function Monitor() {
     }
   });
 
-  // ── Modül durumları ──────────────────────────────────────────
-  const modStatus = {
-    baba: killLevel >= 3 ? 'err' : killLevel > 0 ? 'warn' : 'ok',
-    ustat: sysInfo?.cache_stale ? 'warn' : 'ok',
-    ogul: layers?.ogul?.daily_loss_stop ? 'err' : (orders?.reject_count ?? 0) > 0 || (orders?.timeout_count ?? 0) > 0 ? 'warn' : 'ok',
-    hengine: (layers?.h_engine?.active_hybrid_count ?? 0) > 0 ? 'warn' : 'ok',
-    manuel: 'ok',
-  };
+  // ── Modül durumları (A4 / Widget Denetimi B9) ─────────────────
+  // Tüm modüller artık gerçek sinyallere bağlı: engine_running,
+  // killLevel, errorCounts, layer bayrakları. Hardcode 'ok' YASAK.
+  //
+  // Kurallar:
+  //  - engine_running false  → tüm modüller 'err' (motor ölü)
+  //  - BABA: L3 → err, L1/L2 → warn, errorCounts.baba → warn
+  //  - OĞUL / H-Engine: L2+ → err (Anayasa 4.5 #10, trading durdu),
+  //    errorCounts veya layer uyarıları → warn
+  //  - ÜSTAT: cache_stale / errorCounts.ustat → warn (kill-switch'te
+  //    durmaz, risk motoru değil)
+  //  - MANUEL: errorCounts.manuel → warn; aksi 'ok'. Hardcode 'ok' YASAK.
+  const modStatus = !engineRunning
+    ? { baba: 'err', ustat: 'err', ogul: 'err', hengine: 'err', manuel: 'err' }
+    : {
+        baba:
+          killLevel >= 3 ? 'err' :
+          killLevel > 0 ? 'warn' :
+          errorCounts.baba > 0 ? 'warn' : 'ok',
+        ustat:
+          sysInfo?.cache_stale ? 'warn' :
+          errorCounts.ustat > 0 ? 'warn' : 'ok',
+        ogul:
+          killLevel >= 2 ? 'err' :
+          layers?.ogul?.daily_loss_stop ? 'err' :
+          errorCounts.ogul > 0 ||
+          (orders?.reject_count ?? 0) > 0 ||
+          (orders?.timeout_count ?? 0) > 0 ? 'warn' : 'ok',
+        hengine:
+          killLevel >= 2 ? 'err' :
+          errorCounts.hengine > 0 ? 'warn' :
+          (layers?.h_engine?.active_hybrid_count ?? 0) > 0 ? 'warn' : 'ok',
+        manuel:
+          errorCounts.manuel > 0 ? 'warn' : 'ok',
+      };
 
   // ── Yardımcı fonksiyonlar ────────────────────────────────────
   const fmtUptime = (sec) => {
