@@ -28,7 +28,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   getErrorSummary, getErrorGroups, getErrorTrends,
-  resolveError, resolveAllErrors,
+  resolveError, resolveAllErrors, getSession,
 } from '../services/api';
 
 // ── Sabitler ──
@@ -58,13 +58,28 @@ const SEVERITY_LABELS = {
   WARNING: 'UYARI',
 };
 
-// ── EOD Sabitleri ──
-const EOD_CLOSE_HOUR = 17;
-const EOD_CLOSE_MIN = 45;
-const VIOP_OPEN_HOUR = 9;
-const VIOP_OPEN_MIN = 30;
-const VIOP_CLOSE_HOUR = 18;
-const VIOP_CLOSE_MIN = 15;
+// ── EOD Sabitleri — Widget Denetimi A17 ──
+// Bu değerler FALLBACK; gerçek saatler /api/settings/session üzerinden
+// config/default.json::session bloğundan okunur. Backend okunamazsa
+// aşağıdaki default'lar devreye girer. BIST VİOP sabitleri: 09:30-18:15,
+// EOD zorunlu kapanış 17:45 (Anayasa Kural #5 — engine.trading_close).
+const DEFAULT_SESSION_HOURS = {
+  market_open: '09:30',
+  market_close: '18:15',
+  eod_close: '17:45',
+};
+
+// "HH:MM" → { hour, min }. Geçersiz değerde null döner.
+function parseHHMM(str) {
+  if (typeof str !== 'string') return null;
+  const m = /^(\d{2}):(\d{2})$/.exec(str);
+  if (!m) return null;
+  const hour = Number(m[1]);
+  const min = Number(m[2]);
+  if (Number.isNaN(hour) || Number.isNaN(min)) return null;
+  if (hour < 0 || hour > 23 || min < 0 || min > 59) return null;
+  return { hour, min };
+}
 
 // ── Yardımcılar ──
 
@@ -90,13 +105,19 @@ function shortTime(isoStr) {
   } catch { return isoStr; }
 }
 
-function getEodInfo() {
+function getEodInfo(sessionCfg = DEFAULT_SESSION_HOURS) {
   const now = new Date();
   const day = now.getDay(); // 0=Pazar, 6=Cumartesi
   const nowMins = now.getHours() * 60 + now.getMinutes();
-  const openMins = VIOP_OPEN_HOUR * 60 + VIOP_OPEN_MIN;
-  const closeMins = VIOP_CLOSE_HOUR * 60 + VIOP_CLOSE_MIN;
-  const eodMins = EOD_CLOSE_HOUR * 60 + EOD_CLOSE_MIN;
+
+  // Config'den gelen değerleri parse et, hatalıysa default'a düş.
+  const openParsed = parseHHMM(sessionCfg.market_open) || parseHHMM(DEFAULT_SESSION_HOURS.market_open);
+  const closeParsed = parseHHMM(sessionCfg.market_close) || parseHHMM(DEFAULT_SESSION_HOURS.market_close);
+  const eodParsed = parseHHMM(sessionCfg.eod_close) || parseHHMM(DEFAULT_SESSION_HOURS.eod_close);
+
+  const openMins = openParsed.hour * 60 + openParsed.min;
+  const closeMins = closeParsed.hour * 60 + closeParsed.min;
+  const eodMins = eodParsed.hour * 60 + eodParsed.min;
 
   // Hafta sonu
   if (day === 0 || day === 6) {
@@ -137,15 +158,34 @@ export default function ErrorTracker() {
   const [filterResolved, setFilterResolved] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [eod, setEod] = useState(getEodInfo());
+  // A17: session hours backend'den; fetch tamamlanana kadar default.
+  const [sessionHours, setSessionHours] = useState(DEFAULT_SESSION_HOURS);
+  const [eod, setEod] = useState(() => getEodInfo(DEFAULT_SESSION_HOURS));
   const [resolveMsg, setResolveMsg] = useState(null);
   const [hoveredMsg, setHoveredMsg] = useState(null);
 
+  // ── A17: Session saatlerini mount'ta çek; hata durumunda default kalır ──
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const data = await getSession();
+      if (cancelled) return;
+      const next = {
+        market_open: data?.market_open || DEFAULT_SESSION_HOURS.market_open,
+        market_close: data?.market_close || DEFAULT_SESSION_HOURS.market_close,
+        eod_close: data?.eod_close || DEFAULT_SESSION_HOURS.eod_close,
+      };
+      setSessionHours(next);
+      setEod(getEodInfo(next));
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   // ── EOD geri sayım güncelle (her dakika) ──
   useEffect(() => {
-    const timer = setInterval(() => setEod(getEodInfo()), 60_000);
+    const timer = setInterval(() => setEod(getEodInfo(sessionHours)), 60_000);
     return () => clearInterval(timer);
-  }, []);
+  }, [sessionHours]);
 
   // ── Veri çekme ──
   const fetchAll = useCallback(async () => {

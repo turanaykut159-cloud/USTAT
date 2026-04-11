@@ -20,7 +20,18 @@ from api.schemas import (
     RiskBaselineGetResponse,
     RiskBaselineUpdateRequest,
     RiskBaselineUpdateResponse,
+    SessionHoursResponse,
 )
+
+# v6.0 — Widget Denetimi A17: BIST VİOP seans saatleri (fallback).
+# Config okunamazsa kullanılır. Backend engine.trading_close (EOD)
+# bu değerle senkron olmalıdır. Frontend ErrorTracker ve Performance
+# heatmap bu değerleri /api/settings/session endpoint'inden çeker.
+DEFAULT_SESSION_HOURS: dict = {
+    "market_open": "09:30",
+    "market_close": "18:15",
+    "eod_close": "17:45",
+}
 
 # v6.0 — Widget Denetimi A3/S1: Bildirim tercihleri artık config/default.json
 # üzerinden kalıcıdır (eski bellek tabanlı `_notification_prefs` kaldırıldı).
@@ -176,6 +187,49 @@ async def get_notification_prefs():
     """Mevcut bildirim tercihlerini döndür (config.ui.notification_prefs)."""
     return NotificationPrefsResponse(
         success=True, prefs=_read_notification_prefs_from_config()
+    )
+
+
+def _read_session_hours_from_config() -> tuple[dict, str]:
+    """Config'den seans saatlerini oku; eksik anahtarları default ile doldur.
+
+    Engine yoksa veya config okunamazsa DEFAULT_SESSION_HOURS döner.
+    Kısmi config (örn. sadece eod_close) gelirse eksik anahtarlar default
+    ile tamamlanır. Sadece 'HH:MM' format doğrulanır; geçersiz değerler
+    sessizce default'la değiştirilir.
+
+    Returns (merged_dict, source) — source: 'config' | 'default'.
+    """
+    engine = get_engine()
+    if not engine:
+        return dict(DEFAULT_SESSION_HOURS), "default"
+    raw = engine.config.get("session", None)
+    if not isinstance(raw, dict):
+        return dict(DEFAULT_SESSION_HOURS), "default"
+    merged = dict(DEFAULT_SESSION_HOURS)
+    hh_mm_re = re.compile(r"^\d{2}:\d{2}$")
+    for key in DEFAULT_SESSION_HOURS:
+        val = raw.get(key)
+        if isinstance(val, str) and hh_mm_re.match(val):
+            merged[key] = val
+    return merged, "config"
+
+
+@router.get("/settings/session", response_model=SessionHoursResponse)
+async def get_session_hours():
+    """BIST VİOP seans saatlerini config'den oku (Widget Denetimi A17).
+
+    Frontend ErrorTracker (EOD geri sayım) ve Performance heatmap
+    (9-18 saat aralığı) bu endpoint'ten hardcoded saatleri alır.
+    eod_close backend engine.trading_close (EOD zorunlu kapanış,
+    Anayasa Kural #5) ile senkron olmalıdır.
+    """
+    hours, source = _read_session_hours_from_config()
+    return SessionHoursResponse(
+        market_open=hours["market_open"],
+        market_close=hours["market_close"],
+        eod_close=hours["eod_close"],
+        source=source,
     )
 
 

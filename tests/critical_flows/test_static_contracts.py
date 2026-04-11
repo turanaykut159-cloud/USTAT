@@ -513,6 +513,146 @@ def test_monitor_response_bars_use_cycle_interval_budget():
     )
 
 
+# ── Flow 4i: BIST seans saatleri config/api/frontend senkron ─────
+def test_session_hours_from_config_to_frontend():
+    """Widget Denetimi A17 (H6+H10): EOD saat sabitleri config'e tasindi.
+
+    Eskiden ErrorTracker.jsx'te EOD_CLOSE_HOUR=17/EOD_CLOSE_MIN=45/
+    VIOP_OPEN_HOUR=9/VIOP_CLOSE_HOUR=18 gibi hardcoded sabitler vardi.
+    Performance.jsx heatmap'te de `for (let h = 9; h <= 18; h++)` ile
+    literal 9-18 araligi kullaniliyordu. Backend `engine.trading_close`
+    degistiginde frontend sessizce senkronsuz kaliyordu.
+
+    Yeni: `config/default.json::session` blogu eklendi (market_open,
+    market_close, eod_close). `api/schemas.py::SessionHoursResponse`
+    ve `api/routes/settings.py::get_session_hours` endpoint'i sunuldu.
+    Frontend `services/api.js::getSession()` cagirir, ErrorTracker ve
+    Performance mount'ta fetch edip state'e koyar; hata durumunda
+    DEFAULT fallback devreye girer (UI asla kirilmaz).
+
+    Bu test:
+      - config/default.json'da session blogu var (market_open,
+        market_close, eod_close)
+      - api/schemas.py'de SessionHoursResponse sinifi var
+      - api/routes/settings.py'de get_session_hours endpoint'i var
+        ve config.get("session") cagriyor
+      - desktop/src/services/api.js'de getSession fonksiyonu
+      - ErrorTracker.jsx ve Performance.jsx getSession'i import
+        ediyor ve useEffect ile fetch ediyor
+      - ErrorTracker.jsx'te eski hardcoded VIOP_* / EOD_* sabitleri
+        KALDIRILDI (yalnizca DEFAULT_SESSION_HOURS fallback kaldi)
+      - Performance.jsx'te eski `for (let h = 9; h <= 18; h++)`
+        hardcoded literal'i KALDIRILDI (heatmapHours state'inden
+        okunuyor).
+    """
+    import json
+
+    # 1. config/default.json::session blogu
+    config_path = ROOT / "config" / "default.json"
+    assert config_path.exists(), f"config/default.json bulunamadi: {config_path}"
+    cfg = json.loads(config_path.read_text(encoding="utf-8"))
+    assert "session" in cfg, (
+        "config/default.json'da 'session' blogu yok — "
+        "BIST VIOP seans saatleri hardcoded kalmis."
+    )
+    session_block = cfg["session"]
+    for key in ("market_open", "market_close", "eod_close"):
+        assert key in session_block, (
+            f"config session blogu eksik anahtar: {key} — frontend "
+            f"fetch edip kullanamaz."
+        )
+        assert isinstance(session_block[key], str), (
+            f"config session.{key} string olmalidir (HH:MM format)."
+        )
+
+    # 2. api/schemas.py::SessionHoursResponse
+    schemas_path = ROOT / "api" / "schemas.py"
+    schemas_src = schemas_path.read_text(encoding="utf-8")
+    assert "class SessionHoursResponse" in schemas_src, (
+        "api/schemas.py'de SessionHoursResponse sinifi yok — "
+        "get_session endpoint'i response_model'siz kalir."
+    )
+    assert 'market_open: str' in schemas_src, (
+        "SessionHoursResponse.market_open alani eksik."
+    )
+    assert 'market_close: str' in schemas_src, (
+        "SessionHoursResponse.market_close alani eksik."
+    )
+    assert 'eod_close: str' in schemas_src, (
+        "SessionHoursResponse.eod_close alani eksik."
+    )
+
+    # 3. api/routes/settings.py::get_session_hours
+    settings_path = ROOT / "api" / "routes" / "settings.py"
+    settings_src = settings_path.read_text(encoding="utf-8")
+    assert "async def get_session_hours" in settings_src, (
+        "api/routes/settings.py'de get_session_hours endpoint'i yok."
+    )
+    assert '"/settings/session"' in settings_src, (
+        "settings.py'de GET /settings/session route kaydi yok."
+    )
+    assert 'config.get("session"' in settings_src, (
+        "settings.py get_session_hours, config.get('session') "
+        "cagirmiyor — backend senkronu kaybolmus."
+    )
+
+    # 4. desktop/src/services/api.js::getSession
+    api_js_path = ROOT / "desktop" / "src" / "services" / "api.js"
+    api_js_src = api_js_path.read_text(encoding="utf-8")
+    assert "export async function getSession" in api_js_src, (
+        "services/api.js'de getSession fonksiyonu yok — "
+        "frontend session hours fetch edemez."
+    )
+    assert "'/settings/session'" in api_js_src, (
+        "getSession /settings/session endpoint'ine cagri atmiyor."
+    )
+
+    # 5. ErrorTracker.jsx getSession import + kullanim
+    et_path = ROOT / "desktop" / "src" / "components" / "ErrorTracker.jsx"
+    et_src = et_path.read_text(encoding="utf-8")
+    assert "getSession" in et_src, (
+        "ErrorTracker.jsx getSession'i import etmiyor — session "
+        "hours hardcoded fallback'e dusuyor."
+    )
+    # Eski hardcoded sabitler KALDIRILDI
+    forbidden_et = [
+        "const EOD_CLOSE_HOUR = 17",
+        "const EOD_CLOSE_MIN = 45",
+        "const VIOP_OPEN_HOUR = 9",
+        "const VIOP_OPEN_MIN = 30",
+        "const VIOP_CLOSE_HOUR = 18",
+        "const VIOP_CLOSE_MIN = 15",
+    ]
+    for lit in forbidden_et:
+        assert lit not in et_src, (
+            f"ErrorTracker.jsx eski hardcoded sabit geri dondu: '{lit}' — "
+            f"config/default.json::session'dan okunmali."
+        )
+    # Yeni DEFAULT fallback var
+    assert "DEFAULT_SESSION_HOURS" in et_src, (
+        "ErrorTracker.jsx DEFAULT_SESSION_HOURS fallback'i yok — "
+        "API hatasinda UI kirilir."
+    )
+
+    # 6. Performance.jsx getSession + heatmap aralik
+    perf_path = ROOT / "desktop" / "src" / "components" / "Performance.jsx"
+    perf_src = perf_path.read_text(encoding="utf-8")
+    assert "getSession" in perf_src, (
+        "Performance.jsx getSession'i import etmiyor — heatmap "
+        "hardcoded 9-18 araligina dusuyor."
+    )
+    # Eski hardcoded heatmap aralik literal'i YASAK
+    assert "for (let h = 9; h <= 18; h++)" not in perf_src, (
+        "Performance.jsx heatmap eski hardcoded 'for (let h = 9; "
+        "h <= 18; h++)' aralik literal'i geri dondu — heatmapHours "
+        "state'inden okunmali."
+    )
+    assert "heatmapHours" in perf_src, (
+        "Performance.jsx heatmapHours state'i yok — session hours "
+        "backend'den cekilmiyor."
+    )
+
+
 # ── Flow 5: Kill-switch L2 _close_ogul_and_hybrid manuel dokunmaz ──
 def test_baba_l2_only_closes_ogul_and_hybrid():
     from engine.baba import Baba

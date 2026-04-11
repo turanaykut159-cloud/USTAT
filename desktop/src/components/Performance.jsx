@@ -22,7 +22,22 @@ import {
   LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
 } from 'recharts';
-import { getPerformance, getTradeStats, getTrades, STATS_BASELINE } from '../services/api';
+import { getPerformance, getTradeStats, getTrades, getSession, STATS_BASELINE } from '../services/api';
+
+// ── BIST VİOP seans saatleri — Widget Denetimi A17 ──
+// Heatmap saat aralığı backend config/default.json::session'dan okunur.
+// Fallback (API erişilemezse) BIST sabitleri: 09:30-18:15.
+const DEFAULT_HEATMAP_HOURS = { market_open: '09:30', market_close: '18:15' };
+
+// "HH:MM" → integer saat bölümü (00-23). Geçersizde null.
+function parseHour(str) {
+  if (typeof str !== 'string') return null;
+  const m = /^(\d{2}):\d{2}$/.exec(str);
+  if (!m) return null;
+  const h = Number(m[1]);
+  if (Number.isNaN(h) || h < 0 || h > 23) return null;
+  return h;
+}
 
 // ── Yardımcılar ──────────────────────────────────────────────────
 
@@ -128,6 +143,22 @@ export default function Performance() {
   const [trades, setTrades] = useState([]);
   const [days, setDays] = useState(90);
   const [loading, setLoading] = useState(true);
+  // A17: Heatmap saat aralığı backend session config'den çekilir.
+  const [heatmapHours, setHeatmapHours] = useState(DEFAULT_HEATMAP_HOURS);
+
+  // ── A17: Session saatleri mount'ta çekilir, hata durumunda default ──
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const data = await getSession();
+      if (cancelled) return;
+      setHeatmapHours({
+        market_open: data?.market_open || DEFAULT_HEATMAP_HOURS.market_open,
+        market_close: data?.market_close || DEFAULT_HEATMAP_HOURS.market_close,
+      });
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // ── Performans verisi ────────────────────────────────────────────
   const fetchPerfData = useCallback(async () => {
@@ -226,10 +257,14 @@ export default function Performance() {
     return result;
   }, [trades]);
 
-  // ── Saat bazlı performans (heatmap verisi) ─────────────────────
+  // ── Saat bazlı performans (heatmap verisi) — A17 ───────────────
+  // Heatmap saat aralığı config/default.json::session'dan okunur.
+  // Fallback: BIST VİOP 09-18 (DEFAULT_HEATMAP_HOURS).
   const hourData = useMemo(() => {
     const hours = {};
-    for (let h = 9; h <= 18; h++) {
+    const openHour = parseHour(heatmapHours.market_open) ?? parseHour(DEFAULT_HEATMAP_HOURS.market_open);
+    const closeHour = parseHour(heatmapHours.market_close) ?? parseHour(DEFAULT_HEATMAP_HOURS.market_close);
+    for (let h = openHour; h <= closeHour; h++) {
       hours[h] = { hour: h, count: 0, pnl: 0, wins: 0 };
     }
     for (const t of trades) {
@@ -245,7 +280,7 @@ export default function Performance() {
       } catch { /* ignore */ }
     }
     return Object.values(hours);
-  }, [trades]);
+  }, [trades, heatmapHours]);
 
   const maxHourPnl = useMemo(() => {
     const vals = hourData.map((h) => Math.abs(h.pnl));

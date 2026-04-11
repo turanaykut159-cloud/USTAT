@@ -175,6 +175,26 @@ export async function updateNotificationPrefs(prefs) {
   }
 }
 
+// ── Settings — Session Hours (Widget Denetimi A17) ───────────────
+// Backend config/default.json::session blok'undan BIST VİOP seans
+// saatlerini oku. ErrorTracker (EOD geri sayım) ve Performance
+// heatmap (9-18 saat aralığı) bu endpoint'ten hardcoded saatleri
+// alır. Hata durumunda güvenli default'la fallback — UI asla kırılmaz.
+export async function getSession() {
+  try {
+    const { data } = await client.get('/settings/session');
+    return data;
+  } catch (err) {
+    console.error('[ÜSTAT API] getSession:', err?.message ?? err);
+    return {
+      market_open: '09:30',
+      market_close: '18:15',
+      eod_close: '17:45',
+      source: 'error',
+    };
+  }
+}
+
 // ── Performance ──────────────────────────────────────────────────
 
 export async function getPerformance(days = 30) {

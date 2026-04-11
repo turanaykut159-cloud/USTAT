@@ -50,6 +50,11 @@
       "regimeAlert": false
     }
   },
+  "session": {
+    "market_open": "09:30",
+    "market_close": "18:15",
+    "eod_close": "17:45"
+  },
   "indicators": {
     "ema_fast": 9,
     "ema_slow": 21,

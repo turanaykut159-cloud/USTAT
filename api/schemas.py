@@ -766,6 +766,23 @@ class RiskBaselineUpdateResponse(BaseModel):
     new_date: str = ""
 
 
+class SessionHoursResponse(BaseModel):
+    """GET /api/settings/session — BIST VİOP seans saatleri (Widget Denetimi A17).
+
+    Backend config/default.json::session blok'unun frontend'e görünümü.
+    Frontend ErrorTracker ve Performance heatmap bu endpoint'ten oku
+    ve hardcoded saatleri backend'e senkronize tut. eod_close backend
+    engine.trading_close ile aynı olmalı (EOD zorunlu kapanış saati,
+    Anayasa Kural #5). market_open/market_close BIST VİOP sabitleridir.
+
+    Tüm saatler "HH:MM" format (24-saat, lokal zaman).
+    """
+    market_open: str = "09:30"
+    market_close: str = "18:15"
+    eod_close: str = "17:45"
+    source: str = "config"  # config | default
+
+
 # ═══════════════════════════════════════════════════════════════════
 #  HABER ENTEGRASYONU (v5.7.1)
 # ═══════════════════════════════════════════════════════════════════
