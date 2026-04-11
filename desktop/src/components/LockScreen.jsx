@@ -24,6 +24,11 @@ import {
   verifyMT5Connection,
   sendOTP,
 } from '../services/mt5Launcher';
+// A5/H1: Versiyon tek kaynak engine/__init__.py::VERSION, /api/status uzerinden okunur.
+import { getStatus } from '../services/api';
+
+// A5/H1: Fallback versiyon — backend erisilemezse dahi LockScreen "V6.0" gosterir.
+const VERSION_FALLBACK = '6.0.0';
 
 // ── Polling sabitleri ────────────────────────────────────────────
 const POLL_INTERVAL = 3000;   // 3 saniyede bir kontrol
@@ -57,6 +62,9 @@ export default function LockScreen({ onUnlock }) {
 
   // Polling
   const [elapsed, setElapsed] = useState(0); // geçen süre (saniye)
+
+  // A5/H1: Versiyon status endpoint'inden alinir (tek kaynak).
+  const [appVersion, setAppVersion] = useState(VERSION_FALLBACK);
 
   const serverRef = useRef(null);
   const otpInputRef = useRef(null);
@@ -106,6 +114,22 @@ export default function LockScreen({ onUnlock }) {
   }, []);
 
   useEffect(() => { initFlow(); }, [initFlow]);
+
+  // A5/H1: Mount'ta versiyonu status endpoint'inden al — hardcode "V6.0" kaldirildi.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const s = await getStatus();
+        if (!cancelled && s?.version) {
+          setAppVersion(s.version);
+        }
+      } catch {
+        // Hata durumunda fallback VERSION_FALLBACK state'te zaten mevcut.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // ── Focus yönetimi ────────────────────────────────────────────
   useEffect(() => {
@@ -370,7 +394,8 @@ export default function LockScreen({ onUnlock }) {
 
       {/* ── Logo ─────────────────────────────────────────────────── */}
       <div className="lock-logo">
-        <h1>ÜSTAT Plus <span className="version">V6.0</span></h1>
+        {/* A5/H1: appVersion state'i /api/status uzerinden gelir; major.minor formatinda goster. */}
+        <h1>ÜSTAT Plus <span className="version">V{appVersion.split('.').slice(0, 2).join('.')}</span></h1>
         <p className="lock-tagline">VİOP Algorithmic Trading</p>
       </div>
 

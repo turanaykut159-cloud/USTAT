@@ -12,6 +12,10 @@ from fastapi import APIRouter
 
 from api.deps import get_baba, get_engine, get_mt5, get_pipeline, get_uptime, is_engine_running
 from api.schemas import StatusResponse, SuccessResponse, WarningItem
+# v6.0 — Widget Denetimi A5 / H1: Versiyon tek kaynak engine/__init__.py::VERSION.
+# TopBar/Settings/LockScreen hardcode "V6.0" stringleri artik /api/status.version
+# uzerinden backend'den okur. Tek dokunulacak nokta engine/__init__.py::VERSION.
+from engine import VERSION as ENGINE_VERSION
 
 router = APIRouter()
 
@@ -98,6 +102,7 @@ async def get_status():
         circuit_breaker_active = mt5.circuit_breaker_active
 
     return StatusResponse(
+        version=ENGINE_VERSION,  # A5/H1: engine/__init__.py::VERSION tek kaynak
         engine_running=engine_running,
         mt5_connected=mt5_connected,
         regime=regime,

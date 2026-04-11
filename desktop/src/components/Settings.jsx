@@ -19,7 +19,10 @@ import { getAccount, getStatus, getEvents, getRiskBaseline, updateRiskBaseline, 
 
 // ── Sabitler ──────────────────────────────────────────────────────
 
-const VERSION = '6.0.0';
+// A5/H1: VERSION hardcode'u kaldirildi — tek kaynak engine/__init__.py::VERSION.
+// Artik status?.version uzerinden /api/status endpoint'inden okunur.
+// Fallback '6.0.0' ilk render ve hata durumu icin.
+const VERSION_FALLBACK = '6.0.0';
 const BUILD_DATE = '2026-03-29';
 
 const DEFAULT_PREFS = {
@@ -352,8 +355,12 @@ export default function Settings() {
               <h3>Hakkında</h3>
             </div>
             <div className="st-version-grid">
-              <FieldRow label="Uygulama" value="ÜSTAT Plus V6.0 Desktop" />
-              <FieldRow label="Versiyon" value={`v${VERSION}`} />
+              {/* A5/H1: Versiyon status.version (engine/__init__.py::VERSION) tek kaynaktan okunur. */}
+              <FieldRow
+                label="Uygulama"
+                value={`ÜSTAT Plus V${(status?.version || VERSION_FALLBACK).split('.').slice(0, 2).join('.')} Desktop`}
+              />
+              <FieldRow label="Versiyon" value={`v${status?.version || VERSION_FALLBACK}`} />
               <FieldRow label="Build Tarihi" value={BUILD_DATE} />
               <FieldRow label="Engine" value={status?.engine_running ? 'Çalışıyor' : 'Durduruldu'} cls={status?.engine_running ? 'profit' : 'loss'} />
               <FieldRow label="Uptime" value={status?.uptime_seconds ? formatUptime(status.uptime_seconds) : '—'} />

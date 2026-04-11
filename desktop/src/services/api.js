@@ -37,6 +37,9 @@ export async function getStatus() {
   } catch (err) {
     console.error('[ÜSTAT API] getStatus:', err?.message ?? err);
     return {
+      // A5: Backend erişilemezse dahi version fallback mevcut.
+      // TopBar/Settings/LockScreen "V6.0" display'i hiçbir koşulda kırılmaz.
+      version: '6.0.0',
       engine_running: false,
       mt5_connected: false,
       regime: 'TREND',

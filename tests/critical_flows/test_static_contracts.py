@@ -1111,6 +1111,102 @@ def test_dashboard_max_open_positions_from_config():
     )
 
 
+# ── Flow 4p: Versiyon tek kaynak engine/__init__.py::VERSION (A5 / H1) ──
+def test_version_single_source_of_truth():
+    """Widget Denetimi A5 (H1): TopBar, Settings, LockScreen eskiden kendi
+    hardcode "V6.0" / "VERSION = '6.0.0'" stringlerine sahipti. Artik tek kaynak
+    engine/__init__.py::VERSION, /api/status endpoint'i uzerinden frontend'e akiyor.
+    Hardcode geri eklenemez; backend zinciri kopmamali.
+
+    5 asamali zincir kontrolu:
+      (a) engine/__init__.py::VERSION var + semver formati (N.N.N)
+      (b) api/routes/status.py engine VERSION import ediyor ve
+          StatusResponse(version=ENGINE_VERSION, ...) cagirisi yapiyor
+      (c) services/api.js getStatus fallback objesi 'version' alani iceriyor
+      (d) TopBar.jsx eski <span>V6.0</span> hardcode'u YOK + status.version kullanimi
+      (e) Settings.jsx eski `const VERSION = '6.0.0'` YOK + status?.version kullanimi
+      (f) LockScreen.jsx eski <span>V6.0</span> hardcode'u YOK + appVersion state
+          + getStatus import + mount useEffect fetch
+    """
+    import re as _re
+    from pathlib import Path
+    repo_root = Path(__file__).resolve().parents[2]
+
+    # (a) engine/__init__.py::VERSION
+    engine_init = (repo_root / "engine" / "__init__.py").read_text(encoding="utf-8")
+    match = _re.search(r'VERSION\s*=\s*["\'](\d+\.\d+\.\d+)["\']', engine_init)
+    assert match, (
+        "engine/__init__.py::VERSION semver (N.N.N) formatinda degil ya da yok — "
+        "A5 tek kaynak prensibi bozulmus"
+    )
+    engine_version = match.group(1)
+
+    # (b) api/routes/status.py backend populate
+    status_src = (repo_root / "api" / "routes" / "status.py").read_text(encoding="utf-8")
+    assert "from engine import VERSION" in status_src, (
+        "api/routes/status.py engine VERSION import etmiyor — "
+        "status endpoint'i versiyon bilgisini saglamiyor"
+    )
+    assert "version=ENGINE_VERSION" in status_src, (
+        "api/routes/status.py StatusResponse'a version=ENGINE_VERSION atamiyor"
+    )
+
+    # (c) services/api.js fallback
+    api_src = (repo_root / "desktop" / "src" / "services" / "api.js").read_text(
+        encoding="utf-8"
+    )
+    get_status_match = _re.search(
+        r"export async function getStatus\(\).*?^\}",
+        api_src,
+        _re.DOTALL | _re.MULTILINE,
+    )
+    assert get_status_match, "services/api.js getStatus govdesi bulunamadi"
+    assert "version:" in get_status_match.group(0), (
+        "services/api.js getStatus fallback objesinde 'version' alani yok — "
+        "backend erisilemezse LockScreen/TopBar/Settings versiyon gostermez"
+    )
+
+    # (d) TopBar.jsx hardcode kaldirildi + status.version kullanimi
+    topbar_src = (repo_root / "desktop" / "src" / "components" / "TopBar.jsx").read_text(
+        encoding="utf-8"
+    )
+    assert '<span className="version">V6.0</span>' not in topbar_src, (
+        "TopBar.jsx hardcode '<span className=\"version\">V6.0</span>' hala mevcut — "
+        "A5 fix geri alinmis"
+    )
+    assert "status.version" in topbar_src, (
+        "TopBar.jsx status.version kullanimi yok — versiyon hala hardcode olabilir"
+    )
+
+    # (e) Settings.jsx hardcode kaldirildi + status?.version kullanimi
+    settings_src = (repo_root / "desktop" / "src" / "components" / "Settings.jsx").read_text(
+        encoding="utf-8"
+    )
+    assert "const VERSION = '6.0.0'" not in settings_src, (
+        "Settings.jsx 'const VERSION = \\'6.0.0\\'' hardcode hala mevcut — "
+        "A5 fix geri alinmis"
+    )
+    assert "status?.version" in settings_src, (
+        "Settings.jsx status?.version kullanimi yok"
+    )
+
+    # (f) LockScreen.jsx hardcode kaldirildi + appVersion state + fetch
+    lock_src = (repo_root / "desktop" / "src" / "components" / "LockScreen.jsx").read_text(
+        encoding="utf-8"
+    )
+    assert '<span className="version">V6.0</span>' not in lock_src, (
+        "LockScreen.jsx hardcode '<span className=\"version\">V6.0</span>' hala mevcut — "
+        "A5 fix geri alinmis"
+    )
+    assert "appVersion" in lock_src, (
+        "LockScreen.jsx appVersion state'i yok"
+    )
+    assert "getStatus" in lock_src, (
+        "LockScreen.jsx getStatus import/kullanimi yok — "
+        "versiyon backend'den okunamiyor"
+    )
+
+
 # ── Flow 5: Kill-switch L2 _close_ogul_and_hybrid manuel dokunmaz ──
 def test_baba_l2_only_closes_ogul_and_hybrid():
     from engine.baba import Baba

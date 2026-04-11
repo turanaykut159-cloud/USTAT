@@ -137,13 +137,17 @@ export default function TopBar() {
   const isConnected = status.mt5_connected;
   const floatingPnl = account.floating_pnl || 0;
   const dailyPnl = account.daily_pnl || 0;
+  // A5/H1: Versiyon etiketini tek kaynaktan (engine/__init__.py::VERSION) oku.
+  // Backend status endpoint'i full semver ("6.0.0") dondurur; V"6.0" formatini
+  // korumak icin major.minor'i cikartiyoruz. Fallback "6.0" ilk render ve hata durumu icin.
+  const versionLabel = (status.version || '6.0.0').split('.').slice(0, 2).join('.');
 
   return (
     <div className="top-bar">
 
       {/* ── SOL: Logo + Faz + Bağlantı ─────────────────────────── */}
       <div className="top-bar-left">
-        <h1>ÜSTAT Plus <span className="version">V6.0</span></h1>
+        <h1>ÜSTAT Plus <span className="version">V{versionLabel}</span></h1>
         {initialLoading && <span className="tb-loading">Yükleniyor...</span>}
 
         <span
