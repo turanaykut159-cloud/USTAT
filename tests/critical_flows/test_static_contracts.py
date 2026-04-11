@@ -2179,6 +2179,95 @@ def test_operator_identity_canonical_source():
     )
 
 
+# ── Flow 4zb: Hibrit SL/TP gorunurlugu (Widget Denetimi A8 / K10) ──
+def test_hybrid_sltp_visibility_in_positions_response():
+    """Widget Denetimi A8 (K10): Hibrit pozisyonlarda MT5 native sl/tp '—'
+    goruluyordu (genelde 0), gercek koruma h_engine.hybrid_positions[ticket]
+    .current_sl / current_tp icinde sanal olarak tutuluyordu. Kullanici
+    Dashboard'da hibrit satirini 'korumasiz' sanabilirdi.
+
+    Yeni sozlesme:
+      - PositionItem schema'sina hybrid_sl + hybrid_tp alanlari eklendi.
+      - api/routes/positions.py::get_positions icinde ticket hibrit_tickets
+        icindeyse h_engine.hybrid_positions[ticket].current_sl / current_tp
+        okunur ve schema'ya doldurulur. Manuel/Otomatik/MT5 satirlarinda
+        iki alan da varsayilan 0.0 kalir.
+      - Dashboard.jsx SL/TP hucresi: hibrit satir + native MT5 sl==0 iken
+        pos.hybrid_sl italik + tooltip ('MT5 native degil, H-Engine sanal
+        koruma') ile gosterilir. Native varsa MT5 degeri oncelik.
+
+    Bu test:
+      (a) PositionItem schema'sinda hybrid_sl + hybrid_tp alanlari var
+      (b) api/routes/positions.py hibrit ticket icin hybrid_positions
+          sozlugunu okuyor ve current_sl / current_tp'yi aliyor
+      (c) api/routes/positions.py PositionItem constructor'inda hybrid_sl
+          ve hybrid_tp kwarg'larini veriyor
+      (d) Dashboard.jsx pos.hybrid_sl / pos.hybrid_tp referanslari + tooltip
+          mesaji mevcut (sanal koruma metni)
+      (e) Widget Denetimi A8 / K10 marker mevcut (backend + frontend)
+    """
+    # (a) Schema alanlari
+    schema_path = ROOT / "api" / "schemas.py"
+    schema_src = schema_path.read_text(encoding="utf-8")
+    assert re.search(r"hybrid_sl\s*:\s*float\s*=", schema_src), (
+        "api/schemas.py PositionItem icinde 'hybrid_sl: float =' alani yok "
+        "— A8 schema kontrati bozuk."
+    )
+    assert re.search(r"hybrid_tp\s*:\s*float\s*=", schema_src), (
+        "api/schemas.py PositionItem icinde 'hybrid_tp: float =' alani yok "
+        "— A8 schema kontrati bozuk."
+    )
+
+    # (b) + (c) Route hibrit ticket icin hybrid_positions okuyor ve kwarg
+    #     veriyor
+    route_path = ROOT / "api" / "routes" / "positions.py"
+    route_src = route_path.read_text(encoding="utf-8")
+    assert "h_engine.hybrid_positions" in route_src, (
+        "api/routes/positions.py h_engine.hybrid_positions sozlugunu "
+        "okumuyor — hibrit SL/TP backend'den hic gelmiyor."
+    )
+    assert "current_sl" in route_src and "current_tp" in route_src, (
+        "api/routes/positions.py HybridPosition.current_sl / current_tp "
+        "alanlarini okumuyor — sanal koruma degerleri bos kaliyor."
+    )
+    assert re.search(r"hybrid_sl\s*=\s*hybrid_sl_val", route_src), (
+        "api/routes/positions.py PositionItem constructor'inda hybrid_sl "
+        "kwarg'i yok — schema doldurulmuyor."
+    )
+    assert re.search(r"hybrid_tp\s*=\s*hybrid_tp_val", route_src), (
+        "api/routes/positions.py PositionItem constructor'inda hybrid_tp "
+        "kwarg'i yok — schema doldurulmuyor."
+    )
+
+    # (d) Dashboard.jsx hybrid_sl / hybrid_tp referanslari + tooltip
+    dashboard_path = ROOT / "desktop" / "src" / "components" / "Dashboard.jsx"
+    dash_src = dashboard_path.read_text(encoding="utf-8")
+    assert "pos.hybrid_sl" in dash_src, (
+        "Dashboard.jsx pos.hybrid_sl referansi yok — hibrit satirda sanal "
+        "SL gosterimi eklenmemis."
+    )
+    assert "pos.hybrid_tp" in dash_src, (
+        "Dashboard.jsx pos.hybrid_tp referansi yok — hibrit satirda sanal "
+        "TP gosterimi eklenmemis."
+    )
+    assert "sanal koruma" in dash_src.lower() or "h-engine sanal" in dash_src.lower(), (
+        "Dashboard.jsx hibrit SL/TP tooltip metni ('H-Engine sanal koruma') "
+        "bulunamadi — kullanici 'bu deger MT5 native mi?' ayrimini goremez."
+    )
+
+    # (e) Widget Denetimi A8 marker backend + frontend
+    assert "A8" in schema_src and "K10" in schema_src, (
+        "api/schemas.py icinde 'A8 (K10)' marker yok — audit izi kaybolmus."
+    )
+    assert "A8" in route_src and "K10" in route_src, (
+        "api/routes/positions.py icinde 'A8 (K10)' marker yok — audit izi "
+        "kaybolmus."
+    )
+    assert "A8" in dash_src and "K10" in dash_src, (
+        "Dashboard.jsx icinde 'A8 (K10)' marker yok — audit izi kaybolmus."
+    )
+
+
 # ── Flow 5: Kill-switch L2 _close_ogul_and_hybrid manuel dokunmaz ──
 def test_baba_l2_only_closes_ogul_and_hybrid():
     from engine.baba import Baba

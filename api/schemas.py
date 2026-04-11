@@ -81,6 +81,16 @@ class PositionItem(BaseModel):
     current_price: float
     sl: float = 0.0
     tp: float = 0.0
+    # ── Widget Denetimi A8 (K10) — Hibrit sanal koruma görünürlüğü ─
+    # Hibrit pozisyonlarda MT5 native sl/tp genelde 0 döner çünkü H-Engine
+    # sanal koruma uygular (breakeven, trailing, EOD zorunlu kapanış).
+    # Gerçek koruma değerleri h_engine.hybrid_positions[ticket].current_sl /
+    # current_tp içindedir. Bu iki alan SADECE hibrit satırlarda dolu gelir;
+    # manuel/otomatik/MT5 satırlarında 0.0 kalır. Frontend Dashboard hibrit
+    # satırı görünce bu değerleri "MT5 değil — H-Engine sanal koruma"
+    # tooltip'i ile italik stilde gösterir. Drift koruma: Flow 4zb.
+    hybrid_sl: float = 0.0
+    hybrid_tp: float = 0.0
     pnl: float = 0.0     # profit + swap (toplam floating K/Z)
     swap: float = 0.0    # birikmiş swap maliyeti
     open_time: str = ""

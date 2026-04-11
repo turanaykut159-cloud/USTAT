@@ -745,8 +745,37 @@ export default function Dashboard() {
                       <td className="mono">{pos.volume?.toFixed(2) ?? '—'}</td>
                       <td className="mono">{formatPrice(pos.entry_price)}</td>
                       <td className="mono">{formatPrice(pos.current_price)}</td>
-                      <td className="mono text-dim">{formatPrice(pos.sl)}</td>
-                      <td className="mono text-dim">{formatPrice(pos.tp)}</td>
+                      {/* Widget Denetimi A8 (K10) — Hibrit sanal koruma görünürlüğü.
+                          Hibrit pozisyonlarda MT5 native sl/tp genelde 0 döner; gerçek
+                          koruma h_engine.hybrid_positions[ticket].current_sl/current_tp
+                          içindedir. Backend pos.hybrid_sl / pos.hybrid_tp alanlarına
+                          doldurur. MT5 native değer varsa onu göster; yoksa ve satır
+                          hibrit ise italik + tooltip ile hybrid değeri göster. Drift:
+                          tests/critical_flows Flow 4zb. */}
+                      <td
+                        className={`mono text-dim ${(turClass === 'hybrid' && !(pos.sl > 0)) ? 'op-hybrid-virtual' : ''}`}
+                        title={
+                          (turClass === 'hybrid' && !(pos.sl > 0) && (pos.hybrid_sl || 0) > 0)
+                            ? 'Bu değer MT5 native değil, H-Engine sanal korumadır (breakeven/trailing/EOD yönetimi).'
+                            : ''
+                        }
+                      >
+                        {(turClass === 'hybrid' && !(pos.sl > 0) && (pos.hybrid_sl || 0) > 0)
+                          ? <em>{formatPrice(pos.hybrid_sl)}</em>
+                          : formatPrice(pos.sl)}
+                      </td>
+                      <td
+                        className={`mono text-dim ${(turClass === 'hybrid' && !(pos.tp > 0)) ? 'op-hybrid-virtual' : ''}`}
+                        title={
+                          (turClass === 'hybrid' && !(pos.tp > 0) && (pos.hybrid_tp || 0) > 0)
+                            ? 'Bu değer MT5 native değil, H-Engine sanal korumadır (breakeven/trailing/EOD yönetimi).'
+                            : ''
+                        }
+                      >
+                        {(turClass === 'hybrid' && !(pos.tp > 0) && (pos.hybrid_tp || 0) > 0)
+                          ? <em>{formatPrice(pos.hybrid_tp)}</em>
+                          : formatPrice(pos.tp)}
+                      </td>
                       <td className={`mono text-dim ${pnlClass(pos.swap || 0)}`}>
                         {formatMoney(pos.swap || 0)}
                       </td>

@@ -193,6 +193,21 @@ async def get_positions():
         # Risk skoru: Manuel ve MT5 pozisyonlar için (ManuelMotor yönetiminde)
         risk_score = risk_scores.get(symbol, {}) if tur in ("Manuel", "MT5") else {}
 
+        # Widget Denetimi A8 (K10) — Hibrit sanal koruma görünürlüğü.
+        # Hibrit pozisyonlarda MT5 native sl/tp genelde 0 döner; gerçek
+        # koruma h_engine.hybrid_positions[ticket].current_sl / current_tp
+        # içindedir. Dashboard kullanıcısı hibrit satırda "—" görünce
+        # pozisyonu korumasız sanabilir. Bu iki alan backend'de doldurulur,
+        # frontend italik + tooltip ile gösterir. Manuel/otomatik/MT5
+        # satırlarında 0.0 kalır (varsayılan). Drift: Flow 4zb.
+        hybrid_sl_val = 0.0
+        hybrid_tp_val = 0.0
+        if ticket in hybrid_tickets and h_engine:
+            hp = h_engine.hybrid_positions.get(ticket)
+            if hp is not None:
+                hybrid_sl_val = float(getattr(hp, "current_sl", 0.0) or 0.0)
+                hybrid_tp_val = float(getattr(hp, "current_tp", 0.0) or 0.0)
+
         items.append(PositionItem(
             ticket=ticket,
             symbol=symbol,
@@ -202,6 +217,8 @@ async def get_positions():
             current_price=p.get("price_current", 0.0),
             sl=p.get("sl", 0.0),
             tp=p.get("tp", 0.0),
+            hybrid_sl=hybrid_sl_val,
+            hybrid_tp=hybrid_tp_val,
             pnl=profit + swap,
             swap=swap,
             open_time=open_time,
