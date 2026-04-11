@@ -1887,6 +1887,69 @@ def test_settings_no_dummy_password_fieldrow():
     )
 
 
+# ── Flow 4y: Win rate breakeven esiği canonical kaynak (Widget Denetimi H13) ─
+def test_win_rate_breakeven_canonical_source():
+    """Win rate 50 esiği formatters.js disinda hardcode olmamali.
+
+    H13: UstatBrain kontrat profilleri, Performance Long/Short paneli,
+    Performance ozet kartlar, TradeHistory filtered stats, Dashboard hero
+    stat card ve HybridTrade perf paneli olmak uzere 6 ayri yerde ayni
+    magic number `50` win rate esiği olarak hardcode ediliyordu. Artik
+    `desktop/src/utils/formatters.js` icindeki WIN_RATE_BREAKEVEN_PCT
+    sabiti + winRateClass/winRateColor helper'lari TEK canonical kaynak.
+    Regression koruma:
+        (a) formatters.js icinde `WIN_RATE_BREAKEVEN_PCT` sabiti
+            tanimlanmis olmali.
+        (b) formatters.js icinde winRateClass ve winRateColor export
+            edilmis olmali.
+        (c) formatters.js DISINDA `win_rate >= 50` ve `winRate >= 50`
+            hardcode literal'leri YASAK — herhangi bir bilesen yeni bir
+            win rate renklendirmesi eklerse canonical helper'lari
+            kullanmasi zorunlu.
+        (d) `Widget Denetimi H13` marker yorumu formatters.js'te mevcut.
+    """
+    fmt_js = ROOT / "desktop" / "src" / "utils" / "formatters.js"
+    assert fmt_js.exists(), "desktop/src/utils/formatters.js yok."
+    fmt_src = fmt_js.read_text(encoding="utf-8")
+
+    # (a) Canonical sabit mevcut
+    assert "WIN_RATE_BREAKEVEN_PCT" in fmt_src, (
+        "formatters.js icinde WIN_RATE_BREAKEVEN_PCT sabiti yok — "
+        "Widget Denetimi H13 canonical kaynak kaldirilmis olabilir."
+    )
+
+    # (b) Helper'lar export edilmis
+    assert re.search(r"export\s+function\s+winRateClass\b", fmt_src), (
+        "formatters.js icinde winRateClass helper'i export edilmis degil."
+    )
+    assert re.search(r"export\s+function\s+winRateColor\b", fmt_src), (
+        "formatters.js icinde winRateColor helper'i export edilmis degil."
+    )
+
+    # (c) formatters.js DISINDA hardcode `win_rate >= 50` / `winRate >= 50`
+    # YASAK. Tum desktop/src/components'i tara.
+    components_dir = ROOT / "desktop" / "src" / "components"
+    hardcode_pattern = re.compile(r"\b(?:win_rate|winRate)\s*>=\s*50\b")
+    offenders = []
+    for jsx_file in sorted(components_dir.rglob("*.jsx")):
+        jsx_src = jsx_file.read_text(encoding="utf-8")
+        if hardcode_pattern.search(jsx_src):
+            offenders.append(jsx_file.relative_to(ROOT).as_posix())
+    assert not offenders, (
+        "Asagidaki bilesen(ler)de hardcode `win_rate >= 50` veya "
+        "`winRate >= 50` bulundu (Widget Denetimi H13 ihlali) — "
+        "formatters.js::winRateClass veya winRateColor helper'lari "
+        f"kullanilmalidir: {offenders}"
+    )
+
+    # (d) H13 marker
+    assert "Widget Denetimi H13" in fmt_src, (
+        "formatters.js icinde 'Widget Denetimi H13' marker yok — "
+        "canonical atif kaybolmus, refactor sirasinda merkezi kaynak "
+        "bilgisi silinmis olabilir."
+    )
+
+
 # ── Flow 5: Kill-switch L2 _close_ogul_and_hybrid manuel dokunmaz ──
 def test_baba_l2_only_closes_ogul_and_hybrid():
     from engine.baba import Baba

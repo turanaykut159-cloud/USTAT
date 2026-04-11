@@ -15,7 +15,12 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { getTrades, getTradeStats, getPerformance, approveTrade, syncTrades, connectLiveWS, getStatsBaseline, STATS_BASELINE } from '../services/api';
-import { formatMoney, formatPrice, pnlClass } from '../utils/formatters';
+// Widget Denetimi H13: Filtered stats win rate renk eşiği canonical
+// kaynağa bağlandı — eski satır 481 hardcode `>= 50 ? var(--profit) :
+// var(--loss)` inline style kullanıyordu. Artık winRateClass helper
+// className yoluyla `profit`/`loss` class'ını bırakır (global CSS
+// üzerinden renk gelir), drift koruması Flow 4y.
+import { formatMoney, formatPrice, pnlClass, winRateClass } from '../utils/formatters';
 
 // ── Sabitler ─────────────────────────────────────────────────────
 
@@ -478,7 +483,7 @@ export default function TradeHistory() {
         </div>
         <div className="th-summary-card">
           <span className="th-sc-label">Başarı Oranı</span>
-          <span className="th-sc-value" style={{ color: filteredStats.winRate >= 50 ? 'var(--profit)' : 'var(--loss)' }}>
+          <span className={`th-sc-value ${winRateClass(filteredStats.winRate)}`}>
             {formatPct(filteredStats.winRate)}
           </span>
         </div>

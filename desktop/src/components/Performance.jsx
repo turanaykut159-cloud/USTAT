@@ -23,6 +23,11 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
 } from 'recharts';
 import { getPerformance, getTradeStats, getTrades, getSession, getStatsBaseline, STATS_BASELINE } from '../services/api';
+// Widget Denetimi H13: Long/Short win rate renk eşiği canonical kaynağa
+// bağlandı — eski iki call site (line 494 long, line 503 short) hardcode
+// `>= 50` kullanıyordu. Artık winRateClass helper'ı formatters.js
+// WIN_RATE_BREAKEVEN_PCT sabitinden okuyor, drift koruması Flow 4y.
+import { winRateClass } from '../utils/formatters';
 
 // ── BIST VİOP seans saatleri — Widget Denetimi A17 ──
 // Heatmap saat aralığı backend config/default.json::session'dan okunur.
@@ -370,7 +375,7 @@ export default function Performance() {
           {/* ═══ ÖZET KARTLAR (5) ══════════════════════════════════════ */}
           <div className="pf-stats-row">
             <PfStat label="Net Kâr/Zarar" value={fmt(perf?.total_pnl)} cls={pnlCls(perf?.total_pnl)} />
-            <PfStat label="Win Rate" value={fmtPct(perf?.win_rate)} cls={perf?.win_rate >= 50 ? 'profit' : 'loss'} />
+            <PfStat label="Win Rate" value={fmtPct(perf?.win_rate)} cls={winRateClass(perf?.win_rate)} />
             <PfStat label="Sharpe Oranı" value={fmtNum(perf?.sharpe_ratio)} cls={perf?.sharpe_ratio >= 1 ? 'profit' : ''} />
             <PfStat label="Profit Factor" value={fmtNum(perf?.profit_factor)} cls={perf?.profit_factor >= 1.5 ? 'profit' : perf?.profit_factor >= 1 ? '' : 'loss'} />
             <PfStat label="Max Drawdown" value={perf?.max_drawdown_pct != null ? `%${perf.max_drawdown_pct.toFixed(2)}` : '—'} cls="loss" />
@@ -491,7 +496,7 @@ export default function Performance() {
                 <div className="pf-ls-col">
                   <span className="pf-ls-title profit">LONG (BUY)</span>
                   <LsRow label="İşlem" value={longShort.long.count} />
-                  <LsRow label="Win Rate" value={fmtPct(longShort.long.winRate)} cls={longShort.long.winRate >= 50 ? 'profit' : 'loss'} />
+                  <LsRow label="Win Rate" value={fmtPct(longShort.long.winRate)} cls={winRateClass(longShort.long.winRate)} />
                   <LsRow label="Net K/Z" value={fmt(longShort.long.pnl)} cls={pnlCls(longShort.long.pnl)} />
                   <LsRow label="Ort. K/Z" value={fmt(longShort.long.avgPnl)} cls={pnlCls(longShort.long.avgPnl)} />
                   <LsRow label="PF" value={fmtNum(longShort.long.pf)} />
@@ -500,7 +505,7 @@ export default function Performance() {
                 <div className="pf-ls-col">
                   <span className="pf-ls-title loss">SHORT (SELL)</span>
                   <LsRow label="İşlem" value={longShort.short.count} />
-                  <LsRow label="Win Rate" value={fmtPct(longShort.short.winRate)} cls={longShort.short.winRate >= 50 ? 'profit' : 'loss'} />
+                  <LsRow label="Win Rate" value={fmtPct(longShort.short.winRate)} cls={winRateClass(longShort.short.winRate)} />
                   <LsRow label="Net K/Z" value={fmt(longShort.short.pnl)} cls={pnlCls(longShort.short.pnl)} />
                   <LsRow label="Ort. K/Z" value={fmt(longShort.short.avgPnl)} cls={pnlCls(longShort.short.avgPnl)} />
                   <LsRow label="PF" value={fmtNum(longShort.short.pf)} />

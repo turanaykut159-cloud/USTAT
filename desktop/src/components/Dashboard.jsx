@@ -34,7 +34,11 @@ import {
   getNewsActive, getNotifications, markNotificationRead, markAllNotificationsRead,
   getRisk,
 } from '../services/api';
-import { formatMoney, formatPrice, pnlClass, elapsed } from '../utils/formatters';
+// Widget Denetimi H13: Dashboard hero stat card "Başarı Oranı" win rate
+// renk değeri canonical kaynağa bağlandı — eski satır 589 hardcode
+// `>= 50 ? var(--profit) : var(--loss)` kullanıyordu. Drift koruması
+// Flow 4y ile sağlanır.
+import { formatMoney, formatPrice, pnlClass, elapsed, winRateColor } from '../utils/formatters';
 import ConfirmModal from './ConfirmModal';
 import PrimnetDetail from './PrimnetDetail';
 import SortableCard from './SortableCard';
@@ -586,7 +590,7 @@ export default function Dashboard() {
                 value={formatPct(stats.win_rate)}
                 detail={`${stats.winning_trades || 0}W / ${stats.losing_trades || 0}L`}
                 icon="🎯"
-                color={stats.win_rate >= 50 ? 'var(--profit)' : 'var(--loss)'}
+                color={winRateColor(stats.win_rate)}
               />
             </SortableCard>
           );

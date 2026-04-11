@@ -20,6 +20,11 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
 } from 'recharts';
 import { getUstatBrain, getPerformance, getStatus } from '../services/api';
+// Widget Denetimi H13: Kontrat profilleri win rate renk eşiği canonical
+// kaynağa (formatters.js::WIN_RATE_BREAKEVEN_PCT) bağlandı. Eski satırda
+// hardcode 50 vardı; artık `winRateClass` helper'ı tüm win rate renk
+// mantığını merkezi tutar — drift koruması Flow 4y ile sağlanır.
+import { winRateClass } from '../utils/formatters';
 
 // ── Yardımcılar ──────────────────────────────────────────────────
 
@@ -316,7 +321,7 @@ export default function UstatBrain() {
                 </div>
                 <div className="ub-profile-stats">
                   <div className="ub-ps"><span className="ub-ps-label">Islem</span><span className="ub-ps-val">{cp.trade_count}</span></div>
-                  <div className="ub-ps"><span className="ub-ps-label">Win Rate</span><span className={`ub-ps-val ${cp.win_rate >= 50 ? 'profit' : 'loss'}`}>{fmtPct(cp.win_rate)}</span></div>
+                  <div className="ub-ps"><span className="ub-ps-label">Win Rate</span><span className={`ub-ps-val ${winRateClass(cp.win_rate)}`}>{fmtPct(cp.win_rate)}</span></div>
                   <div className="ub-ps"><span className="ub-ps-label">K/Z</span><span className={`ub-ps-val ${pnlCls(cp.total_pnl)}`}>{fmt(cp.total_pnl)}</span></div>
                   <div className="ub-ps"><span className="ub-ps-label">Ort. Sure</span><span className="ub-ps-val">{cp.avg_duration_min > 60 ? `${(cp.avg_duration_min / 60).toFixed(1)}s` : `${cp.avg_duration_min.toFixed(0)}dk`}</span></div>
                 </div>

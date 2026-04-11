@@ -1,9 +1,56 @@
 /**
- * ÜSTAT v5.7 — Ortak formatlama yardımcıları.
+ * ÜSTAT v6.0 — Ortak formatlama yardımcıları.
  *
  * Tüm bileşenlerde tekrarlanan formatMoney, formatPrice, pnlClass, elapsed
  * fonksiyonları burada merkezileştirilmiştir.
+ *
+ * Widget Denetimi H13 — Win rate breakeven eşiği:
+ * Aşağıdaki `WIN_RATE_BREAKEVEN_PCT` sabiti ve `winRateClass` helper'ı
+ * win rate gösteriminde kullanılan breakeven eşiğinin TEK CANONICAL
+ * kaynağıdır. Eski sürümde aynı `50` magic number'ı UstatBrain.jsx:319
+ * (kontrat profilleri), Performance.jsx:494 (long), Performance.jsx:503
+ * (short) ve TradeHistory.jsx:481 (filtered stats) olmak üzere 4 ayrı
+ * yerde tekrarlanıyordu ve drift riski taşıyordu. Bu eşik backend
+ * tarafında bir risk/karar parametresi DEĞİLDİR — yalnız UI renk
+ * eşiğidir (yeşil/kırmızı). Backend ile ilgili olmadığı için
+ * `config/default.json` yerine frontend ortak modülünde tutulur.
+ * Değiştirmek isteyen bu dosyaya bakar; tüm bileşenler otomatik takip
+ * eder. Flow 4y statik sözleşme testi 4 call site'ın yeniden hardcode
+ * 50 girmesini engeller.
  */
+
+export const WIN_RATE_BREAKEVEN_PCT = 50;
+
+/**
+ * Win rate yüzdesine göre CSS class döndürür.
+ * Breakeven eşiği (%50) veya üstü → 'profit'; altı → 'loss'.
+ * `null`/`undefined`/`NaN` değerlerde boş string döner (renk uygulanmaz).
+ *
+ * Widget Denetimi H13 — canonical atıf:
+ * Bu helper `UstatBrain.jsx` kontrat profilleri, `Performance.jsx`
+ * Long/Short paneli ve `TradeHistory.jsx` filtered stats tarafından
+ * kullanılır.
+ */
+export function winRateClass(winRate) {
+  if (winRate == null || isNaN(winRate)) return '';
+  return winRate >= WIN_RATE_BREAKEVEN_PCT ? 'profit' : 'loss';
+}
+
+/**
+ * Win rate yüzdesine göre CSS custom-property değeri döndürür.
+ * Bileşenlerin `style={{ color: ... }}` veya custom component `color=`
+ * prop'u beklediği yerlerde (Dashboard StatCard, HybridTrade perf panel)
+ * `winRateClass` yerine bu kullanılır. Dönüş değeri `var(--profit)` veya
+ * `var(--loss)` — theme.css'teki canonical renk değişkenleri.
+ *
+ * Widget Denetimi H13 — canonical atıf:
+ * Dashboard.jsx hero stat card ve HybridTrade.jsx perf istatistik paneli
+ * bu helper'ı kullanır.
+ */
+export function winRateColor(winRate) {
+  if (winRate == null || isNaN(winRate)) return 'var(--muted)';
+  return winRate >= WIN_RATE_BREAKEVEN_PCT ? 'var(--profit)' : 'var(--loss)';
+}
 
 /**
  * Para birimi formatla (TRY). 2 ondalık, Türkçe locale.

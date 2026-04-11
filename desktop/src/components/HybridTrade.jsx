@@ -36,7 +36,11 @@ import {
   getHybridPerformance,
   connectLiveWS,
 } from '../services/api';
-import { formatMoney, formatPrice, pnlClass, elapsed } from '../utils/formatters';
+// Widget Denetimi H13: HybridTrade perf istatistik paneli win rate renk
+// değeri canonical kaynağa bağlandı — eski satır 350 inline style hardcode
+// `>= 50 ? var(--profit) : var(--loss)` kullanıyordu. Drift koruması
+// Flow 4y ile sağlanır.
+import { formatMoney, formatPrice, pnlClass, elapsed, winRateColor } from '../utils/formatters';
 import ConfirmModal from './ConfirmModal';
 import SortableCard from './SortableCard';
 
@@ -347,7 +351,7 @@ export default function HybridTrade() {
                     </div>
                     <div className="ht-perf-item">
                       <span className="ht-perf-label">Başarı</span>
-                      <span className="ht-perf-value" style={{ color: perfStats.win_rate >= 50 ? 'var(--profit)' : 'var(--loss)' }}>
+                      <span className="ht-perf-value" style={{ color: winRateColor(perfStats.win_rate) }}>
                         %{perfStats.win_rate}
                       </span>
                     </div>
