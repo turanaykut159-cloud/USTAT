@@ -38,6 +38,53 @@ const COLORS = {
 
 const POLL_MS = 10000;
 
+// ── Modül sınıflandırıcı (Widget Denetimi B25) ───────────────────
+// Event → modül atama. Öncelik: yapısal event.type prefix >
+// serbest metin word-boundary regex. Sınıflandırılamayan event null
+// döner (false-positive yerine sessizlik). Türkçe locale (toLocaleLowerCase
+// 'tr-TR') ile 'Oğul', 'Üstat' gibi Unicode karakterler güvenli eşleşir.
+//
+// Üretimde karşılaşılan event type'ları (DB kanıtlı):
+//   baba    : KILL_SWITCH, DRAWDOWN_LIMIT, RISK_LIMIT, DAILY_LOSS_STOP,
+//             COOLDOWN_*, REGIME_*, BABA_*, HARD_DRAWDOWN, MONTHLY_LOSS,
+//             WEEKLY_RESET, DAILY_RESET, LOT_HALVED, STOP_TRADING, SYSTEM_STOP
+//   ogul    : TRADE_*, ORDER_*, SIGNAL_*, OGUL_*, VOLUME_SPIKE*, PARTIAL_*,
+//             FAKE_*, SIGN_MISMATCH, EOD_*, PAPER_TRADE*
+//   hengine : HYBRID_*
+//   manuel  : MANUAL_*, MANUEL_*
+//   ustat   : USTAT_*, PATTERN_*, STRATEGY_*, TOP5_*
+const MODULE_TYPE_PREFIX = [
+  { mod: 'hengine', re: /^HYBRID_/ },
+  { mod: 'manuel', re: /^(MANUAL_|MANUEL_)/ },
+  { mod: 'baba', re: /^(KILL_SWITCH|DRAWDOWN_|RISK_|COOLDOWN_|REGIME_|BABA_|HARD_DRAWDOWN|DAILY_LOSS_STOP|MONTHLY_LOSS|WEEKLY_RESET|DAILY_RESET|LOT_HALVED|STOP_TRADING|SYSTEM_STOP|SYSTEM_HALT)/ },
+  { mod: 'ogul', re: /^(TRADE_|ORDER_|SIGNAL_|OGUL_|VOLUME_SPIKE|PARTIAL_|FAKE_|SIGN_MISMATCH|EOD_|PAPER_TRADE)/ },
+  { mod: 'ustat', re: /^(USTAT_|PATTERN_|STRATEGY_|TOP5_)/ },
+];
+
+const MODULE_MSG_WORD = [
+  { mod: 'hengine', re: /\b(h[-_ ]?engine|hibrit|hybrid)\b/u },
+  { mod: 'manuel', re: /\bmanue?l\b/u },
+  { mod: 'baba', re: /\bbaba\b/u },
+  { mod: 'ogul', re: /\bo[gğ]ul\b/u },
+  { mod: 'ustat', re: /\b[üu]stat\b/u },
+];
+
+function classifyEventModule(ev) {
+  const type = (ev?.type || '').toUpperCase();
+  if (type) {
+    for (const entry of MODULE_TYPE_PREFIX) {
+      if (entry.re.test(type)) return entry.mod;
+    }
+  }
+  const msg = (ev?.message || '').toLocaleLowerCase('tr-TR');
+  if (msg) {
+    for (const entry of MODULE_MSG_WORD) {
+      if (entry.re.test(msg)) return entry.mod;
+    }
+  }
+  return null;
+}
+
 // ── Yardımcı bileşenler ──────────────────────────────────────────
 
 const Badge = memo(function Badge({ status }) {
@@ -217,16 +264,29 @@ export default function Monitor() {
   const cycleAvg = cycle?.avg_ms ?? 0;
   const uptimeSec = sysInfo?.engine_uptime_seconds ?? status?.uptime_seconds ?? 0;
 
-  // ── Modül hata sayacı (event'lerden) ──────────────────────────
+  // ── Modül hata sayacı (event'lerden — Widget Denetimi B25 fix) ──
+  // Eski versiyonda mesaj metni üzerinde serbest substring kontrolü ile
+  // modül çıkarımı yapılıyordu. İki kritik sorun:
+  //   1) Canlı event type'ları (KILL_SWITCH, DRAWDOWN_LIMIT, TRADE_ERROR,
+  //      SYSTEM_STOP, RISK_LIMIT, DAILY_LOSS_STOP) mesaj metninde modül
+  //      adını İÇERMİYOR — serbest substring fallback tüm üretim
+  //      olaylarını sayım dışı bırakıyordu. Monitor "HATA 0 bugün"
+  //      gösterdiği halde DB'de 48 kritik event olabilirdi — ölü kod.
+  //   2) Eski kod locale-duyarsız küçük harf çevrimi kullanıyordu;
+  //      Türkçe 'Oğul'/'Üstat' gibi Unicode karakterler inconsistent
+  //      eşleşirdi.
+  // Yeni yöntem (classifyEventModule helper'ı):
+  //   (a) Önce yapısal event.type prefix kontrolü (üretimde kullanılan
+  //       type'lar testlerle kanıtlandı).
+  //   (b) Prefix eşleşmezse mesaj üzerinde toLocaleLowerCase('tr-TR') +
+  //       kelime-sınırlı regex fallback.
+  //   (c) Sınıflandırılamayan event sayılmaz (false-positive yerine
+  //       sessizlik).
   const errorCounts = { baba: 0, ustat: 0, ogul: 0, hengine: 0, manuel: 0 };
   (health?.recent_events || []).forEach(ev => {
     if (ev.severity === 'ERROR' || ev.severity === 'CRITICAL') {
-      const msg = (ev.message || '').toLowerCase();
-      if (msg.includes('baba')) errorCounts.baba++;
-      else if (msg.includes('ustat') || msg.includes('üstat')) errorCounts.ustat++;
-      else if (msg.includes('ogul') || msg.includes('oğul')) errorCounts.ogul++;
-      else if (msg.includes('h-engine') || msg.includes('h_engine') || msg.includes('hibrit') || msg.includes('hybrid')) errorCounts.hengine++;
-      else if (msg.includes('manuel') || msg.includes('manual')) errorCounts.manuel++;
+      const mod = classifyEventModule(ev);
+      if (mod) errorCounts[mod]++;
     }
   });
 

@@ -359,6 +359,82 @@ def test_event_bus_emit_preserves_outer_type():
     )
 
 
+# ── Flow 4g: Monitor errorCounts structured classifier ──────────
+def test_monitor_error_counts_uses_structured_classifier():
+    """Widget Denetimi B25: Monitor.jsx `errorCounts` hesaplamasi eskiden
+    `msg.toLowerCase().includes('baba')` gibi substring kontrolleri ile
+    yapiliyordu. Iki kritik sorun:
+      1) Gercek uretim event type'lari (KILL_SWITCH, DRAWDOWN_LIMIT,
+         TRADE_ERROR, SYSTEM_STOP, DAILY_LOSS_STOP) mesaj metninde
+         'baba'/'ogul' kelimesi icermiyor — substring fallback tum
+         uretim olaylarini sayim disi birakiyordu (olu kod).
+      2) `String.toLowerCase()` Turkce locale'e duyarsiz — `Oğul`,
+         `Üstat` gibi Unicode karakterler inconsistent esleserdi.
+
+    Yeni yaklasim: `classifyEventModule` helper'i once yapisal
+    `event.type` prefix tablosu, sonra `toLocaleLowerCase('tr-TR')` +
+    word-boundary regex fallback kullanir.
+
+    Bu test Monitor.jsx kaynaginda:
+      - classifyEventModule fonksiyonunun varligini
+      - eski `msg.toLowerCase().includes('baba')` kalibinin artik
+        kullanilmadigini
+      - `toLocaleLowerCase('tr-TR')` kullanimini
+      - MODULE_TYPE_PREFIX haritasinda uretim type'larinin var oldugunu
+    dogrular.
+    """
+    monitor_path = ROOT / "desktop" / "src" / "components" / "Monitor.jsx"
+    assert monitor_path.exists(), f"Monitor.jsx bulunamadi: {monitor_path}"
+    src = monitor_path.read_text(encoding="utf-8")
+
+    # 1. classifyEventModule helper tanimli
+    assert "function classifyEventModule" in src, (
+        "classifyEventModule helper kaldirildi — structured classifier "
+        "yerine eski substring parse geri donmus olabilir."
+    )
+
+    # 2. Eski kirik substring kalibi YASAK
+    assert "msg.includes('baba')" not in src, (
+        "Eski substring parse kalibi geri dondu — uretim event'leri "
+        "sayim disi kalir (B25 bug)."
+    )
+    assert ".toLowerCase().includes(" not in src, (
+        "toLowerCase().includes() kalibi Monitor.jsx'te gorunmemeli — "
+        "Turkce locale duyarsiz ve false-positive uretir."
+    )
+
+    # 3. Turkce locale lowercase
+    assert "toLocaleLowerCase('tr-TR')" in src, (
+        "Monitor.jsx'te Turkce locale lowercase kullanimi yok — "
+        "'Oğul'/'Üstat' gibi Unicode mesajlar inconsistent eslesebilir."
+    )
+
+    # 4. Uretim type'lari MODULE_TYPE_PREFIX haritasinda olmali
+    # Canli DB'de gorulen: KILL_SWITCH, DRAWDOWN_, TRADE_, SYSTEM_STOP,
+    # DAILY_LOSS_STOP, HYBRID_ (hengine), MANUAL_/MANUEL_, USTAT_
+    required_type_prefixes = [
+        "KILL_SWITCH",
+        "DRAWDOWN_",
+        "TRADE_",
+        "SYSTEM_STOP",
+        "DAILY_LOSS_STOP",
+        "HYBRID_",
+        "MANUAL_",
+        "MANUEL_",
+        "USTAT_",
+    ]
+    for prefix in required_type_prefixes:
+        assert prefix in src, (
+            f"MODULE_TYPE_PREFIX haritasinda '{prefix}' eksik — "
+            f"uretimde gorulen bu event type'i siniflandirilamaz."
+        )
+
+    # 5. Word-boundary regex fallback (ornek: \\bbaba\\b)
+    assert r"\bbaba\b" in src, (
+        "Word-boundary regex fallback kalibi yok — substring parse riski."
+    )
+
+
 # ── Flow 5: Kill-switch L2 _close_ogul_and_hybrid manuel dokunmaz ──
 def test_baba_l2_only_closes_ogul_and_hybrid():
     from engine.baba import Baba
