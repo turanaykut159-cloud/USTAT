@@ -35,11 +35,12 @@ Risk yönetimi (config/default.json risk.* anahtarları):
     Floating loss %1.5 → yeni işlem engeli (max_floating_loss_pct)
     Günlük max otomatik işlem 5  (max_daily_trades)
     Günlük max manuel işlem 10   (max_daily_manual_trades, v5.9.3 BULGU #3)
-    Tek işlem max %2 hard cap    (MAX_RISK_PER_TRADE_HARD)
+    Tek işlem max %2 hard cap    (max_risk_per_trade_hard)
 
-Korelasyon (modül-seviye sabitler):
-    Max 3 aynı yön / Max 2 aynı sektör aynı yön
-    Endeks ağırlık skoru < 0.25
+Korelasyon (risk_params.* — config/default.json):
+    Max 3 aynı yön           (max_same_direction)
+    Max 2 aynı sektör aynı yön (max_same_sector_direction)
+    Endeks ağırlık skoru < 0.25 (max_index_weight_score)
 
 Kill-switch (3 seviye, monotonluk: yalnız yukarı — Anayasa Kural 3):
     L1 — kontrat durdur (anomali)
@@ -148,20 +149,16 @@ BB_PERIOD:   int   = 20
 BB_STD:      float = 2.0
 ATR_LOOKBACK: int  = 100
 
-# ── Çok katmanlı kayıp limit sabitleri ───────────────────────────────
-MAX_WEEKLY_LOSS_PCT:     float = 0.04
-MAX_MONTHLY_LOSS_PCT:    float = 0.07
-HARD_DRAWDOWN_PCT:       float = 0.15    # config: risk.hard_drawdown_pct
-CONSECUTIVE_LOSS_LIMIT:  int   = 3
-COOLDOWN_HOURS:          int   = 4       # config: risk.cooldown_hours
-MAX_FLOATING_LOSS_PCT:   float = 0.015   # config: risk.max_floating_loss_pct
-MAX_DAILY_TRADES:        int   = 5       # config: risk.max_daily_trades
-MAX_RISK_PER_TRADE_HARD: float = 0.02
-
-# ── Korelasyon sabitleri ─────────────────────────────────────────────
-MAX_SAME_DIRECTION:         int   = 3
-MAX_SAME_SECTOR_DIRECTION:  int   = 2
-MAX_INDEX_WEIGHT_SCORE:     float = 0.25
+# ── Risk / korelasyon limitleri ──────────────────────────────────────
+# NOT (v5.9.3 — BULGU #12): Bu alanda eskiden 11 modül-seviye sabit vardı
+#   (MAX_WEEKLY_LOSS_PCT, MAX_MONTHLY_LOSS_PCT, HARD_DRAWDOWN_PCT,
+#    CONSECUTIVE_LOSS_LIMIT, COOLDOWN_HOURS, MAX_FLOATING_LOSS_PCT,
+#    MAX_DAILY_TRADES, MAX_RISK_PER_TRADE_HARD, MAX_SAME_DIRECTION,
+#    MAX_SAME_SECTOR_DIRECTION, MAX_INDEX_WEIGHT_SCORE). Hepsi ölü kod'du
+#   (declaration + 0 kullanım); gerçek değerler config/default.json'dan
+#   ``RiskParams`` dataclass'ına yüklenir ve kod ``risk_params.xxx``
+#   ile kullanır. Config ile desync riskini ortadan kaldırmak için
+#   silindiler. Tek doğru kaynak: ``config/default.json`` + ``engine/models/risk.py``.
 
 # ── Risk hesaplama başlangıç tarihi (varsayılan) ──────────────────
 # Config'den okunur (risk.baseline_date). Bu sabit yalnızca fallback.
