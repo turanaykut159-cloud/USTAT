@@ -27,8 +27,21 @@ const COLORS = {
   cardAlt: '#0d1117',
 };
 
-// Tablo boyutu eşikleri (satır sayısı)
-const TABLE_THRESHOLDS = {
+// ── Widget Denetimi H8/H9: NABIZ eşikleri backend'den akar ─────────
+//
+// Tablo satır eşikleri, özet kart eşikleri ve log dosyası listesi
+// display limiti artık `api/routes/nabiz.py` canonical kaynağından
+// `/api/nabiz.thresholds` alanı üzerinden gelir. Aşağıdaki DEFAULT_*
+// sabitleri sadece fallback'tir — backend erişilemezse veya ilk render
+// sırasında state henüz dolmamışsa sayfa boş görünmez.
+//
+// YENİ KONTRAT EKLEMEK İÇİN: `api/routes/nabiz.py::NABIZ_TABLE_ROW_THRESHOLDS`
+// sözlüğünü güncelle; frontend otomatik senkronize olur (restart sonrası).
+// DEFAULT_TABLE_THRESHOLDS sadece fallback — backend listeyle senkronize
+// tutulmaya ZORUNLU DEĞİL, ama kritik tabloları içermeli ki fallback
+// durumunda renk kodlaması anlamlı kalsın.
+
+const DEFAULT_TABLE_THRESHOLDS = {
   bars:                 { warn: 50000, danger: 150000 },
   trades:               { warn: 5000,  danger: 20000  },
   risk_snapshots:       { warn: 20000, danger: 100000 },
@@ -46,14 +59,31 @@ const TABLE_THRESHOLDS = {
   app_state:            { warn: 50,    danger: 200    },
 };
 
+const DEFAULT_SUMMARY_THRESHOLDS = {
+  database_mb_warn: 500,
+  database_mb_err:  1000,
+  log_mb_warn:      500,
+  log_mb_err:       2000,
+  disk_pct_warn:    80,
+  disk_pct_err:     90,
+};
+
+const DEFAULT_LOG_FILES_DISPLAY_LIMIT = 15;
+
 // ── Yardımcı fonksiyonlar ────────────────────────────────────────
 
-function getRowColor(table, count) {
-  const t = TABLE_THRESHOLDS[table];
+function getRowColor(table, count, tableThresholds) {
+  const t = (tableThresholds || DEFAULT_TABLE_THRESHOLDS)[table];
   if (!t) return COLORS.green;
   if (count >= t.danger) return COLORS.red;
   if (count >= t.warn) return COLORS.yellow;
   return COLORS.green;
+}
+
+function pickSummaryStatus(value, warn, err) {
+  if (value > err) return 'err';
+  if (value > warn) return 'warn';
+  return 'ok';
 }
 
 function formatBytes(mb) {
@@ -112,6 +142,23 @@ export default function Nabiz() {
   const retention = data?.retention || {};
   const conflict = data?.cleanup_conflict || {};
 
+  // Widget Denetimi H8/H9: Thresholds backend canonical kaynaktan (fallback DEFAULT_*)
+  const thresholds = data?.thresholds || {};
+  const tableRowThresholds = thresholds.table_row_thresholds || DEFAULT_TABLE_THRESHOLDS;
+  const summaryThresholds = thresholds.summary || DEFAULT_SUMMARY_THRESHOLDS;
+  const logFilesDisplayLimit = Number.isFinite(thresholds.log_files_display_limit)
+    ? thresholds.log_files_display_limit
+    : DEFAULT_LOG_FILES_DISPLAY_LIMIT;
+
+  const dbSizeMb = db.file_size_mb || 0;
+  const logSizeMb = logs.total_size_mb || 0;
+  const diskPct = disk.usage_pct || 0;
+
+  const dbStatus = pickSummaryStatus(dbSizeMb, summaryThresholds.database_mb_warn, summaryThresholds.database_mb_err);
+  const logStatus = pickSummaryStatus(logSizeMb, summaryThresholds.log_mb_warn, summaryThresholds.log_mb_err);
+  const diskStatus = pickSummaryStatus(diskPct, summaryThresholds.disk_pct_warn, summaryThresholds.disk_pct_err);
+  const diskColor = diskStatus === 'err' ? COLORS.red : diskStatus === 'warn' ? COLORS.yellow : COLORS.cyan;
+
   return (
     <div style={styles.container}>
       {/* ── Başlık ──────────────────────────────────────────────── */}
@@ -135,24 +182,24 @@ export default function Nabiz() {
       <div style={styles.cardRow}>
         <SummaryCard
           label="VERİTABANI"
-          value={formatBytes(db.file_size_mb || 0)}
+          value={formatBytes(dbSizeMb)}
           sub={`WAL: ${formatBytes(db.wal_size_mb || 0)} | ${formatNumber(db.total_rows)} satır`}
           color={COLORS.blue}
-          status={db.file_size_mb > 1000 ? 'err' : db.file_size_mb > 500 ? 'warn' : 'ok'}
+          status={dbStatus}
         />
         <SummaryCard
           label="LOG DOSYALARI"
-          value={formatBytes(logs.total_size_mb || 0)}
+          value={formatBytes(logSizeMb)}
           sub={`${(logs.files || []).length} dosya`}
           color={COLORS.purple}
-          status={logs.total_size_mb > 2000 ? 'err' : logs.total_size_mb > 500 ? 'warn' : 'ok'}
+          status={logStatus}
         />
         <SummaryCard
           label="DİSK ALANI"
           value={`${disk.free_gb || 0} GB`}
-          sub={`%${disk.usage_pct || 0} kullanılıyor | ${disk.total_gb || 0} GB toplam`}
-          color={disk.usage_pct > 90 ? COLORS.red : disk.usage_pct > 80 ? COLORS.yellow : COLORS.cyan}
-          status={disk.usage_pct > 90 ? 'err' : disk.usage_pct > 80 ? 'warn' : 'ok'}
+          sub={`%${diskPct} kullanılıyor | ${disk.total_gb || 0} GB toplam`}
+          color={diskColor}
+          status={diskStatus}
         />
         <SummaryCard
           label="RETENTION"
@@ -172,12 +219,12 @@ export default function Nabiz() {
       <div style={styles.twoCol}>
         {/* Sol: Veritabanı Tabloları */}
         <div style={styles.col}>
-          <TableSizesPanel tables={db.table_sizes || {}} />
+          <TableSizesPanel tables={db.table_sizes || {}} tableRowThresholds={tableRowThresholds} />
         </div>
 
         {/* Sağ: Log + Retention */}
         <div style={styles.col}>
-          <LogFilesPanel logs={logs} />
+          <LogFilesPanel logs={logs} displayLimit={logFilesDisplayLimit} />
           <RetentionConfigPanel retention={retention} />
         </div>
       </div>
@@ -258,7 +305,7 @@ function ConflictWarning({ conflict }) {
 }
 
 
-function TableSizesPanel({ tables }) {
+function TableSizesPanel({ tables, tableRowThresholds }) {
   const sorted = Object.entries(tables).sort((a, b) => b[1] - a[1]);
   return (
     <div style={styles.panel}>
@@ -277,7 +324,7 @@ function TableSizesPanel({ tables }) {
           </thead>
           <tbody>
             {sorted.map(([name, count]) => {
-              const color = getRowColor(name, count);
+              const color = getRowColor(name, count, tableRowThresholds);
               return (
                 <tr key={name} style={styles.tr}>
                   <td style={styles.td}>
@@ -303,7 +350,7 @@ function TableSizesPanel({ tables }) {
 }
 
 
-function LogFilesPanel({ logs }) {
+function LogFilesPanel({ logs, displayLimit = DEFAULT_LOG_FILES_DISPLAY_LIMIT }) {
   const files = logs.files || [];
   return (
     <div style={styles.panel}>
@@ -326,7 +373,7 @@ function LogFilesPanel({ logs }) {
             {files.length === 0 ? (
               <tr><td colSpan={3} style={{ ...styles.td, textAlign: 'center', color: COLORS.dim }}>Log dosyası bulunamadı</td></tr>
             ) : (
-              files.slice(0, 15).map((f) => (
+              files.slice(0, displayLimit).map((f) => (
                 <tr key={f.name} style={styles.tr}>
                   <td style={styles.td}>
                     <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{f.name}</span>

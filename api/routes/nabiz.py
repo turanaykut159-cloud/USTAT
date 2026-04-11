@@ -30,6 +30,75 @@ router = APIRouter()
 _PROJECT_ROOT = Path(os.path.dirname(os.path.abspath(__file__))).parent.parent
 
 
+# ── Widget Denetimi H8: NABIZ esik degerleri tek kaynak (canonical) ──
+#
+# NABIZ sayfasi tablo satir sayilari, ozet kart esikleri ve log dosya
+# listesi limitleri icin esik degerlerine ihtiyac duyuyor. Eskiden bu
+# degerler `desktop/src/components/Nabiz.jsx` icinde hardcoded sabitler
+# (TABLE_THRESHOLDS, inline 500/1000/2000, files.slice(0, 15)) olarak
+# duruyordu. Audit bulgusu H8 (Orta kritiklik): "TABLE_THRESHOLDS (15
+# tablo), SummaryCard esikleri (DB 500/1000 MB, log 2000 MB, disk 80/90%)
+# frontend hardcode" + H9: "files.slice(0,15) — log listesi 15'e kirpiliyor".
+#
+# Kanonik kaynak olarak BU MODUL secildi — config/default.json DEGIL.
+# Neden: Bu esikler UI gosterim politikasi (soft threshold) — motor
+# davranisini etkilemez. Config Kirmizi Bolge oldugu icin her degisiklik
+# cift dogrulama gerektirir; bu esikler UI-only ve UI ekibinin kontrolunde
+# olmali. `api/routes/nabiz.py` Yesil Bolge ve canonical kaynak olmaya
+# uygun. Gelecekte kullanici ozelle&tirmesi istenirse `config.nabiz.*`
+# anahtarlari eklenip bu sabitlerle merge edilebilir (pattern: WATCHED_SYMBOLS).
+#
+# Frontend bu esikleri `/api/nabiz.thresholds` alani uzerinden okur ve
+# fallback olarak kendi DEFAULT_THRESHOLDS kopyasini tutar (backend erisilemezse
+# sayfa bos gorunmesin).
+#
+# Regression koruma: tests/critical_flows/test_static_contracts.py Flow 4u.
+
+NABIZ_TABLE_ROW_THRESHOLDS: dict[str, dict[str, int]] = {
+    "bars":                 {"warn": 50000, "danger": 150000},
+    "trades":               {"warn": 5000,  "danger": 20000},
+    "risk_snapshots":       {"warn": 20000, "danger": 100000},
+    "events":               {"warn": 10000, "danger": 50000},
+    "top5_history":         {"warn": 5000,  "danger": 20000},
+    "notifications":        {"warn": 2000,  "danger": 10000},
+    "daily_risk_summary":   {"warn": 500,   "danger": 2000},
+    "weekly_top5_summary":  {"warn": 500,   "danger": 2000},
+    "config_history":       {"warn": 500,   "danger": 2000},
+    "manual_interventions": {"warn": 200,   "danger": 1000},
+    "hybrid_positions":     {"warn": 500,   "danger": 2000},
+    "hybrid_events":        {"warn": 2000,  "danger": 10000},
+    "strategies":           {"warn": 100,   "danger": 500},
+    "liquidity_classes":    {"warn": 1000,  "danger": 5000},
+    "app_state":            {"warn": 50,    "danger": 200},
+}
+
+NABIZ_SUMMARY_THRESHOLDS: dict[str, float] = {
+    "database_mb_warn": 500.0,
+    "database_mb_err":  1000.0,
+    "log_mb_warn":      500.0,
+    "log_mb_err":       2000.0,
+    "disk_pct_warn":    80.0,
+    "disk_pct_err":     90.0,
+}
+
+NABIZ_LOG_FILES_DISPLAY_LIMIT: int = 15
+
+
+def _build_thresholds_info() -> dict:
+    """Frontend NABIZ bileseni icin esik degerlerini dondur.
+
+    Canonical kaynak modul seviyesindeki NABIZ_* sabitleri. Audit H8/H9:
+    tablo satir esikleri, ozet kart esikleri ve log listesi limiti
+    frontend'de hardcoded iken backend'den tek kaynaktan akitilir.
+    """
+    return {
+        "table_row_thresholds": dict(NABIZ_TABLE_ROW_THRESHOLDS),
+        "summary": dict(NABIZ_SUMMARY_THRESHOLDS),
+        "log_files_display_limit": NABIZ_LOG_FILES_DISPLAY_LIMIT,
+        "source": "api.routes.nabiz",
+    }
+
+
 @router.get("/nabiz")
 async def get_nabiz():
     """NABIZ sistem monitoru verisini dondur."""
@@ -43,6 +112,7 @@ async def get_nabiz():
         "disk": _build_disk_info(),
         "retention": _build_retention_info(engine),
         "cleanup_conflict": _build_cleanup_conflict_info(engine),
+        "thresholds": _build_thresholds_info(),
     }
 
     return result

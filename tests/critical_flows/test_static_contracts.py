@@ -1584,6 +1584,142 @@ def test_risk_response_has_no_dead_graduated_lot_mult():
     )
 
 
+# ── Flow 4u: NABIZ thresholds backend canonical (H8 + H9) ──
+def test_nabiz_thresholds_are_backend_driven():
+    """
+    Widget Denetimi H8 + H9 — NABIZ sayfasi tablo satir esikleri,
+    ozet kart esikleri ve log dosyasi display limiti eskiden
+    `desktop/src/components/Nabiz.jsx` icinde hardcoded sabitlerdi
+    (TABLE_THRESHOLDS dict, inline 500/1000/2000/80/90 magic sayilari,
+    `files.slice(0, 15)` kirpmasi). Artik canonical kaynak
+    `api/routes/nabiz.py::NABIZ_TABLE_ROW_THRESHOLDS` + `NABIZ_SUMMARY_THRESHOLDS`
+    + `NABIZ_LOG_FILES_DISPLAY_LIMIT` modul sabitleridir; `/api/nabiz`
+    response'unda `thresholds` alani uzerinden UI'ya akar. Frontend
+    fallback olarak DEFAULT_* kopyalarini tutar (backend erisilemezse sayfa
+    bos gorunmesin).
+
+    Bu test:
+      (a) api/routes/nabiz.py canonical sabitleri + `_build_thresholds_info`
+          helper + response'ta "thresholds" alani mevcut
+      (b) api/routes/nabiz.py icinde NABIZ_TABLE_ROW_THRESHOLDS en az 10 tablo
+          icerir (regression: birkac tablo silinirse test kirilir)
+      (c) Nabiz.jsx eski `const TABLE_THRESHOLDS` hardcode tanimi YASAK
+          (DEFAULT_TABLE_THRESHOLDS fallback olarak izinli, ama canli tuketim
+          `tableRowThresholds` prop'u uzerinden olmali)
+      (d) Nabiz.jsx `data?.thresholds` tuketimi + `tableRowThresholds`
+          prop zinciri mevcut
+      (e) Nabiz.jsx inline `> 1000 ?`, `> 500 ?`, `> 2000 ?`, `> 90 ?`, `> 80 ?`
+          SummaryCard karar pattern'leri YASAK — `pickSummaryStatus` helper +
+          `summaryThresholds` uzerinden akmali (regression koruma)
+      (f) Nabiz.jsx `files.slice(0, 15)` hardcode kirpma YASAK —
+          `files.slice(0, displayLimit)` kullanimi mevcut
+    """
+    root = Path(__file__).resolve().parent.parent.parent
+    import re as _re_h8
+
+    # (a) Backend canonical + helper + response alani
+    nabiz_route_path = root / "api" / "routes" / "nabiz.py"
+    nabiz_route_src = nabiz_route_path.read_text(encoding="utf-8")
+    assert "NABIZ_TABLE_ROW_THRESHOLDS" in nabiz_route_src, (
+        "api/routes/nabiz.py NABIZ_TABLE_ROW_THRESHOLDS canonical sabiti yok — "
+        "H8 geri ciktiginda frontend hardcode tekrar eder."
+    )
+    assert "NABIZ_SUMMARY_THRESHOLDS" in nabiz_route_src, (
+        "api/routes/nabiz.py NABIZ_SUMMARY_THRESHOLDS canonical sabiti yok."
+    )
+    assert "NABIZ_LOG_FILES_DISPLAY_LIMIT" in nabiz_route_src, (
+        "api/routes/nabiz.py NABIZ_LOG_FILES_DISPLAY_LIMIT canonical sabiti yok."
+    )
+    assert "def _build_thresholds_info" in nabiz_route_src, (
+        "api/routes/nabiz.py _build_thresholds_info helper yok — "
+        "thresholds response alanina nasil aktariliyor?"
+    )
+    assert '"thresholds": _build_thresholds_info()' in nabiz_route_src, (
+        "api/routes/nabiz.py /nabiz response'unda 'thresholds' alani yok — "
+        "frontend DEFAULT_* fallback'lerine dusecek."
+    )
+
+    # (b) Canonical dictte en az 10 tablo
+    # Kayit: NABIZ_TABLE_ROW_THRESHOLDS bloguna bakip key sayisini yaklasik say
+    # (Pythonic parse yerine regex — statik sozlesme testi basit kalmali)
+    dict_match = _re_h8.search(
+        r"NABIZ_TABLE_ROW_THRESHOLDS\s*:\s*dict.*?=\s*\{(.*?)\n\}",
+        nabiz_route_src,
+        _re_h8.DOTALL,
+    )
+    assert dict_match is not None, (
+        "NABIZ_TABLE_ROW_THRESHOLDS dict tanimi parse edilemedi — "
+        "format degistiyse bu testi guncelle."
+    )
+    dict_body = dict_match.group(1)
+    key_count = len(_re_h8.findall(r'^\s*"[a-z_]+"\s*:', dict_body, _re_h8.MULTILINE))
+    assert key_count >= 10, (
+        f"NABIZ_TABLE_ROW_THRESHOLDS sadece {key_count} tablo iceriyor. "
+        "Kritik tablolarin cogu temsil edilmeli (bars, trades, risk_snapshots, "
+        "events, vb.)."
+    )
+
+    # (c-f) Frontend kontrolleri
+    nabiz_jsx_path = root / "desktop" / "src" / "components" / "Nabiz.jsx"
+    nabiz_jsx_src = nabiz_jsx_path.read_text(encoding="utf-8")
+
+    # (c) Eski "const TABLE_THRESHOLDS = {" hardcode yok (DEFAULT_ prefix'li izinli)
+    assert "const TABLE_THRESHOLDS" not in nabiz_jsx_src, (
+        "Nabiz.jsx eski 'const TABLE_THRESHOLDS = {' hardcode geri eklenmis — "
+        "canonical kaynak backend olmali, frontend sadece DEFAULT_TABLE_THRESHOLDS "
+        "fallback'ini tutabilir. (H8 regression)"
+    )
+    assert "DEFAULT_TABLE_THRESHOLDS" in nabiz_jsx_src, (
+        "Nabiz.jsx DEFAULT_TABLE_THRESHOLDS fallback sabiti yok — backend "
+        "erisilemezse sayfa renk kodlamasi calismaz."
+    )
+
+    # (d) data?.thresholds + tableRowThresholds tuketimi
+    assert "data?.thresholds" in nabiz_jsx_src, (
+        "Nabiz.jsx 'data?.thresholds' tuketimi yok — backend'den akan esikler "
+        "okunmuyor."
+    )
+    assert "tableRowThresholds" in nabiz_jsx_src, (
+        "Nabiz.jsx tableRowThresholds prop/variable'i yok — TableSizesPanel "
+        "hala hardcode'a dusuyor olabilir."
+    )
+    assert "getRowColor(name, count, tableRowThresholds)" in nabiz_jsx_src, (
+        "Nabiz.jsx getRowColor cagrisi tableRowThresholds argumanini gecmiyor — "
+        "hardcode kullanilmaya devam ediyor."
+    )
+
+    # (e) Inline > 1000 / > 500 / > 2000 / > 90 / > 80 SummaryCard karar pattern'leri YASAK
+    inline_magic_patterns = [
+        r"file_size_mb\s*>\s*1000",
+        r"total_size_mb\s*>\s*2000",
+        r"usage_pct\s*>\s*90",
+    ]
+    for pat in inline_magic_patterns:
+        assert not _re_h8.search(pat, nabiz_jsx_src), (
+            f"Nabiz.jsx'te inline magic pattern geri eklenmis: {pat}. "
+            "SummaryCard karari pickSummaryStatus + summaryThresholds uzerinden "
+            "akmali (H8 regression)."
+        )
+    assert "pickSummaryStatus" in nabiz_jsx_src, (
+        "Nabiz.jsx pickSummaryStatus helper yok — SummaryCard karari "
+        "hardcode'a geri dusmus olabilir."
+    )
+    assert "summaryThresholds" in nabiz_jsx_src, (
+        "Nabiz.jsx summaryThresholds variable'i yok — backend esik "
+        "degerleri okunmuyor."
+    )
+
+    # (f) files.slice(0, 15) hardcode YASAK — displayLimit prop'u kullanilmali
+    assert "files.slice(0, 15)" not in nabiz_jsx_src, (
+        "Nabiz.jsx hala 'files.slice(0, 15)' hardcode kirpmasi yapiyor — "
+        "backend NABIZ_LOG_FILES_DISPLAY_LIMIT uzerinden akmali. (H9 regression)"
+    )
+    assert "files.slice(0, displayLimit)" in nabiz_jsx_src, (
+        "Nabiz.jsx LogFilesPanel 'files.slice(0, displayLimit)' kullanmiyor — "
+        "log listesi kirpmasi backend'den akmiyor."
+    )
+
+
 # ── Flow 5: Kill-switch L2 _close_ogul_and_hybrid manuel dokunmaz ──
 def test_baba_l2_only_closes_ogul_and_hybrid():
     from engine.baba import Baba
