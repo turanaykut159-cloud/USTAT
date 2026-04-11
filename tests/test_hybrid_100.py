@@ -41,11 +41,12 @@ HYBRID_CONFIG = {
         "daily_loss_limit": 500.0,
         "sl_atr_mult": 2.0,
         "tp_atr_mult": 2.0,
+        # Commit 9020e43 — PRİMNET sabit 1.5 prim trailing, Faz 1/Faz 2 ayrımı kaldırıldı.
+        # HER ZAMAN 1.5 prim sabit trailing, stop > giriş olduğunda kilitli kâr otomatik.
         "primnet": {
-            "faz1_stop_prim": 1.5,
-            "faz2_activation_prim": 2.0,
-            "faz2_trailing_prim": 1.0,
+            "trailing_prim": 1.5,
             "target_prim": 9.5,
+            "step_prim": 0.5,
         },
     }
 }
@@ -390,8 +391,10 @@ class TestPrimCalc:
         assert abs(h._price_to_prim(66.24, REF_PRICE) - (-1.501)) < 0.01
 
     def test_015_prim_to_price(self, engine):
+        """_prim_to_price sonucu VİOP fiyat adımına yuvarlanır (50-100 TRY: 0.05 adım).
+        Ham: 67.25 + 5.0 × 0.6725 = 70.6125 → 0.05 adıma yuvarlı → 70.60."""
         h = engine[0]
-        assert abs(h._prim_to_price(5.0, REF_PRICE) - 70.6125) < 0.01
+        assert abs(h._prim_to_price(5.0, REF_PRICE) - 70.60) < 0.01
 
     def test_016_roundtrip(self, engine):
         h = engine[0]
@@ -499,22 +502,24 @@ class TestFaz1:
         assert sl_after <= sl_best, f"SELL SL geriledi: {sl_best:.4f} → {sl_after:.4f}"
 
     def test_029_faz1_boundary(self, engine):
-        """Tam +1.99 prim — hâlâ Faz 1."""
+        """+1.99 prim — sabit 1.5 trailing + 0.5 step.
+        stop_raw = 1.99 - 1.5 = 0.49; step floor (0.5'e) → 0.0.
+        SL hâlâ başlangıç -1.5'ten iyi (breakeven'a yakın)."""
         _do_transfer(engine, entry_prim=0.0)
         _simulate_price(engine, 1001, new_prim=1.99)
         hp = engine[0].hybrid_positions[1001]
         sl_prim = _prim_at_price(hp.current_sl)
-        expected_sl = 1.99 - 1.5  # Faz 1 mesafe
-        assert abs(sl_prim - expected_sl) < 0.1, f"Faz1 eşik: {sl_prim:.2f} vs {expected_sl:.2f}"
+        assert sl_prim > -1.5, f"SL iyileşmedi: {sl_prim:.2f}"
+        assert sl_prim <= 0.1, f"SL fazla yükseldi (step rounding bozuk): {sl_prim:.2f}"
 
     def test_030_faz1_to_faz2_transition(self, engine):
-        """Faz 1 → Faz 2 geçişi (+2.5 prim — net Faz 2)."""
+        """+2.5 prim — sabit 1.5 trailing sonucu SL ≈ +1.0 (breakeven üstü, kilitli kâr başlangıcı).
+        stop_raw = 2.5 - 1.5 = 1.0; step floor → 1.0."""
         _do_transfer(engine, entry_prim=0.0)
         _simulate_price(engine, 1001, new_prim=2.5)
         hp = engine[0].hybrid_positions[1001]
         sl_prim = _prim_at_price(hp.current_sl)
-        expected_sl = 2.5 - 1.0  # Faz 2 mesafe
-        assert abs(sl_prim - expected_sl) < 0.15, f"Faz2 geçiş: {sl_prim:.2f} vs {expected_sl:.2f}"
+        assert abs(sl_prim - 1.0) < 0.15, f"+2.5 prim SL: {sl_prim:.2f} vs beklenen 1.0"
 
     def test_031_faz1_sl_written_to_mt5(self, engine):
         """Faz1 SL güncellemesi MT5'e yazılır (software modda bile)."""
@@ -543,12 +548,13 @@ class TestFaz1:
 
 class TestFaz2:
     def test_033_buy_faz2_tighter(self, engine):
-        """BUY Faz2 — mesafe 1.0 prim (Faz1'den sıkı)."""
+        """BUY +3.0 prim — sabit 1.5 trailing → SL ≈ +1.5 (kilitli kâr).
+        stop_raw = 3.0 - 1.5 = 1.5; step floor → 1.5."""
         _do_transfer(engine, entry_prim=0.0)
         _simulate_price(engine, 1001, new_prim=3.0)
         hp = engine[0].hybrid_positions[1001]
         sl_prim = _prim_at_price(hp.current_sl)
-        assert abs(sl_prim - 2.0) < 0.1, f"Faz2 SL: {sl_prim:.2f} vs beklenen 2.0"
+        assert abs(sl_prim - 1.5) < 0.1, f"BUY +3.0 SL: {sl_prim:.2f} vs beklenen 1.5"
 
     def test_034_buy_faz2_progressive(self, engine):
         """Faz2 kademeli: +3p → +5p → +8p."""
@@ -563,12 +569,13 @@ class TestFaz2:
         assert expected_sls[2] > expected_sls[1]
 
     def test_035_sell_faz2(self, engine):
-        """SELL Faz2 — aşağı yönde trailing."""
+        """SELL -3.0 prim — sabit 1.5 trailing → SL ≈ -1.5 (kilitli kâr).
+        stop_raw = -3.0 + 1.5 = -1.5; step ceil → -1.5."""
         _do_transfer(engine, direction="SELL", entry_prim=0.0)
         _simulate_price(engine, 1001, new_prim=-3.0)
         hp = engine[0].hybrid_positions[1001]
         sl_prim = _prim_at_price(hp.current_sl)
-        assert abs(sl_prim - (-2.0)) < 0.1, f"SELL Faz2 SL: {sl_prim:.2f}"
+        assert abs(sl_prim - (-1.5)) < 0.1, f"SELL -3.0 SL: {sl_prim:.2f} vs beklenen -1.5"
 
     def test_036_no_faz2_to_faz1_regress(self, engine):
         """Faz2'den Faz1'e geri dönüş yok — SL monotonluk.
@@ -586,20 +593,22 @@ class TestFaz2:
             assert sl_after >= sl_faz2, f"SL geriledi: {sl_faz2:.4f} → {sl_after:.4f}"
 
     def test_037_faz2_locked_profit(self, engine):
-        """Faz2 kilitli kâr: SL=+4p ise 4 prim kilitli."""
+        """+5.0 prim → sabit 1.5 trailing → SL ≈ +3.5 (kilitli kâr).
+        stop_raw = 5.0 - 1.5 = 3.5; step floor → 3.5."""
         _do_transfer(engine, entry_prim=0.0)
         _simulate_price(engine, 1001, new_prim=5.0)
         hp = engine[0].hybrid_positions[1001]
         sl_prim = _prim_at_price(hp.current_sl)
-        assert sl_prim >= 3.9, f"Kilitli kâr yetersiz: SL prim={sl_prim:.2f}"
+        assert sl_prim >= 3.4, f"Kilitli kâr yetersiz: SL prim={sl_prim:.2f} (≥3.4 bekleniyor)"
 
     def test_038_faz2_near_target(self, engine):
-        """Tavana yakın (+9.0p) — SL +8.0p."""
+        """+9.0 prim (tavana yakın) → sabit 1.5 trailing → SL ≈ +7.5.
+        stop_raw = 9.0 - 1.5 = 7.5; step floor → 7.5."""
         _do_transfer(engine, entry_prim=0.0)
         _simulate_price(engine, 1001, new_prim=9.0)
         hp = engine[0].hybrid_positions[1001]
         sl_prim = _prim_at_price(hp.current_sl)
-        assert sl_prim >= 7.9, f"Tavan yakını SL: {sl_prim:.2f}"
+        assert sl_prim >= 7.4, f"Tavan yakını SL: {sl_prim:.2f} (≥7.4 bekleniyor)"
 
     def test_039_faz2_mt5_native_sl(self, engine):
         """Faz2 SL MT5'e yazılır."""
@@ -630,13 +639,14 @@ class TestFaz2:
         h._verify_mt5_sl.assert_called()
 
     def test_042_faz2_big_jump(self, engine):
-        """Tek cycle'da büyük sıçrama: +2p → +8p."""
+        """Tek cycle'da büyük sıçrama: +2p → +8p.
+        Sabit 1.5 trailing → SL ≈ +6.5 (step floor)."""
         _do_transfer(engine, entry_prim=0.0)
         _simulate_price(engine, 1001, new_prim=2.0)
         _simulate_price(engine, 1001, new_prim=8.0)
         hp = engine[0].hybrid_positions[1001]
         sl_prim = _prim_at_price(hp.current_sl)
-        assert sl_prim >= 6.9, f"Büyük sıçrama SL: {sl_prim:.2f}"
+        assert sl_prim >= 6.4, f"Büyük sıçrama SL: {sl_prim:.2f} (≥6.4 bekleniyor)"
 
 
 # ═══════════════════════════════════════════════════════════════════
