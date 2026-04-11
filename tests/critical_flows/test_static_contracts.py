@@ -1455,6 +1455,65 @@ def test_manual_trade_lot_limits_from_config():
     )
 
 
+# ── Flow 4s: Monitor L1/L2/L3 yaklasik gostergesi (H15) ──
+def test_monitor_kill_switch_levels_are_disclosed_as_approximate():
+    """
+    Widget Denetimi H15 — BABA kill-switch L1/L2/L3 tetikleyicileri
+    event-driven (anomali, gunluk kayip, hard drawdown vb). Monitor.jsx
+    bu seviyeleri limDaily * (0.5, 0.75, 1.0) illustratif carpanlariyla
+    gosterir. Kullanici gercek esik sanmasin diye UI'de "~YAKLASIK"
+    disclosure badge + her ksLevel karti icinde "~%pct" prefix + tooltip
+    zorunludur.
+
+    Bu test Monitor.jsx'te:
+      (a) KS_LEVEL_PCT_FRACTIONS sabiti dokumante edilmis
+      (b) Render header'inda "~YAKLASIK" string'i
+      (c) Her ksLevel kartinda "~%{pct}" prefix
+      (d) Tooltip (title) icinde "YAKLASIK gorselestirme" / "gercek esik degil"
+          benzeri aciklama
+    oldugunu dogrular.
+    """
+    root = Path(__file__).resolve().parent.parent.parent
+    monitor_path = root / "desktop" / "src" / "components" / "Monitor.jsx"
+    assert monitor_path.exists(), f"Monitor.jsx bulunamadi: {monitor_path}"
+    monitor_src = monitor_path.read_text(encoding="utf-8")
+
+    # (a) KS_LEVEL_PCT_FRACTIONS sabiti var
+    assert "KS_LEVEL_PCT_FRACTIONS" in monitor_src, (
+        "Monitor.jsx KS_LEVEL_PCT_FRACTIONS dokumante sabiti yok — "
+        "0.5/0.75/1.0 carpanlari hala inline hardcode (H15)."
+    )
+    # Carpanlarin sabit uzerinden okundugunu dogrula
+    assert "KS_LEVEL_PCT_FRACTIONS.L1" in monitor_src, (
+        "ksLevels L1 yuzdesi KS_LEVEL_PCT_FRACTIONS.L1 uzerinden okunmuyor"
+    )
+    assert "KS_LEVEL_PCT_FRACTIONS.L2" in monitor_src, (
+        "ksLevels L2 yuzdesi KS_LEVEL_PCT_FRACTIONS.L2 uzerinden okunmuyor"
+    )
+    assert "KS_LEVEL_PCT_FRACTIONS.L3" in monitor_src, (
+        "ksLevels L3 yuzdesi KS_LEVEL_PCT_FRACTIONS.L3 uzerinden okunmuyor"
+    )
+
+    # (b) Render header'inda "~YAKLASIK" disclosure badge var (Turkce I)
+    assert "~YAKLAŞIK" in monitor_src, (
+        "Monitor.jsx RISK & KILL-SWITCH header'inda '~YAKLASIK' disclosure "
+        "badge yok — kullanici gercek esik saniyor (H15)."
+    )
+
+    # (c) ksLevel kartinda "~%{pct}" prefix
+    assert "~%{pct}" in monitor_src, (
+        "Monitor.jsx ksLevel pct render'inda '~%{pct}' prefix yok — "
+        "yuzdelerin yaklasik oldugu kullaniciya belirtilmemis (H15)."
+    )
+
+    # (d) Tooltip icinde gercek esik olmadigi aciklamasi
+    #     Cesitli yazim: "gercek esik degil" / "gercek esigi degil" / "DEGIL"
+    assert "gerçek eşik" in monitor_src or "gerçek eşiği" in monitor_src, (
+        "Monitor.jsx ksLevel tooltip'inde 'gercek esik(i) degil' aciklamasi "
+        "yok — yaklasik notu tam anlamli degil (H15)."
+    )
+
+
 # ── Flow 5: Kill-switch L2 _close_ogul_and_hybrid manuel dokunmaz ──
 def test_baba_l2_only_closes_ogul_and_hybrid():
     from engine.baba import Baba

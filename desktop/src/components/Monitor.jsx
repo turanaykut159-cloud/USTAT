@@ -393,11 +393,19 @@ export default function Monitor() {
   const floatingLimit = (risk?.equity || 1) * (risk?.max_floating_loss || 0.015);
   const floatingPct = floatingLimit > 0 ? Math.min(Math.abs(floatingPnl) / floatingLimit * 100, 100) : 0;
 
-  // Kill-switch level thresholds (yaklaşık hesaplama)
+  // ── Kill-switch seviye göstergesi (Widget Denetimi H15) ──────
+  // BABA'nın gerçek L1/L2/L3 kill-switch tetikleyicileri event-driven:
+  //   L1: anomali / kontrat engeli (scalar eşik YOK — haber, anomali)
+  //   L2: günlük-aylık kayıp limiti, 3 ardışık kayıp, OLAY rejimi
+  //   L3: hard drawdown ≥%15, flash crash, felaket kapanış
+  // Aşağıdaki yüzdeler kullanıcıya YAKLAŞIK görselleştirme sunar —
+  // BABA'daki gerçek eşik değil. Gerçek değerler Risk Yönetimi sayfasında.
+  // KS_LEVEL_PCT_FRACTIONS: görsel doluluk için illüstratif payda.
+  const KS_LEVEL_PCT_FRACTIONS = { L1: 0.5, L2: 0.75, L3: 1.0 };
   const ksLevels = [
-    { lvl: 'L1', label: 'UYARI', pct: (limDaily * 0.5).toFixed(1) },
-    { lvl: 'L2', label: 'DURDUR', pct: (limDaily * 0.75).toFixed(1) },
-    { lvl: 'L3', label: 'KRİTİK', pct: limDaily.toFixed(1) },
+    { lvl: 'L1', label: 'UYARI',  pct: (limDaily * KS_LEVEL_PCT_FRACTIONS.L1).toFixed(1) },
+    { lvl: 'L2', label: 'DURDUR', pct: (limDaily * KS_LEVEL_PCT_FRACTIONS.L2).toFixed(1) },
+    { lvl: 'L3', label: 'KRİTİK', pct: (limDaily * KS_LEVEL_PCT_FRACTIONS.L3).toFixed(1) },
   ];
 
   // ═════════════════════════════════════════════════════════════
@@ -871,9 +879,24 @@ export default function Monitor() {
 
         {/* ── [E3] RISK & KILL-SWITCH ─────────────────────────── */}
         <div style={{ background: '#0d1220', border: '1px solid #1a2540', borderRadius: 10, padding: '14px 14px 10px' }}>
-          <div style={{ fontSize: 8, letterSpacing: 3, color: '#a0bcd4', marginBottom: 10 }}>RİSK & KİLL-SWİTCH</div>
+          <div style={{ fontSize: 8, letterSpacing: 3, color: '#a0bcd4', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span>RİSK & KİLL-SWİTCH</span>
+            <span
+              title={
+                "BABA'nın gerçek L1/L2/L3 kill-switch tetikleyicileri event-driven:\n" +
+                "L1 — anomali / haber / kontrat engeli (scalar eşik yok)\n" +
+                "L2 — günlük/aylık kayıp limiti, 3 ardışık kayıp, OLAY rejimi\n" +
+                "L3 — hard drawdown ≥%15, flash crash\n\n" +
+                "Aşağıdaki yüzdeler YAKLAŞIK görselleştirme — BABA'daki gerçek eşik DEĞİL. " +
+                "Gerçek değerler için Risk Yönetimi sayfasına bakın (H15)."
+              }
+              style={{ fontSize: 7, padding: '1px 5px', background: '#1a2540', borderRadius: 3, color: '#c8dae8', letterSpacing: 1, cursor: 'help' }}
+            >
+              ~YAKLAŞIK
+            </span>
+          </div>
 
-          {/* Kill-switch seviyeleri */}
+          {/* Kill-switch seviyeleri (Widget Denetimi H15 — ~ prefix yaklaşık görselleştirmeyi belirtir) */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
             {ksLevels.map(({ lvl, label, pct }) => {
               const lvlNum = parseInt(lvl.slice(1));
@@ -887,10 +910,11 @@ export default function Monitor() {
                     border: `1px solid ${active ? '#e74c3c' : '#1a2540'}`,
                     borderRadius: 6, padding: '8px 6px', textAlign: 'center',
                   }}
+                  title="Yaklaşık görselleştirme — BABA'nın gerçek eşiği değil (H15)"
                 >
                   <div style={{ fontSize: 16, fontWeight: 'bold', color: active ? '#e74c3c' : '#5a7a9a', marginBottom: 2 }}>{lvl}</div>
                   <div style={{ fontSize: 7, color: '#c8dae8', letterSpacing: 1 }}>{label}</div>
-                  <div style={{ fontSize: 8, color: '#a0bcd4', marginTop: 2 }}>%{pct}</div>
+                  <div style={{ fontSize: 8, color: '#a0bcd4', marginTop: 2 }}>~%{pct}</div>
                 </div>
               );
             })}
