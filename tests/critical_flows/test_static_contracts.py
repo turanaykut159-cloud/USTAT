@@ -410,3 +410,69 @@ def test_ustat_to_baba_notification_chain_intact():
         "Baba._process_ustat_notifications gevdesi kuyrugu artik okumuyor. "
         "BULGU #7 zinciri ic mantik kirilmis."
     )
+
+
+# ── Flow 17: USTAT->BABA RISK_MISS feedback chain (BULGU #8) ────
+def test_ustat_to_baba_risk_miss_chain_intact():
+    """USTAT->BABA RISK_MISS feedback consumer zinciri sag mi?
+
+    BULGU #8 (v5.9.3): receive_feedback() audit'te "never called" diye
+    isaretlendi ama gercekte canli bir conditional consumer. Tetikledigi
+    aksiyonlar gercek ve kritik:
+      - 24h ayni sembolde 3+ miss -> L1 kill-switch o sembol icin
+      - 24h toplam 5+ miss        -> floating_loss esigini %10 sikilastir
+
+    Bu zincir kirilirsa BABA, USTAT'in RISK_MISS tespitlerine cevap veremez
+    ve sembol bazli L1 koruma + floating_loss tightening sessizce kaybolur.
+    """
+    from engine.baba import Baba
+    from engine.ustat import Ustat
+
+    # 1. Producer: ustat.py icinde baba.receive_feedback(attribution) cagrisi
+    ustat_src = (ROOT / "engine" / "ustat.py").read_text(encoding="utf-8")
+    assert "baba.receive_feedback(attribution)" in ustat_src, (
+        "engine/ustat.py'da 'baba.receive_feedback(attribution)' producer "
+        "satiri bulunamadi. BULGU #8 zincirinin producer ucu kirilmis."
+    )
+
+    # 1b. Producer'in cevreledigi kosul: responsible == BABA
+    assert 'attribution.get("responsible") == "BABA"' in ustat_src, (
+        "engine/ustat.py producer kosul kontrolu kaybolmus. BULGU #8 "
+        "zincirinin attribution filtresi kirilmis."
+    )
+
+    # 1c. _determine_fault hala BABA responsibility uretebiliyor
+    df_src = inspect.getsource(Ustat._determine_fault)
+    assert '"responsible": "BABA"' in df_src or "'responsible': 'BABA'" in df_src, (
+        "Ustat._determine_fault artik BABA responsibility uretmiyor. "
+        "BULGU #8 zincirinin atama mantigi kirilmis — receive_feedback "
+        "asla cagrilmaz hale geldi."
+    )
+
+    # 2. Consumer: baba.receive_feedback fonksiyon tanimi var
+    baba_src = (ROOT / "engine" / "baba.py").read_text(encoding="utf-8")
+    assert "def receive_feedback" in baba_src, (
+        "engine/baba.py'da 'def receive_feedback' tanimi bulunamadi. "
+        "BULGU #8 zincirinin consumer ucu silinmis."
+    )
+
+    # 2b. Consumer ic mantigi: kill-switch + floating_loss aksiyonlari
+    rf_src = inspect.getsource(Baba.receive_feedback)
+    assert "_risk_miss_log" in rf_src, (
+        "receive_feedback _risk_miss_log sayacini artik tutmuyor."
+    )
+    assert "_activate_kill_switch" in rf_src or "kill_switch" in rf_src.lower(), (
+        "receive_feedback artik kill-switch tetiklemiyor. BULGU #8 zinciri "
+        "ic aksiyon kaybolmus — sembol bazli L1 koruma yok."
+    )
+    assert "max_floating_loss" in rf_src, (
+        "receive_feedback artik floating_loss esigini sikilastirmiyor. "
+        "BULGU #8 ikinci aksiyonu kaybolmus."
+    )
+
+    # 3. Caller chain: ustat.run_cycle -> _check_error_attribution
+    rc_src = inspect.getsource(Ustat.run_cycle)
+    assert "_check_error_attribution" in rc_src, (
+        "Ustat.run_cycle artik _check_error_attribution cagirmiyor — "
+        "BULGU #8 zincirinin trigger'i kaybolmus."
+    )

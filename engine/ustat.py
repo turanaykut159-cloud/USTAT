@@ -415,6 +415,14 @@ class Ustat:
             attribution = self._determine_fault(trade, risk_events)
             if attribution:
                 # BABA geri bildirim döngüsü: RISK_MISS ise BABA'ya bildir
+                # NOT (v5.9.3 — BULGU #8): Bu satır CANLI feedback chain'in
+                # producer'ıdır. baba.receive_feedback() (engine/baba.py:2061)
+                # consumer; aşağıdaki gerçek aksiyonları tetikler:
+                #   - 24h aynı sembol 3+ miss → L1 kill-switch o sembol için
+                #   - 24h toplam 5+ miss → floating_loss %10 sıkılaştırılır
+                # Audit "never called" SANABILIR — değil. SİLMEYİN. Statik
+                # koruma: tests/critical_flows/test_static_contracts.py
+                # ::test_ustat_to_baba_risk_miss_chain_intact
                 if attribution.get("responsible") == "BABA" and baba is not None:
                     try:
                         if hasattr(baba, "receive_feedback"):

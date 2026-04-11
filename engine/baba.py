@@ -2061,10 +2061,37 @@ class Baba:
     def receive_feedback(self, attribution: dict) -> None:
         """ÜSTAT'tan hata atama geri bildirimi al ve eşik bazlı aksiyon al.
 
-        RISK_MISS atandığında ÜSTAT bu metodu çağırır.
-        BABA gelen bilgiyi loglar, sayacı günceller ve eşiklere göre aksiyon alır:
-          - Aynı sembolde 3+ miss (24 saat) → L1 sembol durdur (1 gün)
-          - Toplam 5+ miss (24 saat) → floating_loss eşiğini %10 sıkılaştır (geçici)
+        NOT (v5.9.3 — BULGU #8): Bu fonksiyon "defined but never called" GİBİ
+        görünebilir ama DEĞİLDİR. ÜSTAT→BABA RISK_MISS feedback consumer'ıdır.
+        Tetik zinciri:
+
+            1. Her cycle ``ustat.run_cycle`` ``_check_error_attribution(baba,
+               ogul, now)`` çağırır (ustat.py:193).
+            2. Son 24 saatteki zararlı işlemler DB'den çekilir.
+            3. Her zararlı işlem için ``_determine_fault(trade, risk_events)``
+               çalışır → işlem süresince RISK_LIMIT/KILL_SWITCH/DRAWDOWN_WARNING
+               vb event tespit edilir VE exit_reason güvenli kapanış değilse
+               ``{"responsible": "BABA", "error_type": "RISK_MISS", ...}`` döner.
+            4. ``ustat.py:418-422``: ``if attribution["responsible"] == "BABA":
+               baba.receive_feedback(attribution)``.
+            5. Bu fonksiyon çağrılır → ``_risk_miss_log`` + sayaç güncellenir,
+               DB'ye ``BABA_FEEDBACK`` event yazılır, ve aşağıdaki aksiyonlar
+               koşullu olarak tetiklenir.
+
+        Tetikletilen GERÇEK aksiyonlar (test edilmeyen ama kritik):
+          - 24 saat içinde aynı sembolde 3+ miss → ``_activate_kill_switch``
+            ``level=1`` o sembol için (L1 sembol durdur).
+          - 24 saat içinde toplam 5+ miss → ``rp.max_floating_loss`` %10
+            sıkılaştırılır (``_ustat_floating_tightened`` bayrağı bir kez).
+
+        Statik koruma: ``tests/critical_flows/test_static_contracts.py
+        ::test_ustat_to_baba_risk_miss_chain_intact`` — producer call site +
+        consumer fonksiyon tanımı + iç aksiyon kalıplarını assert eder.
+
+        Tetik koşullu ve nadirdir (zararlı işlem + risk event eşleşmesi
+        gerekir) ama BABA'nın ÜSTAT analizine tepki verme tek mekanizmasıdır.
+        SİLMEYİN — silinirse BABA, ÜSTAT'ın `RISK_MISS` tespitlerine cevap
+        veremez ve sembol bazlı L1 koruma + floating_loss tightening kaybolur.
 
         Args:
             attribution: Hata atama dict'i (trade_id, error_type, symbol vb).
