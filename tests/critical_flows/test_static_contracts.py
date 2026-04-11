@@ -1780,6 +1780,59 @@ def test_settings_light_theme_disabled():
     )
 
 
+# ── Flow 4w: TopBar regime dead field removal (Widget Denetimi H18) ─
+def test_topbar_no_dead_regime_initial_state():
+    """TopBar.jsx initial state'inde `regime` alani bulunmamali.
+
+    H18: TopBar.jsx render'inda `status.regime` hicbir yerde okunmuyor —
+    initial state'te `regime: 'TREND'` yaniltici bir default idi. Dead
+    field removal sonrasi regression koruma:
+        (a) `regime: 'TREND'` initial state literal'i YASAK
+        (b) `regime:` initial state alan tanimi YASAK (baska default ile
+            geri gelmesini de engelle)
+        (c) `status.regime` consumption YASAK (ileride render'da
+            kullanilacaksa ayri bir state olarak eklenmeli)
+        (d) `Widget Denetimi H18` marker mevcut (canonical atif)
+    """
+    topbar_jsx = ROOT / "desktop" / "src" / "components" / "TopBar.jsx"
+    assert topbar_jsx.exists(), "desktop/src/components/TopBar.jsx yok."
+    src = topbar_jsx.read_text(encoding="utf-8")
+
+    # (a) Eski literal YASAK
+    assert "regime: 'TREND'" not in src, (
+        "TopBar.jsx initial state'inde 'regime: TREND' yaniltici default "
+        "geri gelmis — H18 dead field regression."
+    )
+
+    # (b) useState icinde `regime:` alan tanimi YASAK
+    # useState blok yakalayici (parantez ici bolgeyi hedefle)
+    usestate_block = re.search(
+        r"useState\s*\(\s*\{([^}]*)\}", src, re.DOTALL
+    )
+    assert usestate_block, (
+        "TopBar.jsx icinde useState({...}) initial state blogu bulunamadi — "
+        "dosya yapisi degismis olabilir."
+    )
+    initial_state = usestate_block.group(1)
+    assert not re.search(r"\bregime\s*:", initial_state), (
+        "TopBar.jsx useState initial state'inde `regime:` alani var — "
+        "dead field H18 regression, alan tamamen kaldirilmali."
+    )
+
+    # (c) status.regime consumption YASAK
+    assert "status.regime" not in src, (
+        "TopBar.jsx icinde `status.regime` consumption var — H18 sonrasi "
+        "bu alan kaldirildi, ileride gerekirse ayri bir state eklenmeli."
+    )
+
+    # (d) H18 marker mevcut
+    assert "Widget Denetimi H18" in src, (
+        "TopBar.jsx icinde 'Widget Denetimi H18' marker yok — canonical "
+        "atif kaybolmus, refactor sirasinda dead field kaldirildigi "
+        "bilgisi silinmis olabilir."
+    )
+
+
 # ── Flow 5: Kill-switch L2 _close_ogul_and_hybrid manuel dokunmaz ──
 def test_baba_l2_only_closes_ogul_and_hybrid():
     from engine.baba import Baba

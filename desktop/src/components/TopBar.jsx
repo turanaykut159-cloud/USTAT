@@ -20,10 +20,19 @@ const PHASE_LABELS = {
 
 export default function TopBar() {
   // ── State ──────────────────────────────────────────────────────
+  //
+  // Widget Denetimi H18: Eski initial state'te piyasa rejimi alanı
+  // yanıltıcı bir default değer ile taşınıyordu ama TopBar render'ında
+  // bu alan HİÇBİR yerde okunmuyordu — backend status response'u
+  // setStatus ile geldiğinde dahi UI'de görünmüyordu. Dashboard.jsx ve
+  // AutoTrading.jsx kendi bağımsız status state'lerini tutuyor (React'ta
+  // TopBar'daki state onlara prop drill olmuyor), bu yüzden alanı
+  // kaldırmak başka bir bileşeni bozmaz. Dead field removal: gelecekte
+  // piyasa rejimi TopBar'da gerçekten gösterilmek istenirse ayrı bir
+  // state eklenir ve loading state'i için em-dash placeholder kullanılır.
   const [status, setStatus] = useState({
     engine_running: false,
     mt5_connected: false,
-    regime: 'TREND',
     phase: 'stopped',
     kill_switch_level: 0,
   });
