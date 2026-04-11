@@ -13,12 +13,15 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { checkManualTrade, executeManualTrade, getTrades, getManualRiskScores, getPositions, closePosition } from '../services/api';
+import { checkManualTrade, executeManualTrade, getTrades, getManualRiskScores, getPositions, closePosition, getWatchlistSymbols } from '../services/api';
 import { formatMoney, formatPrice, pnlClass, elapsed } from '../utils/formatters';
 
-// ── 15 VİOP Kontratı ────────────────────────────────────────────
-
-const SYMBOLS = [
+// ── 15 VİOP Kontratı — Fallback (Widget Denetimi A-H3) ──────────
+// Canonical kaynak backend engine/mt5_bridge.py::WATCHED_SYMBOLS —
+// /api/settings/watchlist endpoint'inden okunur. Aşağıdaki dizi
+// yalnız ilk render ve hata fallback'i olarak kullanılır; yeni kontrat
+// eklenmesi tek yerde (WATCHED_SYMBOLS) yapılır, UI otomatik senkronize olur.
+const DEFAULT_SYMBOLS = [
   'F_THYAO', 'F_AKBNK', 'F_ASELS', 'F_TCELL', 'F_HALKB',
   'F_PGSUS', 'F_GUBRF', 'F_EKGYO', 'F_SOKM', 'F_TKFEN',
   'F_OYAKC', 'F_BRSAN', 'F_AKSEN', 'F_ASTOR', 'F_KONTR',
@@ -55,6 +58,11 @@ export default function ManualTrade() {
   const [activePositions, setActivePositions] = useState([]);
   const [closingTicket, setClosingTicket] = useState(null);
 
+  // ── İzlenen VİOP kontratları (Widget Denetimi A-H3) ──────────
+  // /api/settings/watchlist → engine/mt5_bridge.py::WATCHED_SYMBOLS.
+  // İlk render DEFAULT_SYMBOLS ile; mount'ta backend fetch ile override.
+  const [watchlist, setWatchlist] = useState(DEFAULT_SYMBOLS);
+
   // Son manuel işlemleri çek
   const fetchRecentTrades = useCallback(async () => {
     const res = await getTrades({ strategy: 'manual', limit: 10 });
@@ -90,6 +98,28 @@ export default function ManualTrade() {
     const iv = setInterval(() => { fetchRecentTrades(); fetchRiskScores(); fetchActivePositions(); }, 10000);
     return () => clearInterval(iv);
   }, [fetchRecentTrades, fetchRiskScores, fetchActivePositions]);
+
+  // A-H3: Mount'ta watchlist'i backend'den al — engine/mt5_bridge.py::WATCHED_SYMBOLS.
+  // Hardcode SYMBOLS drift riskini ortadan kaldırır (tek kaynak).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await getWatchlistSymbols();
+        if (!cancelled && Array.isArray(resp?.symbols) && resp.symbols.length > 0) {
+          setWatchlist(resp.symbols);
+          // Dropdown'un seçili değeri yeni listede yoksa ilk öğeye çek.
+          if (!resp.symbols.includes(symbol)) {
+            setSymbol(resp.symbols[0]);
+          }
+        }
+      } catch {
+        // Hata durumunda DEFAULT_SYMBOLS state'te zaten mevcut.
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Kontrol Et ───────────────────────────────────────────────
   const handleCheck = useCallback(async () => {
@@ -174,7 +204,8 @@ export default function ManualTrade() {
               onChange={handleSymbolChange}
               disabled={phase !== 'select'}
             >
-              {SYMBOLS.map((s) => (
+              {/* A-H3: Dinamik watchlist — backend WATCHED_SYMBOLS canonical kaynak. */}
+              {watchlist.map((s) => (
                 <option key={s} value={s}>{s}</option>
               ))}
             </select>

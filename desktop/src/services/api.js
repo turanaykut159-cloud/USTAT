@@ -249,6 +249,29 @@ export async function getUiPrefs() {
   }
 }
 
+// ── Settings — Watchlist (Widget Denetimi A-H3) ──────────────────
+// Backend engine/mt5_bridge.py::WATCHED_SYMBOLS canonical listesinden
+// izlenen VİOP kontratlarını oku. Hardcode SYMBOLS dizisi drift riskini
+// ortadan kaldırır — yeni kontrat eklendiğinde tek yerden (bridge)
+// güncelleme yapılır. Hata durumunda 15 VİOP kontratı fallback devrede,
+// ManualTrade dropdown'u asla boş gösterilmez.
+export async function getWatchlistSymbols() {
+  try {
+    const { data } = await client.get('/settings/watchlist');
+    return data;
+  } catch (err) {
+    console.error('[ÜSTAT API] getWatchlistSymbols:', err?.message ?? err);
+    return {
+      symbols: [
+        'F_THYAO', 'F_AKBNK', 'F_ASELS', 'F_TCELL', 'F_HALKB',
+        'F_PGSUS', 'F_GUBRF', 'F_EKGYO', 'F_SOKM', 'F_TKFEN',
+        'F_OYAKC', 'F_BRSAN', 'F_AKSEN', 'F_ASTOR', 'F_KONTR',
+      ],
+      source: 'error',
+    };
+  }
+}
+
 // ── Performance ──────────────────────────────────────────────────
 
 export async function getPerformance(days = 30) {

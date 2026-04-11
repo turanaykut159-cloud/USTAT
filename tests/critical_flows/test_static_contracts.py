@@ -1207,6 +1207,125 @@ def test_version_single_source_of_truth():
     )
 
 
+# ── Flow 4q: ManualTrade watchlist tek kaynak mt5_bridge.WATCHED_SYMBOLS (A-H3) ──
+def test_manual_trade_watchlist_single_source():
+    """Widget Denetimi A-H3: ManualTrade.jsx eskiden 15 VIOP kontratini
+    kendi hardcode SYMBOLS dizisinde tutuyordu. Backend WATCHED_SYMBOLS
+    listesi (engine/mt5_bridge.py) degistiginde dropdown sessizce
+    senkronsuz kaliyordu. Artik canonical kaynak
+    engine/mt5_bridge.py::WATCHED_SYMBOLS ve /api/settings/watchlist
+    endpoint'i uzerinden ManualTrade dropdown'una akiyor.
+
+    6 asamali zincir kontrolu:
+      (a) engine/mt5_bridge.py::WATCHED_SYMBOLS var + list[str] + >=10 sembol
+      (b) api/schemas.py::WatchlistResponse sinifi var + symbols alani
+      (c) api/routes/settings.py _read_watchlist_symbols helper +
+          /settings/watchlist route + WATCHED_SYMBOLS import
+      (d) services/api.js::getWatchlistSymbols export var + /settings/watchlist
+          endpoint cagrisi + fallback objesinde symbols alani
+      (e) ManualTrade.jsx eski `const SYMBOLS = [` hardcode YASAK +
+          getWatchlistSymbols import + watchlist state + setWatchlist setter
+      (f) ManualTrade.jsx JSX'te dropdown watchlist state'inden map ediyor
+          (SYMBOLS.map degil) + useEffect mount'ta fetch ediyor.
+    """
+    import re as _re
+    from pathlib import Path
+    repo_root = Path(__file__).resolve().parents[2]
+
+    # (a) engine/mt5_bridge.py::WATCHED_SYMBOLS
+    bridge_src = (repo_root / "engine" / "mt5_bridge.py").read_text(encoding="utf-8")
+    assert "WATCHED_SYMBOLS: list[str] = [" in bridge_src, (
+        "engine/mt5_bridge.py::WATCHED_SYMBOLS list[str] tanimi yok — "
+        "A-H3 canonical kaynak kaldirilmis."
+    )
+    # Parantez icindeki semboller >=10 tane olmali (mevcut 15)
+    match = _re.search(
+        r'WATCHED_SYMBOLS: list\[str\] = \[(.*?)\]',
+        bridge_src,
+        _re.DOTALL,
+    )
+    assert match, "WATCHED_SYMBOLS liste govdesi parse edilemedi"
+    body = match.group(1)
+    symbol_count = len(_re.findall(r'"F_[A-Z]+"', body))
+    assert symbol_count >= 10, (
+        f"WATCHED_SYMBOLS sayisi {symbol_count} — en az 10 VIOP kontrati bekleniyor"
+    )
+
+    # (b) api/schemas.py::WatchlistResponse
+    schemas_src = (repo_root / "api" / "schemas.py").read_text(encoding="utf-8")
+    assert "class WatchlistResponse" in schemas_src, (
+        "api/schemas.py::WatchlistResponse sinifi yok — "
+        "/settings/watchlist endpoint'i response_model'siz kalir."
+    )
+    assert "symbols: list[str]" in schemas_src, (
+        "WatchlistResponse.symbols: list[str] alani yok"
+    )
+
+    # (c) api/routes/settings.py helper + route + WATCHED_SYMBOLS import
+    settings_src = (repo_root / "api" / "routes" / "settings.py").read_text(
+        encoding="utf-8"
+    )
+    assert "def _read_watchlist_symbols" in settings_src, (
+        "api/routes/settings.py _read_watchlist_symbols helper yok"
+    )
+    assert "from engine.mt5_bridge import WATCHED_SYMBOLS" in settings_src, (
+        "_read_watchlist_symbols WATCHED_SYMBOLS import etmiyor — "
+        "canonical kaynak bridge disindan okunuyor olabilir"
+    )
+    assert '@router.get("/settings/watchlist"' in settings_src, (
+        "/settings/watchlist route kaydi yok"
+    )
+    assert "WatchlistResponse" in settings_src, (
+        "settings.py WatchlistResponse import/kullanimi yok"
+    )
+
+    # (d) services/api.js::getWatchlistSymbols
+    api_src = (repo_root / "desktop" / "src" / "services" / "api.js").read_text(
+        encoding="utf-8"
+    )
+    assert "export async function getWatchlistSymbols" in api_src, (
+        "services/api.js getWatchlistSymbols export yok"
+    )
+    get_wl_match = _re.search(
+        r"export async function getWatchlistSymbols\(\).*?^\}",
+        api_src,
+        _re.DOTALL | _re.MULTILINE,
+    )
+    assert get_wl_match, "getWatchlistSymbols govdesi parse edilemedi"
+    wl_body = get_wl_match.group(0)
+    assert "/settings/watchlist" in wl_body, (
+        "getWatchlistSymbols /settings/watchlist endpoint'ini cagirmiyor"
+    )
+    assert "symbols:" in wl_body, (
+        "getWatchlistSymbols fallback objesinde 'symbols' alani yok — "
+        "backend erisilemezse ManualTrade dropdown'u bos gorunur"
+    )
+
+    # (e) ManualTrade.jsx hardcode kaldirildi + state + import
+    manual_src = (repo_root / "desktop" / "src" / "components" / "ManualTrade.jsx").read_text(
+        encoding="utf-8"
+    )
+    assert "const SYMBOLS = [" not in manual_src, (
+        "ManualTrade.jsx 'const SYMBOLS = [' hardcode hala mevcut — "
+        "A-H3 fix geri alinmis (drift riski)"
+    )
+    assert "getWatchlistSymbols" in manual_src, (
+        "ManualTrade.jsx getWatchlistSymbols import/kullanimi yok"
+    )
+    assert "const [watchlist, setWatchlist]" in manual_src, (
+        "ManualTrade.jsx watchlist state'i yok"
+    )
+
+    # (f) JSX dropdown watchlist state'inden map + mount fetch
+    assert "watchlist.map" in manual_src, (
+        "ManualTrade.jsx dropdown watchlist.map kullanmiyor — "
+        "muhtemelen hardcode SYMBOLS.map geri dondu"
+    )
+    assert "SYMBOLS.map" not in manual_src, (
+        "ManualTrade.jsx hala SYMBOLS.map kullaniyor — state dropdown'a baglanmamis"
+    )
+
+
 # ── Flow 5: Kill-switch L2 _close_ogul_and_hybrid manuel dokunmaz ──
 def test_baba_l2_only_closes_ogul_and_hybrid():
     from engine.baba import Baba

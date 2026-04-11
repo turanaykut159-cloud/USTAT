@@ -801,6 +801,24 @@ class UiPrefsResponse(BaseModel):
     source: str = "config"  # config | default | error
 
 
+class WatchlistResponse(BaseModel):
+    """GET /api/settings/watchlist — İzlenen 15 VİOP kontratı (Widget Denetimi A-H3).
+
+    Backend `engine/mt5_bridge.py::WATCHED_SYMBOLS` listesinin frontend'e görünümü.
+    Frontend ManualTrade dropdown'u bu endpoint'ten okur ve hardcoded SYMBOLS
+    dizisi drift oluşmasını engeller. Liste yeni bir kontrat eklendiğinde
+    (örn. F_YENI) Yalnızca `WATCHED_SYMBOLS`'da değişir — UI otomatik senkronize
+    olur.
+
+    symbols: WATCHED_SYMBOLS (base isim, örn. "F_THYAO"). MT5'teki gerçek ada
+             (F_THYAO1224) eşleme mt5_bridge._resolve_symbol() tarafından yapılır.
+    source: 'bridge' — engine/mt5_bridge.py::WATCHED_SYMBOLS canonical kaynak;
+            'default' — engine yoksa veya import başarısız olursa fallback.
+    """
+    symbols: list[str] = []
+    source: str = "bridge"  # bridge | default | error
+
+
 class StatsBaselineResponse(BaseModel):
     """GET /api/settings/stats-baseline — İstatistik taban tarihleri (Widget Denetimi A7).
 

@@ -24,6 +24,7 @@ from api.schemas import (
     SessionHoursResponse,
     StatsBaselineResponse,
     UiPrefsResponse,
+    WatchlistResponse,
 )
 
 # v6.0 — Widget Denetimi A17: BIST VİOP seans saatleri (fallback).
@@ -56,6 +57,16 @@ DEFAULT_NOTIFICATION_PREFS: dict = {
 DEFAULT_UI_PREFS: dict = {
     "kill_hold_ms": 2000,
 }
+
+# v6.0 — Widget Denetimi A-H3: İzlenen 15 VİOP kontratı fallback listesi.
+# Canonical kaynak engine/mt5_bridge.py::WATCHED_SYMBOLS; import başarısız
+# olursa bu fallback devreye girer. ManualTrade dropdown'u senkron kalır.
+# Yeni kontrat eklendiğinde tek yerde (WATCHED_SYMBOLS) değişir — UI otomatik.
+DEFAULT_WATCHLIST_SYMBOLS: list[str] = [
+    "F_THYAO", "F_AKBNK", "F_ASELS", "F_TCELL", "F_HALKB",
+    "F_PGSUS", "F_GUBRF", "F_EKGYO", "F_SOKM",  "F_TKFEN",
+    "F_OYAKC", "F_BRSAN", "F_AKSEN", "F_ASTOR", "F_KONTR",
+]
 
 logger = logging.getLogger("ustat.api.routes.settings")
 
@@ -267,6 +278,48 @@ def _read_ui_prefs_from_config() -> tuple[dict, str]:
     if isinstance(raw, int) and not isinstance(raw, bool) and 500 <= raw <= 10000:
         merged["kill_hold_ms"] = raw
     return merged, "config"
+
+
+def _read_watchlist_symbols() -> tuple[list[str], str]:
+    """engine/mt5_bridge.py::WATCHED_SYMBOLS listesini oku.
+
+    Widget Denetimi A-H3. Canonical kaynak `engine/mt5_bridge.WATCHED_SYMBOLS` —
+    ManualTrade dropdown'u hardcode SYMBOLS yerine bu endpoint'ten okur, böylece
+    yeni kontrat eklendiğinde tek yerden güncelleme yapılır (backend + UI senkron).
+
+    Import başarısız olur veya liste boş/yanlış tipte gelirse DEFAULT_WATCHLIST_SYMBOLS
+    devreye girer — UI dropdown'u asla boş gösterilmez.
+
+    Returns (symbols_list, source) — source: 'bridge' | 'default' | 'error'.
+    """
+    try:
+        from engine.mt5_bridge import WATCHED_SYMBOLS as BRIDGE_SYMBOLS  # type: ignore
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("WATCHED_SYMBOLS import failed: %s", exc)
+        return list(DEFAULT_WATCHLIST_SYMBOLS), "error"
+
+    if not isinstance(BRIDGE_SYMBOLS, list) or not BRIDGE_SYMBOLS:
+        return list(DEFAULT_WATCHLIST_SYMBOLS), "default"
+
+    # Tüm elemanların string olduğunu doğrula — karışık tipler sessizce default'a düşer.
+    cleaned = [s for s in BRIDGE_SYMBOLS if isinstance(s, str) and s.strip()]
+    if not cleaned:
+        return list(DEFAULT_WATCHLIST_SYMBOLS), "default"
+
+    return cleaned, "bridge"
+
+
+@router.get("/settings/watchlist", response_model=WatchlistResponse)
+async def get_watchlist():
+    """İzlenen VİOP kontratları listesini döndür (Widget Denetimi A-H3).
+
+    Frontend ManualTrade dropdown'u hardcoded SYMBOLS yerine bu endpoint'ten
+    okur. Canonical kaynak `engine/mt5_bridge.py::WATCHED_SYMBOLS`. Yeni kontrat
+    eklendiğinde tek yerden (WATCHED_SYMBOLS) güncelleme yapılır; backend +
+    frontend otomatik senkron kalır, drift imkansızlaşır.
+    """
+    symbols, source = _read_watchlist_symbols()
+    return WatchlistResponse(symbols=symbols, source=source)
 
 
 @router.get("/settings/ui-prefs", response_model=UiPrefsResponse)
