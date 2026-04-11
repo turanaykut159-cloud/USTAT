@@ -142,6 +142,16 @@ function buildLadder(pos, cfg) {
     stepSet.add(currentRounded);
   }
 
+  // 6. Güncel stop fiyatının (canlı SL) dinamik satırı
+  const hasValidSl = pos.current_sl && pos.current_sl > 0 && !isNaN(slPrim);
+  const slRounded = Math.round(slPrim * 10) / 10;
+  const isSlOnFixedStep = hasValidSl
+    ? [...stepSet].some(s => Math.abs(s - slPrim) < 0.08)
+    : true;
+  if (hasValidSl && !isSlOnFixedStep && slRounded >= -10 && slRounded <= 10) {
+    stepSet.add(slRounded);
+  }
+
   const steps = [...stepSet].filter(v => v >= -10 && v <= 10).sort((a, b) => b - a);
 
   const rows = [];
@@ -164,6 +174,11 @@ function buildLadder(pos, cfg) {
     // Güncel fiyat satırı: dinamik eklendiyse sadece o, yoksa en yakın kademe
     const isDynamicRow = !isOnFixedStep && prim === currentRounded;
     const isCurrent = isDynamicRow || (isOnFixedStep && Math.abs(prim - currentPrim) < 0.08);
+    // Güncel stop satırı (CANLI SL konumu — trailing ile hareket eder)
+    const isDynamicSlRow = hasValidSl && !isSlOnFixedStep && prim === slRounded;
+    const isCurrentStop = hasValidSl && (
+      isDynamicSlRow || (isSlOnFixedStep && Math.abs(prim - slPrim) < 0.08)
+    );
     // Hedef satırı
     const isTarget = Math.abs(prim - tpPrim) < 0.25;
 
@@ -234,7 +249,7 @@ function buildLadder(pos, cfg) {
 
     rows.push({
       prim, price, pnlTL, status, statusClass, fazLabel,
-      lockedTL, stopLevel, isEntry, isCurrent, isStop, isTarget,
+      lockedTL, stopLevel, isEntry, isCurrent, isStop, isCurrentStop, isTarget,
     });
   }
 
@@ -397,7 +412,8 @@ export default function PrimnetDetail({ position, primnetConfig, onClose }) {
                   const isCurrent = r.isCurrent;
                   let rowCls = `pn-row pn-row--${r.statusClass || 'neutral'}`;
                   if (isCurrent) rowCls += ' pn-row--current pn-pulse';
-                  if (r.isEntry && !isCurrent) rowCls += ' pn-row--entry-mark';
+                  if (r.isCurrentStop && !isCurrent) rowCls += ' pn-row--current-stop pn-pulse-red';
+                  if (r.isEntry && !isCurrent && !r.isCurrentStop) rowCls += ' pn-row--entry-mark';
 
                   const explanation = buildExplanation(r, data, cfg);
 
