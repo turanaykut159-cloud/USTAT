@@ -1587,7 +1587,14 @@ class Ustat:
                 severity="WARNING",
             )
             # ── BABA'ya bildir: bildirim kuyruğuna yaz ──
-            # BABA kendi cycle'ında bu kuyruğu okuyarak farkındalık kazanır.
+            # NOT (v5.9.3 — BULGU #7): BABA kendi cycle'ında bu kuyruğu
+            # _process_ustat_notifications() ile okur, loglar ve DB'ye
+            # USTAT_NOTIFICATION event'i olarak persist eder. İki motor
+            # da main.py __init__'te aynı RiskParams instance'ını paylaşır
+            # (baba._risk_params_ref + ustat._risk_params). Bu satırı
+            # "dead code" sanıp silmeyin — statik koruma:
+            # tests/critical_flows/test_static_contracts.py
+            # ::test_ustat_to_baba_notification_chain_intact
             if hasattr(rp, "ustat_notifications"):
                 rp.ustat_notifications.append(
                     f"[ÜSTAT→BABA] Parametre ayarlaması: {changes}"

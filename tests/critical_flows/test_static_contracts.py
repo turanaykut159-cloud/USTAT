@@ -350,3 +350,63 @@ def test_start_ustat_handles_electron_exit_42():
     assert "_find_orphan_electrons" in body or "ProcessGuard" in body, (
         "run_webview_process'ta orphan Electron sweep marker'i bulunamadi"
     )
+
+
+# ── Flow 16: USTAT->BABA notification chain (BULGU #7) ──────────
+def test_ustat_to_baba_notification_chain_intact():
+    """USTAT->BABA feedback loop'unun uc baglanti noktasi sag mi?
+
+    BULGU #7 (v5.9.3): _process_ustat_notifications "dead code" gibi gorunur
+    ama gercekte canli bir conditional consumer. Audit/refactor sirasinda
+    silinmemesi icin uc nokta statik kontrol edilir:
+
+      1. producer  : engine/ustat.py  rp.ustat_notifications.append(...)
+      2. wire      : engine/main.py   baba._risk_params_ref = risk_params
+                                      ustat._risk_params = risk_params
+      3. consumer  : engine/baba.py   _process_ustat_notifications fonksiyonu
+                                      VE run_cycle icinden cagrilmasi
+
+    Eger bu uc noktadan biri kaybolursa, USTAT'in BABA'ya yaptigi parametre
+    ayarlamasi bildirimi sessizce kaybolur, audit-trail bozulur. Bu test
+    pre-commit hook'ta calisir ve kirik zincirde commit'i bloklar.
+    """
+    # 1. Producer: ustat.py rp.ustat_notifications.append(...) yaz
+    ustat_src = (ROOT / "engine" / "ustat.py").read_text(encoding="utf-8")
+    assert "ustat_notifications.append" in ustat_src, (
+        "engine/ustat.py'da 'ustat_notifications.append(...)' producer "
+        "satiri bulunamadi. BULGU #7 zincirinin producer ucu kirilmis."
+    )
+
+    # 2. Wire: main.py iki tarafa da risk_params referansini ver
+    main_src = (ROOT / "engine" / "main.py").read_text(encoding="utf-8")
+    assert "baba._risk_params_ref" in main_src and "= self.risk_params" in main_src, (
+        "engine/main.py'da 'self.baba._risk_params_ref = self.risk_params' "
+        "wire satiri bulunamadi. BULGU #7 zincirinin baba wire ucu kirilmis."
+    )
+    assert "ustat._risk_params" in main_src, (
+        "engine/main.py'da 'self.ustat._risk_params = self.risk_params' "
+        "wire satiri bulunamadi. BULGU #7 zincirinin ustat wire ucu kirilmis."
+    )
+
+    # 3. Consumer: baba.py _process_ustat_notifications fonksiyonu var
+    baba_src = (ROOT / "engine" / "baba.py").read_text(encoding="utf-8")
+    assert "def _process_ustat_notifications" in baba_src, (
+        "engine/baba.py'da '_process_ustat_notifications' fonksiyon tanimi "
+        "bulunamadi. BULGU #7 zincirinin consumer ucu silinmis."
+    )
+
+    # 3b. Consumer cagri: run_cycle bu fonksiyonu cagiriyor
+    from engine.baba import Baba
+    cycle_src = inspect.getsource(Baba.run_cycle)
+    assert "_process_ustat_notifications" in cycle_src, (
+        "Baba.run_cycle icinde '_process_ustat_notifications()' cagrisi "
+        "bulunamadi. BULGU #7 consumer cagrisi kaybolmus — bildirimler "
+        "asla okunmayacak."
+    )
+
+    # 3c. Consumer fonksiyonu hala notifications kuyrugunu okuyor
+    consumer_src = inspect.getsource(Baba._process_ustat_notifications)
+    assert "ustat_notifications" in consumer_src, (
+        "Baba._process_ustat_notifications gevdesi kuyrugu artik okumuyor. "
+        "BULGU #7 zinciri ic mantik kirilmis."
+    )

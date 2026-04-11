@@ -423,8 +423,15 @@ class Baba:
         self._cycle_count += 1
 
         # ── ÜSTAT bildirimlerini oku ve logla ────────────────────
-        # ÜSTAT risk parametrelerini değiştirdiğinde ustat_notifications
-        # kuyruğuna yazar. BABA burada bilgilendirilir.
+        # NOT (v5.9.3 — BULGU #7): Bu CANLI feedback loop consumer'ıdır.
+        # Producer: engine/ustat.py _apply_baba_feedback() — günlük rapor
+        # zamanında (~18:00) BABA risk parametrelerini ayarladıktan sonra
+        # rp.ustat_notifications kuyruğuna yazar. Wire: engine/main.py
+        # __init__ "self.baba._risk_params_ref = self.risk_params" satırı.
+        # Bu üç noktayı SİLMEYİN — koşullu/nadiren çalışan ama gerçek
+        # audit-trail. Statik koruma:
+        # tests/critical_flows/test_static_contracts.py
+        # ::test_ustat_to_baba_notification_chain_intact
         self._process_ustat_notifications()
 
         if pipeline:
@@ -531,10 +538,34 @@ class Baba:
     def _process_ustat_notifications(self) -> None:
         """ÜSTAT'ın risk parametre ayarlamalarını oku ve logla.
 
-        ÜSTAT parametreleri değiştirdiğinde RiskParams.ustat_notifications
-        kuyruğuna mesaj yazar. BABA burada bu mesajları okur, loglar ve
-        kuyruğu temizler. Böylece BABA, ÜSTAT'ın yaptığı değişikliklerden
-        haberdar olur ve loglarına yansıtır.
+        NOT (v5.9.3 — BULGU #7): Bu fonksiyon "dead code" GİBİ görünür ama
+        DEĞİLDİR. ÜSTAT→BABA feedback loop consumer'ıdır. Tetik zinciri:
+
+            1. Günde 1 kez (~18:00) ``ustat.run_cycle`` ``_should_daily_report``
+               True döner → ``_generate_regulation_suggestions`` çağrılır.
+            2. ``_apply_regulation_feedback`` çağrılır (eğer overall win-rate
+               > %60 ise hiçbir şey yapmadan döner — "iyi gideni bozma").
+            3. ``_apply_baba_feedback`` çağrılır → BABA hatası ≥2 / floating
+               loss / low-score koşullarından biri varsa ``rp.max_daily_loss``,
+               ``rp.max_floating_loss``, ``rp.cooldown_hours`` mutate edilir.
+            4. ``ustat.py`` producer ``rp.ustat_notifications.append(...)``
+               çağırarak BABA'ya bildirim yazar.
+            5. Bir sonraki ``baba.run_cycle()`` bu fonksiyonu çağırır,
+               kuyruğu okur, console + DB ``USTAT_NOTIFICATION`` event'i
+               olarak persist eder, kuyruğu boşaltır.
+
+        Wire (main.py __init__): ``self.baba._risk_params_ref = risk_params``
+        + ``self.ustat._risk_params = risk_params`` — iki motor da AYNI
+        ``RiskParams`` instance'ını paylaşır, bu yüzden kuyruk ortaktır.
+
+        Statik koruma: ``tests/critical_flows/test_static_contracts.py
+        ::test_ustat_to_baba_notification_chain_intact`` — bu üç noktanın
+        (producer / wire / consumer) varlığını assert eder. Refactor sırasında
+        zincir bozulursa pre-commit hook commit'i bloklar.
+
+        Tetik nadirdir (günde max 1 kere ve sadece kötü performans varsa)
+        ama dokümantasyon trail'i bozulursa BABA, ÜSTAT'ın yaptığı parametre
+        değişikliklerini sessizce kaybeder. SİLMEYİN.
         """
         # risk_params referansını bul (self'te olmayabilir, main.py'de tutulur)
         # BABA check_risk_limits'e risk_params parametre olarak alır,
