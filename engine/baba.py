@@ -45,6 +45,27 @@ Kill-switch (3 seviye, monotonluk: yalnız yukarı — Anayasa Kural 3):
     L1 — kontrat durdur (anomali)
     L2 — sistem pause (risk limiti, 3 kayıp, OLAY) — _close_ogul_and_hybrid
     L3 — tam kapanış (manuel + onay, DD %10+, flash crash) — _close_all_positions
+
+NOT (v5.9.3 — BULGU #10): Zaman damgaları ve karşılaştırmalar.
+    Tüm ``datetime.now()`` çağrıları sistem yerel saatini (NAIVE) kullanır.
+    VİOP TR (Avrupa/İstanbul) saatinde çalışır; sistem saatinin TRT
+    (UTC+3) ile eşleşmesi işletim sorumluluğudur. Kod tabanı içsel olarak
+    tutarlıdır: ``database.py _now()``, ``_start_cooldown``, ``_is_in_cooldown``,
+    günlük/haftalık/aylık baseline ve cooldown read-back hep naive datetime
+    ile çalışır — naive vs aware karşılaştırma bug'ı YOKTUR. ``mt5_bridge``
+    pozisyon ``time`` alanını sadece string gösterimi için ``timezone.utc``
+    ile çevirir; karar mantığında kullanılmaz.
+
+    Bilinen sınırlama (kabul edilmiş, eylem gerektirmez): Türkiye 2016'dan
+    beri sabit UTC+3 kullanır ve DST uygulamaz, dolayısıyla cooldown ve
+    period reset'lerinde DST atlaması senaryosu geçerli değildir. Sistem
+    saati başka bir TZ'ye ayarlanırsa (geliştirme ortamı vs.) baseline
+    saatleri yerel-saat olarak kayar; canlı üretim makinesinde tek doğru
+    kaynak Windows TZ ayarıdır.
+
+    Bu not, audit BULGU #10 (datetime tz) sonucu eklendi. Mini-audit
+    kanıtlı bir naive/aware karşılaştırma bug'ı bulamadı; pure C0
+    dokümantasyon olarak implicit varsayım açıklandı.
 """
 
 from __future__ import annotations
