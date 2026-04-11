@@ -147,6 +147,9 @@ export async function getRisk() {
     return {
       daily_pnl: 0, can_trade: true, kill_switch_level: 0,
       regime: 'TREND', risk_multiplier: 1, open_positions: 0,
+      // A18: hata durumunda bile max_open_positions güvenli fallback değeri (5).
+      // Dashboard rozetinin "n / X" formatı hiçbir koşulda kırılmaz.
+      max_open_positions: 5,
     };
   }
 }

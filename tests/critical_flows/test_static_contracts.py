@@ -1024,6 +1024,93 @@ def test_sidenav_kill_hold_ms_from_config():
     )
 
 
+# ── Flow 4o: Dashboard max_open_positions config'den okunur (A18 / H2) ──
+def test_dashboard_max_open_positions_from_config():
+    """Widget Denetimi A18 (H2): Dashboard "Acik Pozisyonlar" rozeti eskiden
+    "n / 5" seklinde hardcode'du. Artik config/default.json::risk.max_open_positions
+    zinciri uzerinden /api/risk endpoint'i araciligiyla dinamik okunmalidir.
+    Hardcode geri eklenemez; backend zinciri kopmamali.
+
+    5 asamali zincir kontrolu:
+      (a) config/default.json::risk.max_open_positions var + pozitif int
+      (b) api/schemas.py::RiskResponse.max_open_positions alani mevcut
+      (c) api/routes/risk.py resp.max_open_positions atamasi yapiyor
+      (d) services/api.js::getRisk fallback'inde max_open_positions yer aliyor
+      (e) Dashboard.jsx eski '} / 5' hardcode'u YOK + getRisk import + riskState
+          state + riskState?.max_open_positions ifadesi mevcut
+    """
+    import json
+    from pathlib import Path
+    repo_root = Path(__file__).resolve().parents[2]
+
+    # (a) config
+    config_path = repo_root / "config" / "default.json"
+    with open(config_path, "r", encoding="utf-8") as f:
+        cfg = json.load(f)
+    assert "risk" in cfg, "config/default.json::risk bloku yok"
+    assert "max_open_positions" in cfg["risk"], (
+        "risk.max_open_positions ayari yok"
+    )
+    val = cfg["risk"]["max_open_positions"]
+    assert isinstance(val, int) and val > 0, (
+        f"risk.max_open_positions gecersiz deger: {val} (pozitif int bekleniyor)"
+    )
+
+    # (b) schema
+    from api.schemas import RiskResponse
+    assert hasattr(RiskResponse, "model_fields"), "RiskResponse Pydantic BaseModel degil"
+    assert "max_open_positions" in RiskResponse.model_fields, (
+        "RiskResponse.max_open_positions alani yok"
+    )
+
+    # (c) route
+    risk_src = (repo_root / "api" / "routes" / "risk.py").read_text(encoding="utf-8")
+    assert "resp.max_open_positions" in risk_src, (
+        "api/routes/risk.py resp.max_open_positions atamasi yapmiyor"
+    )
+
+    # (d) services/api.js — getRisk fallback max_open_positions iceriyor mu?
+    api_src = (repo_root / "desktop" / "src" / "services" / "api.js").read_text(
+        encoding="utf-8"
+    )
+    assert "export async function getRisk" in api_src, (
+        "services/api.js getRisk export'u yok"
+    )
+    # getRisk fonksiyonunda max_open_positions fallback degeri olmali
+    import re as _re
+    get_risk_match = _re.search(
+        r"export async function getRisk\(\).*?^\}",
+        api_src,
+        _re.DOTALL | _re.MULTILINE,
+    )
+    assert get_risk_match, "getRisk fonksiyon govdesi bulunamadi"
+    assert "max_open_positions" in get_risk_match.group(0), (
+        "services/api.js getRisk fallback objesi max_open_positions icermiyor"
+    )
+
+    # (e) Dashboard.jsx — hardcode kaldirildi + import + state + kullanim
+    dash_src = (repo_root / "desktop" / "src" / "components" / "Dashboard.jsx").read_text(
+        encoding="utf-8"
+    )
+    # Eski hardcode pattern'i: "{(livePositions || []).length} / 5" — regresyon korumasi
+    assert "|| []).length} / 5\n" not in dash_src, (
+        "Dashboard.jsx '} / 5' hardcode pattern'i hala mevcut — A18 fix geri alinmis"
+    )
+    assert "getRisk" in dash_src, (
+        "Dashboard.jsx getRisk import/kullanimi yok"
+    )
+    assert "riskState" in dash_src, (
+        "Dashboard.jsx riskState state'i yok"
+    )
+    assert "setRiskState" in dash_src, (
+        "Dashboard.jsx setRiskState setter'i yok"
+    )
+    assert "riskState?.max_open_positions" in dash_src, (
+        "Dashboard.jsx riskState?.max_open_positions ifadesi yok — "
+        "rozet hala eski hardcode'a bagli olabilir"
+    )
+
+
 # ── Flow 5: Kill-switch L2 _close_ogul_and_hybrid manuel dokunmaz ──
 def test_baba_l2_only_closes_ogul_and_hybrid():
     from engine.baba import Baba

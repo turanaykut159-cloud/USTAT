@@ -32,6 +32,7 @@ import {
   getAccount, getPositions, closePosition, connectLiveWS,
   getHybridStatus, checkHybridTransfer, transferToHybrid,
   getNewsActive, getNotifications, markNotificationRead, markAllNotificationsRead,
+  getRisk,
 } from '../services/api';
 import { formatMoney, formatPrice, pnlClass, elapsed } from '../utils/formatters';
 import ConfirmModal from './ConfirmModal';
@@ -105,6 +106,11 @@ export default function Dashboard() {
     _dashCache?.account ?? { balance: 0, equity: 0, margin: 0, free_margin: 0, floating_pnl: 0 },
   );
   const [livePositions, setLivePositions] = useState(_dashCache?.livePositions ?? []);
+  // v6.0 — Widget Denetimi A18 / H2: max_open_positions artık config'den okunur.
+  // Dashboard pozisyon rozetinde "n / X" formatında — eski hardcode "/5" yerine.
+  // Backend zinciri: config/default.json::risk.max_open_positions → /api/risk (RiskResponse)
+  // → getRisk() → riskState state → JSX render. Fallback 5 geriye dönük uyumluluk için.
+  const [riskState, setRiskState] = useState(_dashCache?.riskState ?? null);
   // İlk kez açılıyorsa loading göster, daha önce yüklendiyse gösterme
   const [initialLoading, setInitialLoading] = useState(!_dashLoaded);
   const [closingTicket, setClosingTicket] = useState(null);
@@ -241,7 +247,7 @@ export default function Dashboard() {
   // ── Durum/Pozisyon veri çekme (REST fallback, 30sn) ────────────
   const fetchAll = useCallback(async () => {
     try {
-      const [s, p, t, st, acc, pos, hybrid] = await Promise.all([
+      const [s, p, t, st, acc, pos, hybrid, rk] = await Promise.all([
         getTradeStats(),
         getPerformance(30),
         getTrades({ limit: 5 }),
@@ -249,6 +255,7 @@ export default function Dashboard() {
         getAccount(),
         getPositions(),
         getHybridStatus(),
+        getRisk(), // A18: max_open_positions için config zincirinden oku
       ]);
       setStats(s);
       setPerf(p);
@@ -256,6 +263,7 @@ export default function Dashboard() {
       setStatus(st);
       setAccount(acc);
       setLivePositions(pos.positions || []);
+      setRiskState(rk || null);
       const tickets = (hybrid.positions || []).map((hp) => hp.ticket).filter(Boolean);
       setHybridTickets(new Set(tickets));
       setHybridPositions(hybrid.positions || []);
@@ -285,6 +293,7 @@ export default function Dashboard() {
         stats: s, perf: p, recentTrades: t.trades || [],
         status: st, account: acc, livePositions: pos.positions || [],
         hybridTickets: new Set(tickets),
+        riskState: rk || null, // A18: max_open_positions cache'i
       };
       _dashLoaded = true;
     } catch (err) {
@@ -668,7 +677,8 @@ export default function Dashboard() {
             <h3>Açık Pozisyonlar</h3>
             <div className="dash-card-header-right">
               <span className="dash-card-badge">
-                {(livePositions || []).length} / 5
+                {/* A18: "/5" eski hardcode'u, artık riskState.max_open_positions (config zinciri). */}
+                {(livePositions || []).length} / {riskState?.max_open_positions ?? 5}
               </span>
               {account.margin > 0 && (
                 <span className={`dash-margin-badge ${marginPct > 80 ? 'danger' : marginPct > 50 ? 'warn' : ''}`}>
