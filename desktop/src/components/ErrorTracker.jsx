@@ -30,33 +30,22 @@ import {
   getErrorSummary, getErrorGroups, getErrorTrends,
   resolveError, resolveAllErrors, getSession,
 } from '../services/api';
+// Widget Denetimi H7: Kategori/severity renkleri, etiketleri ve filtre
+// seçenekleri frontend canonical modülüne (errorTaxonomy.js) taşındı.
+// Eski yerel CATEGORY_COLORS / SEVERITY_COLORS / SEVERITY_LABELS dict'leri
+// ve filter option literal'leri bu bileşenden kaldırıldı; backend
+// engine/error_tracker.py ERROR_CATEGORIES + SEVERITY_PRIORITY ile sync
+// Flow 4z (tests/critical_flows/test_static_contracts.py) ile CI'da garanti.
+import {
+  CATEGORY_COLORS,
+  SEVERITY_COLORS,
+  SEVERITY_LABELS,
+  CATEGORY_FILTER_OPTIONS,
+  SEVERITY_FILTER_OPTIONS,
+} from '../utils/errorTaxonomy';
 
 // ── Sabitler ──
 const POLL_INTERVAL = 15_000; // 15sn
-
-const CATEGORY_COLORS = {
-  bağlantı: '#3b82f6',
-  emir: '#f59e0b',
-  risk: '#ef4444',
-  sinyal: '#8b5cf6',
-  netting: '#ec4899',
-  veri: '#06b6d4',
-  sistem: '#6b7280',
-  diğer: '#9ca3af',
-};
-
-const SEVERITY_COLORS = {
-  CRITICAL: '#ef4444',
-  ERROR: '#f97316',
-  WARNING: '#eab308',
-  INFO: '#3b82f6',
-};
-
-const SEVERITY_LABELS = {
-  CRITICAL: 'KRİTİK',
-  ERROR: 'HATA',
-  WARNING: 'UYARI',
-};
 
 // ── EOD Sabitleri — Widget Denetimi A17 ──
 // Bu değerler FALLBACK; gerçek saatler /api/settings/session üzerinden
@@ -403,25 +392,13 @@ export default function ErrorTracker() {
           value={filterCategory}
           onChange={setFilterCategory}
           placeholder="Tüm Kategoriler"
-          options={[
-            { value: 'bağlantı', label: 'Bağlantı' },
-            { value: 'emir', label: 'Emir' },
-            { value: 'risk', label: 'Risk' },
-            { value: 'sinyal', label: 'Sinyal' },
-            { value: 'netting', label: 'Netting' },
-            { value: 'veri', label: 'Veri' },
-            { value: 'sistem', label: 'Sistem' },
-          ]}
+          options={CATEGORY_FILTER_OPTIONS}
         />
         <FilterSelect
           value={filterSeverity}
           onChange={setFilterSeverity}
           placeholder="Tüm Seviyeler"
-          options={[
-            { value: 'CRITICAL', label: 'Kritik' },
-            { value: 'ERROR', label: 'Hata' },
-            { value: 'WARNING', label: 'Uyarı' },
-          ]}
+          options={SEVERITY_FILTER_OPTIONS}
         />
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#94a3b8', cursor: 'pointer' }}>
           <input

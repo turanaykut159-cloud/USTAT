@@ -1950,6 +1950,139 @@ def test_win_rate_breakeven_canonical_source():
     )
 
 
+# ── Flow 4z: Hata Takip taxonomy backend sync (Widget Denetimi H7) ──
+def test_error_taxonomy_backend_sync():
+    """Frontend errorTaxonomy.js backend ERROR_CATEGORIES + SEVERITY ile sync.
+
+    H7: ErrorTracker.jsx icinde CATEGORY_COLORS, SEVERITY_COLORS,
+    SEVERITY_LABELS ve filtre option literal'leri ayri ayri hardcode
+    ediliyordu. Backend `engine/error_tracker.py` ERROR_CATEGORIES dict
+    veya SEVERITY_PRIORITY dict degistirilirse frontend sessizce kopardi
+    (drift). Artik canonical kaynak `desktop/src/utils/errorTaxonomy.js`
+    ve bu test backend ile sync'i CI'da garanti eder.
+
+    Regression koruma:
+        (a) errorTaxonomy.js dosyasi mevcut olmali ve gerekli export'lar
+            tanimli olmali (CATEGORY_COLORS, SEVERITY_COLORS,
+            SEVERITY_LABELS, CATEGORY_FILTER_OPTIONS, SEVERITY_FILTER_OPTIONS).
+        (b) Backend `engine/error_tracker.py` ERROR_CATEGORIES dict'inden
+            cikarilan unique kategori seti ile errorTaxonomy.js
+            CATEGORY_COLORS keys seti EXACT match olmali — backend yeni
+            kategori eklerse veya kaldirirsa bu test FAIL eder.
+        (c) Backend SEVERITY_PRIORITY dict keys'i frontend SEVERITY_COLORS
+            keys'inin uzerkumesi olmali (frontend INFO/DEBUG opsiyonel
+            gosterse de gostermese de drift olmamali).
+        (d) ErrorTracker.jsx artik yerel CATEGORY_COLORS / SEVERITY_COLORS /
+            SEVERITY_LABELS const tanimi ICERMEMELI (regression engelle).
+        (e) ErrorTracker.jsx errorTaxonomy.js'den import yapiyor olmali.
+        (f) `Widget Denetimi H7` marker yorumu errorTaxonomy.js'te mevcut.
+    """
+    # ── (a) Canonical modul + export'lar ──
+    tax_js = ROOT / "desktop" / "src" / "utils" / "errorTaxonomy.js"
+    assert tax_js.exists(), (
+        "desktop/src/utils/errorTaxonomy.js yok — H7 canonical modul kaldirilmis."
+    )
+    tax_src = tax_js.read_text(encoding="utf-8")
+    for export_name in (
+        "CATEGORY_COLORS",
+        "SEVERITY_COLORS",
+        "SEVERITY_LABELS",
+        "CATEGORY_FILTER_OPTIONS",
+        "SEVERITY_FILTER_OPTIONS",
+    ):
+        assert re.search(rf"export\s+const\s+{export_name}\b", tax_src), (
+            f"errorTaxonomy.js icinde '{export_name}' export'u yok."
+        )
+
+    # ── (b) Backend ERROR_CATEGORIES unique values seti vs frontend keys ──
+    backend_py = ROOT / "engine" / "error_tracker.py"
+    assert backend_py.exists(), "engine/error_tracker.py yok."
+    backend_src = backend_py.read_text(encoding="utf-8")
+
+    err_cat_match = re.search(
+        r"ERROR_CATEGORIES\s*=\s*\{(.*?)\}", backend_src, re.DOTALL
+    )
+    assert err_cat_match, "engine/error_tracker.py icinde ERROR_CATEGORIES dict bulunamadi."
+    err_cat_block = err_cat_match.group(1)
+    backend_cats = set(re.findall(r":\s*\"([^\"]+)\"", err_cat_block))
+    assert backend_cats, "ERROR_CATEGORIES values parse edilemedi."
+
+    cat_colors_match = re.search(
+        r"export\s+const\s+CATEGORY_COLORS\s*=\s*\{(.*?)\};",
+        tax_src,
+        re.DOTALL,
+    )
+    assert cat_colors_match, "errorTaxonomy.js CATEGORY_COLORS bloku parse edilemedi."
+    cat_colors_block = cat_colors_match.group(1)
+    frontend_cats = set(re.findall(r"'([^']+)'\s*:", cat_colors_block))
+    assert frontend_cats, "CATEGORY_COLORS keys parse edilemedi."
+
+    missing_in_frontend = backend_cats - frontend_cats
+    extra_in_frontend = frontend_cats - backend_cats
+    assert not missing_in_frontend, (
+        f"Backend ERROR_CATEGORIES.values() icinde olup frontend "
+        f"CATEGORY_COLORS keys'inde OLMAYAN kategori(ler): "
+        f"{sorted(missing_in_frontend)}. errorTaxonomy.js guncellenmeli."
+    )
+    assert not extra_in_frontend, (
+        f"Frontend CATEGORY_COLORS keys'inde olup backend "
+        f"ERROR_CATEGORIES.values() icinde OLMAYAN kategori(ler): "
+        f"{sorted(extra_in_frontend)}. errorTaxonomy.js veya backend "
+        f"engine/error_tracker.py guncel degil."
+    )
+
+    # ── (c) Backend SEVERITY_PRIORITY keys vs frontend SEVERITY_COLORS keys ──
+    sev_match = re.search(
+        r"SEVERITY_PRIORITY\s*=\s*\{(.*?)\}", backend_src, re.DOTALL
+    )
+    assert sev_match, "SEVERITY_PRIORITY dict bulunamadi."
+    backend_sevs = set(re.findall(r"\"([A-Z]+)\"\s*:", sev_match.group(1)))
+    assert backend_sevs, "SEVERITY_PRIORITY keys parse edilemedi."
+
+    sev_colors_match = re.search(
+        r"export\s+const\s+SEVERITY_COLORS\s*=\s*\{(.*?)\};",
+        tax_src,
+        re.DOTALL,
+    )
+    assert sev_colors_match, "SEVERITY_COLORS bloku parse edilemedi."
+    frontend_sevs = set(re.findall(r"\b([A-Z]+)\s*:", sev_colors_match.group(1)))
+    assert frontend_sevs, "SEVERITY_COLORS keys parse edilemedi."
+
+    # Frontend SEVERITY_COLORS, backend SEVERITY_PRIORITY'nin alt kumesi olmali
+    # (frontend DEBUG'i gostermez ama varsa da gostermek istemez).
+    sev_drift = frontend_sevs - backend_sevs
+    assert not sev_drift, (
+        f"Frontend SEVERITY_COLORS icinde backend SEVERITY_PRIORITY'de "
+        f"olmayan key(ler) var: {sorted(sev_drift)}. Backend ile drift."
+    )
+
+    # ── (d) ErrorTracker.jsx yerel const tanimi YASAK ──
+    et_jsx = ROOT / "desktop" / "src" / "components" / "ErrorTracker.jsx"
+    assert et_jsx.exists(), "ErrorTracker.jsx yok."
+    et_src = et_jsx.read_text(encoding="utf-8")
+    local_const_pattern = re.compile(
+        r"^\s*const\s+(?:CATEGORY_COLORS|SEVERITY_COLORS|SEVERITY_LABELS)\s*=",
+        re.MULTILINE,
+    )
+    assert not local_const_pattern.search(et_src), (
+        "ErrorTracker.jsx icinde yerel CATEGORY_COLORS / SEVERITY_COLORS / "
+        "SEVERITY_LABELS const tanimi var — H7 ihlali; canonical kaynak "
+        "errorTaxonomy.js'tir, import edilmeli."
+    )
+
+    # ── (e) ErrorTracker.jsx errorTaxonomy import yapmali ──
+    assert "from '../utils/errorTaxonomy'" in et_src, (
+        "ErrorTracker.jsx errorTaxonomy.js'den import yapmiyor — "
+        "H7 canonical kaynak kullanilmiyor."
+    )
+
+    # ── (f) H7 marker ──
+    assert "Widget Denetimi" in tax_src and "H7" in tax_src, (
+        "errorTaxonomy.js icinde 'Widget Denetimi H7' marker yok — "
+        "canonical kaynak rolu/atif kaybolmus."
+    )
+
+
 # ── Flow 5: Kill-switch L2 _close_ogul_and_hybrid manuel dokunmaz ──
 def test_baba_l2_only_closes_ogul_and_hybrid():
     from engine.baba import Baba
