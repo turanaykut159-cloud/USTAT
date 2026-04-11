@@ -21,6 +21,11 @@ import { getTrades, getTradeStats, getPerformance, approveTrade, syncTrades, con
 // className yoluyla `profit`/`loss` class'ını bırakır (global CSS
 // üzerinden renk gelir), drift koruması Flow 4y.
 import { formatMoney, formatPrice, pnlClass, winRateClass } from '../utils/formatters';
+// Widget Denetimi H16: approveTrade operatör kimliği canonical kaynağa
+// bağlandı — eski satır 366 hardcode `'operator'` literal'i kullanıyordu.
+// Settings.jsx'teki "Operatör Adı" alanı localStorage'a yazar; bu helper
+// tüm onay/kill-switch çağrılarında aynı değeri döndürür. Drift Flow 4za.
+import { getOperatorName } from '../utils/operator';
 
 // ── Sabitler ─────────────────────────────────────────────────────
 
@@ -361,14 +366,20 @@ export default function TradeHistory() {
   };
 
   // ── Onay handler ─────────────────────────────────────────────────
+  // H16: operatör kimliği getOperatorName() ile canonical kaynaktan
+  // okunur (Settings ekranındaki "Operatör Adı" alanı, localStorage).
+  // Optimistic update gösteriminde de aynı değer kullanılır — yoksa
+  // backend "APPROVED by Ali" yazıyorken UI satırı "APPROVED by operator"
+  // gösterirdi.
   const handleApprove = async (tradeId) => {
     setApproving(tradeId);
-    const res = await approveTrade(tradeId, 'operator', '');
+    const operatorName = getOperatorName();
+    const res = await approveTrade(tradeId, operatorName, '');
     if (res.success) {
       setAllTrades((prev) =>
         prev.map((t) =>
           t.id === tradeId
-            ? { ...t, exit_reason: `${t.exit_reason || ''} | APPROVED by operator` }
+            ? { ...t, exit_reason: `${t.exit_reason || ''} | APPROVED by ${operatorName}` }
             : t
         )
       );

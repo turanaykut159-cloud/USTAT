@@ -8,6 +8,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { getStatus, getAccount, acknowledgeKillSwitch, getAgentStatus, getHealth } from '../services/api';
 import { formatMoney } from '../utils/formatters';
+// Widget Denetimi H16: kill-switch acknowledge kullanıcı kimliği canonical
+// kaynağa bağlandı — eski satır 134 hardcode `'operator'` literal'i
+// kullanıyordu. Settings → "Operatör Adı" alanı tek kaynak. Drift Flow 4za.
+import { getOperatorName } from '../utils/operator';
 
 // ── Faz etiketleri ──────────────────────────────────────────────
 const PHASE_LABELS = {
@@ -131,7 +135,7 @@ export default function TopBar() {
     if (ksResetting) return;
     setKsResetting(true);
     try {
-      await acknowledgeKillSwitch('operator');
+      await acknowledgeKillSwitch(getOperatorName());
       await fetchData();
     } finally {
       setKsResetting(false);

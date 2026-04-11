@@ -2083,6 +2083,102 @@ def test_error_taxonomy_backend_sync():
     )
 
 
+# ── Flow 4za: Operator kimligi canonical kaynak (Widget Denetimi H16) ─
+def test_operator_identity_canonical_source():
+    """Widget Denetimi H16 (+K7): Operator kimligi hardcode 'operator'
+    string'i drift yuzeyindeydi.
+
+    Eski drift yuzeyi (3 ayri call site):
+      - TradeHistory.jsx::handleApprove satir 366: approveTrade(id, 'operator', '')
+      - SideNav.jsx::handleKillSwitch satir 89: activateKillSwitch('operator')
+      - TopBar.jsx::handleKsReset satir 134: acknowledgeKillSwitch('operator')
+
+    Sonuc: backend audit log her zaman 'APPROVED by operator' yaziyordu —
+    birden fazla operator calissa bile ayirt edilemiyordu.
+
+    Yeni canonical kaynak: desktop/src/utils/operator.js
+      - getOperatorName() / setOperatorName(name) / OPERATOR_NAME_KEY
+      - localStorage['ustat_operator_name'] tek dogru kaynak
+      - Bos / yok ise DEFAULT_OPERATOR ('operator') fallback (geriye uyumlu)
+      - Settings.jsx 'Operator Adi' alani setOperatorName ile yazar
+
+    Bu test:
+      (a) operator.js mevcut + 3 export regex dogrulanir
+      (b) Uc tuketici dosyada hardcode 'operator' literal'i YASAK
+      (c) Uc tuketici dosya '../utils/operator' import yapmali
+      (d) Settings.jsx setOperatorName helper'ini import etmeli
+      (e) DEFAULT_OPERATOR fallback'i operator.js'te 'operator' olmali
+      (f) Widget Denetimi H16 marker mevcut (canonical kaynak rolu)
+    """
+    op_path = ROOT / "desktop" / "src" / "utils" / "operator.js"
+    assert op_path.exists(), f"operator.js bulunamadi: {op_path}"
+    op_src = op_path.read_text(encoding="utf-8")
+
+    # (a) 3 export tanimli
+    for export_name in ("OPERATOR_NAME_KEY", "DEFAULT_OPERATOR", "getOperatorName", "setOperatorName"):
+        assert re.search(rf"export\s+(?:const|function)\s+{export_name}\b", op_src), (
+            f"operator.js icinde 'export {export_name}' bulunamadi — "
+            f"canonical kaynak API kontrati bozuk."
+        )
+
+    # (e) DEFAULT_OPERATOR fallback degeri 'operator' olmali (geriye uyum)
+    assert re.search(r"DEFAULT_OPERATOR\s*=\s*['\"]operator['\"]", op_src), (
+        "DEFAULT_OPERATOR fallback 'operator' string'i degil — eski "
+        "audit log davranisi bozuldu, geriye uyumluluk kaybi."
+    )
+
+    # (f) H16 marker
+    assert "Widget Denetimi" in op_src and "H16" in op_src, (
+        "operator.js icinde 'Widget Denetimi H16' marker yok — canonical "
+        "kaynak rolu/atif kaybolmus."
+    )
+
+    # (b) + (c) Uc tuketici dosyada hardcode 'operator' literal'i YASAK,
+    # ve operator.js import edilmeli
+    consumers = [
+        ("desktop/src/components/TradeHistory.jsx", "approveTrade"),
+        ("desktop/src/components/SideNav.jsx", "activateKillSwitch"),
+        ("desktop/src/components/TopBar.jsx", "acknowledgeKillSwitch"),
+    ]
+    for rel_path, fn_name in consumers:
+        path = ROOT / rel_path
+        assert path.exists(), f"{rel_path} bulunamadi"
+        src = path.read_text(encoding="utf-8")
+
+        # Hardcode 'operator' literal'i ilgili fonksiyon cagrisinda YASAK.
+        # Pattern: fn_name( ... 'operator' ... )  (tek/cift tirnak, opsiyonel
+        # whitespace ve oncesi parametreler).
+        forbidden = re.search(
+            rf"{fn_name}\s*\([^)]*['\"]operator['\"]",
+            src,
+        )
+        assert forbidden is None, (
+            f"{rel_path} icinde {fn_name}() cagrisi hala literal 'operator' "
+            f"string'i kullaniyor — H16 regression. getOperatorName() "
+            f"helper'ina gecirilmis olmasi gerekirdi."
+        )
+
+        # operator.js import edilmis olmali
+        assert "from '../utils/operator'" in src or 'from "../utils/operator"' in src, (
+            f"{rel_path} icinde '../utils/operator' import'u yok — "
+            f"getOperatorName helper'i kullanilmiyor olabilir."
+        )
+        assert "getOperatorName" in src, (
+            f"{rel_path} icinde getOperatorName referansi yok."
+        )
+
+    # (d) Settings.jsx setOperatorName import etmeli (UI yazma yolu)
+    settings_path = ROOT / "desktop" / "src" / "components" / "Settings.jsx"
+    settings_src = settings_path.read_text(encoding="utf-8")
+    assert "setOperatorName" in settings_src, (
+        "Settings.jsx setOperatorName helper'ini import etmiyor — "
+        "Operator Adi alani yazma yolu kopuk."
+    )
+    assert "from '../utils/operator'" in settings_src or 'from "../utils/operator"' in settings_src, (
+        "Settings.jsx '../utils/operator' import'u yok."
+    )
+
+
 # ── Flow 5: Kill-switch L2 _close_ogul_and_hybrid manuel dokunmaz ──
 def test_baba_l2_only_closes_ogul_and_hybrid():
     from engine.baba import Baba

@@ -7,6 +7,10 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
 import { activateKillSwitch, getUiPrefs } from '../services/api';
+// Widget Denetimi H16: kill-switch kullanıcı kimliği canonical kaynağa
+// bağlandı — eski satır 89 hardcode `'operator'` literal'i kullanıyordu.
+// Settings → "Operatör Adı" alanı tek kaynak. Drift Flow 4za.
+import { getOperatorName } from '../utils/operator';
 import ConfirmModal from './ConfirmModal';
 
 // ── Menü öğeleri ─────────────────────────────────────────────────
@@ -86,7 +90,7 @@ export default function SideNav() {
       setKillHolding(false);
       setKillFired(true);
 
-      await activateKillSwitch('operator');
+      await activateKillSwitch(getOperatorName());
 
       // 3 saniye sonra butonu sıfırla
       setTimeout(() => setKillFired(false), 3000);

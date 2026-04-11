@@ -22,6 +22,11 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { getAccount, getStatus, getEvents, getRiskBaseline, updateRiskBaseline, updateNotificationPrefs } from '../services/api';
+// Widget Denetimi H16: Operatör adı canonical kaynağa bağlandı.
+// localStorage'ta saklanır; TradeHistory.jsx::handleApprove,
+// SideNav.jsx::handleKillSwitch ve TopBar.jsx::handleKsReset
+// `getOperatorName()` ile aynı değeri okur. Drift Flow 4za.
+import { getOperatorName, setOperatorName, DEFAULT_OPERATOR } from '../utils/operator';
 
 // ── Sabitler ──────────────────────────────────────────────────────
 
@@ -103,6 +108,16 @@ export default function Settings() {
   const [baselineTimeInput, setBaselineTimeInput] = useState('00:00');
   const [baselineStep, setBaselineStep] = useState('idle'); // idle | confirm | saving
   const [baselineMsg, setBaselineMsg] = useState('');
+
+  // Widget Denetimi H16: Operatör adı (localStorage canonical kaynak).
+  // Settings'te düzenlenir; TradeHistory/SideNav/TopBar getOperatorName()
+  // ile okur. Boş bırakılırsa DEFAULT_OPERATOR ('operator') fallback'ı
+  // devreye girer (geriye uyumlu).
+  const [operatorName, setOperatorNameState] = useState(() => {
+    const v = getOperatorName();
+    return v === DEFAULT_OPERATOR ? '' : v;
+  });
+  const [operatorMsg, setOperatorMsg] = useState('');
 
   // ── Tema (localStorage + DOM) — Widget Denetimi H12 ──
   //
@@ -233,6 +248,20 @@ export default function Settings() {
     setBaselineStep('idle');
     setBaselineMsg('');
   }, [baselineDate]);
+
+  // ── Operatör adı handler (H16) ─────────────────────────────────
+  // Boş input → localStorage temizlenir → DEFAULT_OPERATOR fallback.
+  // Dolu input → trim + 64 char limit + localStorage'a yazılır.
+  // Ekrana kısa onay mesajı düşer (3sn sonra silinir).
+  const handleSaveOperator = useCallback(() => {
+    const saved = setOperatorName(operatorName);
+    if (saved === DEFAULT_OPERATOR) {
+      setOperatorMsg('Operatör adı temizlendi — varsayılan ("operator") kullanılacak.');
+    } else {
+      setOperatorMsg(`Kaydedildi: ${saved}`);
+    }
+    setTimeout(() => setOperatorMsg(''), 3000);
+  }, [operatorName]);
 
   // ── Render ──────────────────────────────────────────────────────
 
@@ -367,6 +396,44 @@ export default function Settings() {
             {baselineStep === 'idle' && baselineMsg && (
               <div className={'st-baseline-msg ' + (baselineMsg.startsWith('Hata') ? 'error' : 'success')}>
                 {baselineMsg}
+              </div>
+            )}
+          </section>
+
+          {/* ── OPERATÖR KİMLİĞİ (Widget Denetimi H16) ───────────── */}
+          <section className="st-section">
+            <div className="st-section-header">
+              <h3>Operatör Kimliği</h3>
+            </div>
+            <p className="st-section-desc">
+              İşlem onayı ve kill-switch işlemlerinde audit log'a yazılan
+              operatör adı. Boş bırakılırsa varsayılan ("operator") kullanılır.
+              Bu alan yalnız bu masaüstünde saklanır (localStorage), başka
+              cihazlara senkronize edilmez.
+            </p>
+            <div className="st-baseline-row">
+              <label className="st-field-label">Operatör Adı</label>
+              <input
+                type="text"
+                className="st-baseline-input"
+                value={operatorName}
+                maxLength={64}
+                placeholder="Örn: Turan Aykut"
+                onChange={(e) => {
+                  setOperatorNameState(e.target.value);
+                  setOperatorMsg('');
+                }}
+              />
+            </div>
+            <button
+              className="st-btn st-btn-primary"
+              onClick={handleSaveOperator}
+            >
+              Kaydet
+            </button>
+            {operatorMsg && (
+              <div className={'st-baseline-msg ' + (operatorMsg.startsWith('Kaydedildi') ? 'success' : 'info')}>
+                {operatorMsg}
               </div>
             )}
           </section>
