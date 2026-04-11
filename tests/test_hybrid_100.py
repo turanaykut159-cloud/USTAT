@@ -182,10 +182,15 @@ class MockMT5:
         return {"pnl": 50.0, "swap": -2.0}
 
     def add_position(self, ticket, symbol, direction, volume, entry, current, sl=0, tp=0, pnl=0, swap=0):
-        """Test helper — pozisyon ekle."""
+        """Test helper — pozisyon ekle.
+
+        NOT: Gerçek mt5_bridge.py:1952 pozisyon tipini "BUY"/"SELL" string olarak normalize eder.
+        Mock da aynı kontrata uymalı; aksi halde h_engine.py:776 yön tutarlılık kontrolü
+        (str == int karşılaştırması) yanlış DIRECTION_FLIP tetikler.
+        """
         self.positions.append({
             "ticket": ticket, "symbol": symbol,
-            "type": 0 if direction == "BUY" else 1,
+            "type": direction,  # "BUY" veya "SELL" — bridge kontratı
             "volume": volume,
             "price_open": entry, "price_current": current,
             "sl": sl, "tp": tp,
@@ -251,10 +256,10 @@ def _simulate_price(engine_tuple, ticket, new_prim, pnl=None, swap=0.0):
         else:
             pnl = (entry_prim - new_prim) * ONE_PRIM * hp.volume * CONTRACT_SIZE
 
-    # MT5 pozisyonu güncelle
+    # MT5 pozisyonu güncelle — bridge kontratı: "type" string ("BUY"/"SELL")
     mt5.positions = [{
         "ticket": ticket, "symbol": hp.symbol,
-        "type": 0 if hp.direction == "BUY" else 1,
+        "type": hp.direction,
         "volume": hp.volume,
         "price_open": hp.entry_price, "price_current": new_price,
         "sl": 0, "tp": 0,
