@@ -1833,6 +1833,60 @@ def test_topbar_no_dead_regime_initial_state():
     )
 
 
+# ── Flow 4x: Settings dummy Sifre FieldRow kaldirma (Widget Denetimi H11) ─
+def test_settings_no_dummy_password_fieldrow():
+    """Settings.jsx icinde dummy sabit sifre FieldRow bulunmamali.
+
+    H11: Eski Settings'te `<FieldRow label="Sifre" value="........" />`
+    satiri vardi — /api/account MT5 sifresini guvenlik nedeniyle hic
+    dondurmez (Windows credential store'da keyring ile tutulur), bu
+    alan hicbir backend verisine bagli degildi, sabit 8 bullet
+    gosteriyordu. Kullaniciya "uygulama sifreyi bilip maskeliyor"
+    yanlis mesaji veriyordu. Dead decorative field. Regression koruma:
+        (a) 8 bullet sabit ("\u2022" * 8) literal'i Settings.jsx'te
+            YASAK — dummy sifre satirinin geri gelmesini engeller.
+        (b) Settings.jsx icinde `label="Sifre"` (tam eslesen) literal
+            icin HERHANGI bir `value=` atamasi YASAK — boylece
+            ileride biri basit bir kaynak gozden kacirip dummy'yi
+            tekrar eklerse test yakalayabilir.
+        (c) `Widget Denetimi H11` marker yorumu mevcut (canonical atif).
+    """
+    settings_jsx = ROOT / "desktop" / "src" / "components" / "Settings.jsx"
+    assert settings_jsx.exists(), "desktop/src/components/Settings.jsx yok."
+    src = settings_jsx.read_text(encoding="utf-8")
+
+    # (a) 8 bullet sabit literal YASAK
+    bullet_literal = "\u2022" * 8
+    assert bullet_literal not in src, (
+        "Settings.jsx icinde 8 karakterlik sabit bullet stringi "
+        "('\u2022' * 8) bulundu — dummy 'Sifre' FieldRow geri gelmis "
+        "olabilir. /api/account sifreyi hic dondurmez, bu tamamen "
+        "dekoratif olu UI idi, Widget Denetimi H11 ile kaldirildi."
+    )
+
+    # (b) Sifre label'i ile FieldRow-style value= yasagi
+    # Eski kalip: <FieldRow label="Sifre" value="..." />
+    # Turkce i karakteri hassasiyeti: hem "Sifre" (S-i-f-r-e) hem
+    # "\u015eifre" (Ş-ifre) varyantlarini kontrol et.
+    for variant in ("Şifre", "Sifre"):
+        pattern = rf'label="{variant}"\s*value='
+        match = re.search(pattern, src)
+        assert match is None, (
+            f"Settings.jsx icinde `label=\"{variant}\"` ile `value=` "
+            f"atamasi bulundu — bu dummy sifre FieldRow'u yeniden "
+            f"getirmeye cok benziyor. Widget Denetimi H11: sifre UI'de "
+            f"GOSTERILMEZ; MT5 sifresi Windows credential store'dadir, "
+            f"renderer'a guvenlik gereği aktarilmaz."
+        )
+
+    # (c) H11 marker
+    assert "Widget Denetimi H11" in src, (
+        "Settings.jsx icinde 'Widget Denetimi H11' marker yok — canonical "
+        "atif kaybolmus, refactor sirasinda dummy sifre satirinin neden "
+        "kaldirildigi bilgisi silinmis olabilir."
+    )
+
+
 # ── Flow 5: Kill-switch L2 _close_ogul_and_hybrid manuel dokunmaz ──
 def test_baba_l2_only_closes_ogul_and_hybrid():
     from engine.baba import Baba

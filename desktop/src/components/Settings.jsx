@@ -2,7 +2,12 @@
  * ÜSTAT Plus V6.0 — Ayarlar ekranı.
  *
  * Bölümler:
- *   1. MT5 Bağlantı Bilgileri (sunucu, hesap, şifre maskeli)
+ *   1. MT5 Bağlantı Bilgileri (sunucu, hesap no maskeli, para birimi —
+ *      şifre UI'de GÖSTERİLMEZ; Widget Denetimi H11: eski dummy sabit
+ *      bullet FieldRow tamamen kaldırıldı, çünkü /api/account endpoint'i
+ *      şifreyi hiç döndürmez — MT5 şifresi Windows credential store'da
+ *      tutulur ve renderer'a güvenlik gereği aktarılmaz. Placeholder
+ *      bile değildi, tamamen dekoratif ölü UI idi)
  *   2. "Farklı hesap ile giriş" butonu
  *   3. Tema Ayarı (koyu tema aktif; açık tema CSS'te hazır ama tüm bileşenlerde
  *      doğrulanmadığı için disabled — Widget Denetimi H12)
@@ -273,7 +278,13 @@ export default function Settings() {
                   </button>
                 }
               />
-              <FieldRow label="Şifre" value="••••••••" />
+              {/* Widget Denetimi H11: Eski dummy "Şifre" satırı kaldırıldı.
+                  /api/account MT5 şifresini hiç döndürmez (güvenlik), bu
+                  FieldRow sabit bir bullet dizisi gösteriyordu ve hiçbir
+                  backend verisine bağlı değildi. Kullanıcıya "uygulama
+                  şifreyi bilip maskeliyor" yanlış mesajını veriyordu.
+                  "Farklı Hesap ile Giriş" butonu aşağıda zaten kimlik
+                  değişimini sağlıyor. */}
               <FieldRow label="Para Birimi" value={account?.currency || 'TRY'} />
             </div>
 
