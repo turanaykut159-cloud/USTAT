@@ -4,7 +4,8 @@
  * Bölümler:
  *   1. MT5 Bağlantı Bilgileri (sunucu, hesap, şifre maskeli)
  *   2. "Farklı hesap ile giriş" butonu
- *   3. Tema Ayarı (şimdilik sadece koyu tema)
+ *   3. Tema Ayarı (koyu tema aktif; açık tema CSS'te hazır ama tüm bileşenlerde
+ *      doğrulanmadığı için disabled — Widget Denetimi H12)
  *   4. Bildirim Tercihleri
  *   5. Sistem Log Görüntüleme
  *   6. Versiyon Bilgisi
@@ -98,19 +99,29 @@ export default function Settings() {
   const [baselineStep, setBaselineStep] = useState('idle'); // idle | confirm | saving
   const [baselineMsg, setBaselineMsg] = useState('');
 
-  // Tema (localStorage + DOM)
+  // ── Tema (localStorage + DOM) — Widget Denetimi H12 ──
+  //
+  // Açık tema CSS değişkenleri (theme.css `:root[data-theme="light"]`) hazır,
+  // ancak tüm bileşenlerde doğrulanmadığı için UI'den seçilemez (disabled
+  // kart + tooltip). applyTheme sadece 'dark' argümanını kabul eder; 'light'
+  // çağrısı güvenlik amaçlı sessizce reddedilir. Açık tema hazır olduğunda
+  // kart disabled state'inden çıkarılır ve bu guard kaldırılır.
   const [theme, setTheme] = useState(() => {
-    return localStorage.getItem('ustat_theme') || 'dark';
+    const saved = localStorage.getItem('ustat_theme');
+    // Legacy kullanıcı 'light' kaydetmiş olsa bile UI 'dark' gösterir;
+    // gerçek applyTheme çağrısı olana kadar DOM data-theme attribute'u
+    // App.jsx mount effect'inde zaten yönetilir.
+    return saved === 'light' ? 'dark' : (saved || 'dark');
   });
 
   const applyTheme = useCallback((newTheme) => {
-    setTheme(newTheme);
-    localStorage.setItem('ustat_theme', newTheme);
-    if (newTheme === 'light') {
-      document.documentElement.setAttribute('data-theme', 'light');
-    } else {
-      document.documentElement.removeAttribute('data-theme');
+    // H12 guard: açık tema henüz tam doğrulanmadı, yalnız 'dark' kabul edilir.
+    if (newTheme !== 'dark') {
+      return;
     }
+    setTheme('dark');
+    localStorage.setItem('ustat_theme', 'dark');
+    document.documentElement.removeAttribute('data-theme');
   }, []);
 
   // ── Veri çekme ──────────────────────────────────────────────────
@@ -389,11 +400,12 @@ export default function Settings() {
                 <span>Koyu Tema</span>
               </div>
               <div
-                className={`st-theme-card ${theme === 'light' ? 'active' : ''}`}
-                onClick={() => applyTheme('light')}
+                className="st-theme-card disabled"
+                title="Açık tema henüz tüm bileşenlerde doğrulanmadı — yalnız koyu tema aktif (Widget Denetimi H12)"
+                aria-disabled="true"
               >
                 <div className="st-theme-preview light" />
-                <span>Açık Tema</span>
+                <span>Açık Tema (yakında)</span>
               </div>
             </div>
           </section>

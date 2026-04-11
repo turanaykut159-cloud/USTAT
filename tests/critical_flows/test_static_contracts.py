@@ -1720,6 +1720,66 @@ def test_nabiz_thresholds_are_backend_driven():
     )
 
 
+# ── Flow 4v: Settings acik tema disabled (Widget Denetimi H12) ───
+def test_settings_light_theme_disabled():
+    """Settings.jsx icinde acik tema UI'den secilemez olmali.
+
+    H12: acik tema CSS degiskenleri hazir ama tum bilesenlerde
+    dogrulanmadigi icin Settings sayfasinda 'Koyu Tema aktif' yazip
+    acik temayi sessizce uyguluyordu. Regression koruma:
+        (a) 'simdilik sadece koyu tema' yaniltici yorumu kaldirilmis
+        (b) 'Widget Denetimi H12' marker mevcut
+        (c) applyTheme guard: 'dark' disinda cagrilar reddedilir
+        (d) Acik tema karti disabled class + title tooltip + aria-disabled
+        (e) Regresyon: onClick={() => applyTheme('light')} YOK
+    """
+    settings_jsx = ROOT / "desktop" / "src" / "components" / "Settings.jsx"
+    assert settings_jsx.exists(), "desktop/src/components/Settings.jsx yok."
+    src = settings_jsx.read_text(encoding="utf-8")
+
+    # (a) Yaniltici yorum kaldirilmis olmali
+    assert "şimdilik sadece koyu tema" not in src, (
+        "Settings.jsx hala 'şimdilik sadece koyu tema' yorumunu tasiyor — "
+        "H12 temizligi tamam degil."
+    )
+
+    # (b) H12 marker mevcut
+    assert "Widget Denetimi H12" in src, (
+        "Settings.jsx icinde 'Widget Denetimi H12' marker yok — canonical "
+        "referans kaybolmus."
+    )
+
+    # (c) applyTheme guard mevcut
+    assert "if (newTheme !== 'dark')" in src, (
+        "Settings.jsx applyTheme fonksiyonu 'dark' disindaki temalari "
+        "reddetmiyor — H12 guard kaybolmus."
+    )
+
+    # (d) Acik tema karti disabled + title + aria-disabled tasimali
+    assert 'className="st-theme-card disabled"' in src, (
+        "Settings.jsx Acik Tema karti 'disabled' class tasimiyor — "
+        "H12 regression."
+    )
+    assert 'aria-disabled="true"' in src, (
+        "Settings.jsx Acik Tema karti aria-disabled=\"true\" tasimiyor — "
+        "erisilebilirlik regression."
+    )
+    # Title tooltip icinde H12 atfi bulunmali
+    title_match = re.search(
+        r'title="[^"]*Widget Denetimi H12[^"]*"', src
+    )
+    assert title_match, (
+        "Settings.jsx Acik Tema karti title tooltip'i 'Widget Denetimi H12' "
+        "atfini icermiyor."
+    )
+
+    # (e) Regresyon: onClick applyTheme('light') cagrisi OLMAMALI
+    assert "applyTheme('light')" not in src, (
+        "Settings.jsx hala applyTheme('light') cagirmaya calisiyor — "
+        "H12 disable regression."
+    )
+
+
 # ── Flow 5: Kill-switch L2 _close_ogul_and_hybrid manuel dokunmaz ──
 def test_baba_l2_only_closes_ogul_and_hybrid():
     from engine.baba import Baba
