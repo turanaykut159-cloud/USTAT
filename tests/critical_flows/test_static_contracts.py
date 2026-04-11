@@ -874,6 +874,39 @@ def test_trade_error_category_mapping_consistent():
     )
 
 
+# ── Flow 4l: Monitor Flow Diagram MT5 panel dinamik (B11) ───────
+def test_monitor_mt5_panel_uses_dynamic_state():
+    """Widget Denetimi B11: Monitor Flow Diagram ÜSTAT ModBox'inin 'MT5' detail
+    satiri, gercek mt5Connected state'ine bagli olmali. Onceden 'BAĞLANTI YOK'
+    string'i hardcode idi ve MT5 bagli iken bile YOK gorunuyordu."""
+    from pathlib import Path
+    repo_root = Path(__file__).resolve().parents[2]
+    monitor_src = (repo_root / "desktop" / "src" / "components" / "Monitor.jsx").read_text(
+        encoding="utf-8"
+    )
+
+    # 1) mt5Connected state'i hala mevcut
+    assert "const mt5Connected" in monitor_src, (
+        "Monitor.jsx mt5Connected state'i kaldirilmis — B11 dinamik bagla hedefi yok."
+    )
+
+    # 2) Hardcode 'BAĞLANTI YOK' kaldirilmis olmali (MT5 panel satirinda)
+    # Diger kullanim alanlari olabilir diye spesifik pattern arariz:
+    # ['MT5', 'BAĞLANTI YOK' ...] seklinde bir hardcode kalmamali.
+    assert "['MT5', 'BAĞLANTI YOK'" not in monitor_src, (
+        "Monitor.jsx 'MT5' detail satirinda 'BAĞLANTI YOK' hardcode hala mevcut — "
+        "B11 fix geri alinmis veya yeni hardcode eklenmis."
+    )
+
+    # 3) Dinamik ifade mevcut — mt5Connected ile MT5 label'i ayni satirda
+    # olmali. Cok kati regex yerine yakin gecinme kontrolu yeterli.
+    mt5_label_idx = monitor_src.find("['MT5', mt5Connected")
+    assert mt5_label_idx != -1, (
+        "Monitor.jsx 'MT5' detail satirinda mt5Connected kullanimi yok — "
+        "beklenen pattern: ['MT5', mt5Connected ? '✓ BAĞLI' : '✗ KOPUK', ...]"
+    )
+
+
 # ── Flow 5: Kill-switch L2 _close_ogul_and_hybrid manuel dokunmaz ──
 def test_baba_l2_only_closes_ogul_and_hybrid():
     from engine.baba import Baba

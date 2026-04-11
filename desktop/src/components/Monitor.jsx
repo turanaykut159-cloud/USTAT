@@ -763,7 +763,10 @@ export default function Monitor() {
                 details={[
                   ['SON ÇALIŞMA', layers?.ustat?.last_run_time ? fmtTime(layers.ustat.last_run_time) : '—'],
                   ['DB BOYUT', `${sysInfo?.db_file_size_mb ?? 0} MB`],
-                  ['MT5', 'BAĞLANTI YOK', '#556680'],
+                  // Widget Denetimi B11 fix — gerçek mt5Connected state'ine bağlandı
+                  // (önce 'BAĞLANTI YOK' hardcode'du; mt5Connected hesaplanıyor ama
+                  // burada kullanılmıyordu, bu yüzden MT5 bağlıyken bile "YOK" görünüyordu).
+                  ['MT5', mt5Connected ? '✓ BAĞLI' : '✗ KOPUK', mt5Connected ? '#2ecc71' : '#e74c3c'],
                   ['HATA', `${errorCounts.ustat} bugün`, errorCounts.ustat > 0 ? '#f39c12' : undefined],
                 ]}
                 fill={sysInfo?.cache_stale ? 30 : 90}
