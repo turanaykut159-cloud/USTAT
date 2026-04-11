@@ -744,15 +744,22 @@ class TestModeProtect:
         assert trade.sl == original_sl
 
     def test_03_sl_tightened_after_2h_buy(self):
-        """BUY 2 saat sonra zararda → SL sıkılaştırılmalı."""
+        """BUY 2 saat sonra zararda → SL sıkılaştırılmalı.
+
+        NOT: Commit a670e48 ile SL güncelleme yolu `mt5.modify_position`'dan
+        `OgulSLTP.update_trailing_sl`'e taşındı (STOP LIMIT → plain STOP migrasyonu).
+        Davranış testi: trade.sl değerinin yaklaştığını kontrol eder — API değişikliğine dayanıklı.
+        """
         ogul = make_ogul()
         trade = make_trade(
             entry_price=100.0, sl=97.0,
             opened_at=datetime.now() - timedelta(hours=3),
         )
+        original_sl = trade.sl
         ogul._mode_protect("F_THYAO", trade, 1.5)
-        # SL sıkılaştırılmış olmalı (97 → 99.25)
-        ogul.mt5.modify_position.assert_called()
+        # BUY için SL yukarı hareket etmeli (entry'ye yaklaşmalı)
+        assert trade.sl > original_sl, f"BUY SL sıkılaşmadı: {original_sl} → {trade.sl}"
+        assert trade.sl <= trade.entry_price, "BUY SL entry'yi geçmemeli (koruma modu)"
 
     def test_04_sl_tightened_after_2h_sell(self):
         """SELL 2 saat sonra zararda → SL sıkılaştırılmalı."""
@@ -761,8 +768,11 @@ class TestModeProtect:
             direction="SELL", entry_price=100.0, sl=103.0,
             opened_at=datetime.now() - timedelta(hours=3),
         )
+        original_sl = trade.sl
         ogul._mode_protect("F_THYAO", trade, 1.5)
-        ogul.mt5.modify_position.assert_called()
+        # SELL için SL aşağı hareket etmeli (entry'ye yaklaşmalı)
+        assert trade.sl < original_sl, f"SELL SL sıkılaşmadı: {original_sl} → {trade.sl}"
+        assert trade.sl >= trade.entry_price, "SELL SL entry'nin altına inmemeli (koruma modu)"
 
     def test_05_profit_reaches_atr_switches_to_trend(self):
         """Kâr ≥ ATR → breakeven + TREND modu."""
