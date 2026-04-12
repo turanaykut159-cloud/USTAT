@@ -2587,6 +2587,90 @@ def test_primnet_thresholds_visible_card():
     )
 
 
+# ── Flow 4zi: HybridTrade handleCheck/handleTransfer error handling (A24/K2) ──
+def test_hybrid_trade_check_transfer_have_try_catch():
+    """A24 (K2): HybridTrade.jsx::handleCheck ve handleTransfer eskiden
+    try/catch'siz idi. checkHybridTransfer/transferToHybrid bir hata
+    firlatirsa (network/500/timeout) setChecking(false)/setTransferring(false)
+    hic cagrilmiyor, loading spinner sonsuza kadar donuyor ve kullanici
+    hatadan haberdar olmuyordu — canli para uzerinde 'butonum donmus' UX
+    hatasi.
+
+    Duzeltme: Her iki fonksiyon try/catch/finally ile sarildi. Hata
+    setErrorModal ile ConfirmModal'a basilir, loading state finally
+    blogunda kapatilir.
+
+    Bu test her iki useCallback blogunu statik parse eder ve try, catch,
+    finally + setErrorModal cagrisinin varligini dogrular."""
+    ht_path = ROOT / "desktop" / "src" / "components" / "HybridTrade.jsx"
+    src = ht_path.read_text(encoding="utf-8")
+
+    # 1. handleCheck blogu
+    check_match = re.search(
+        r"const handleCheck = useCallback\(\s*async \(\) => \{(.*?)\},\s*\[.*?\]\s*\);",
+        src,
+        re.DOTALL,
+    )
+    assert check_match, (
+        "HybridTrade.jsx handleCheck useCallback bloku parse edilemedi."
+    )
+    check_body = check_match.group(1)
+    assert "try {" in check_body, (
+        "A24 (K2): handleCheck try blogu eksik — API hatasinda spinner "
+        "donuk kalir, eski bug geri donmus."
+    )
+    assert "catch" in check_body, (
+        "A24 (K2): handleCheck catch blogu eksik."
+    )
+    assert "finally" in check_body, (
+        "A24 (K2): handleCheck finally blogu eksik — setChecking(false) "
+        "exception path'inde cagrilmiyor olabilir."
+    )
+    assert "setErrorModal" in check_body, (
+        "A24 (K2): handleCheck catch blogunda setErrorModal cagrisi yok "
+        "— kullaniciya hata gosterilmeyecek."
+    )
+    assert "setChecking(false)" in check_body, (
+        "A24 (K2): handleCheck finally blogunda setChecking(false) yok."
+    )
+
+    # 2. handleTransfer blogu
+    transfer_match = re.search(
+        r"const handleTransfer = useCallback\(\s*async \(\) => \{(.*?)\},\s*\[.*?\]\s*\);",
+        src,
+        re.DOTALL,
+    )
+    assert transfer_match, (
+        "HybridTrade.jsx handleTransfer useCallback bloku parse edilemedi."
+    )
+    transfer_body = transfer_match.group(1)
+    assert "try {" in transfer_body, (
+        "A24 (K2): handleTransfer try blogu eksik — devir hatasinda "
+        "spinner donuk kalir."
+    )
+    assert "catch" in transfer_body, (
+        "A24 (K2): handleTransfer catch blogu eksik."
+    )
+    assert "finally" in transfer_body, (
+        "A24 (K2): handleTransfer finally blogu eksik — "
+        "setTransferring(false) exception path'inde cagrilmiyor olabilir."
+    )
+    assert "setErrorModal" in transfer_body, (
+        "A24 (K2): handleTransfer catch blogunda setErrorModal cagrisi "
+        "yok — kullaniciya devir hatasi gosterilmeyecek."
+    )
+    assert "setTransferring(false)" in transfer_body, (
+        "A24 (K2): handleTransfer finally blogunda setTransferring(false) "
+        "yok."
+    )
+
+    # 3. Audit marker
+    assert "A24" in src, (
+        "HybridTrade.jsx A24 audit markerin yok — regresyon takibi icin "
+        "gerekli."
+    )
+
+
 # ── Flow 4zh: ManualTrade handleExecute stale closure fix (A23/K1) ──
 def test_manual_trade_handle_execute_no_stale_closure():
     """A23 (K1): ManualTrade.jsx::handleExecute useCallback dependency

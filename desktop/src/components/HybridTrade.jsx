@@ -143,35 +143,59 @@ export default function HybridTrade() {
   }, []);
 
   // ── Kontrol Et ───────────────────────────────────────────────
+  // A24 (K2): handleCheck/handleTransfer try/catch sarıldı. Eskiden API
+  // hatası (network/500/timeout) atıldığında setChecking(false) hiç
+  // çağrılmıyor, loading spinner sonsuza kadar dönüyor ve kullanıcı
+  // hatadan haberdar olmuyordu. Şimdi hata ConfirmModal ile gösterilir,
+  // loading state finally bloğunda kapatılır.
   const handleCheck = useCallback(async () => {
     if (!selectedTicket) return;
     setChecking(true);
     setCheckResult(null);
     setTransferResult(null);
 
-    const result = await checkHybridTransfer(parseInt(selectedTicket, 10));
-    setCheckResult(result);
-    setChecking(false);
+    try {
+      const result = await checkHybridTransfer(parseInt(selectedTicket, 10));
+      setCheckResult(result);
+    } catch (err) {
+      setErrorModal({
+        title: 'Kontrol Hatası',
+        message: err?.message ?? String(err),
+      });
+    } finally {
+      setChecking(false);
+    }
   }, [selectedTicket]);
 
   // ── Hibrite Devret ───────────────────────────────────────────
+  // A24 (K2): try/catch + finally — devir başarısız olursa
+  // setTransferring(false) hiçbir şekilde unutulmaz; canlı para üzerinde
+  // pozisyon devri sırasında "buton donmuş" UX hatası kaybolur.
   const handleTransfer = useCallback(async () => {
     if (!selectedTicket) return;
     setTransferring(true);
 
-    const result = await transferToHybrid(parseInt(selectedTicket, 10));
-    setTransferResult(result);
-    setTransferring(false);
+    try {
+      const result = await transferToHybrid(parseInt(selectedTicket, 10));
+      setTransferResult(result);
 
-    if (result.success) {
-      // Listeyi güncelle
-      setTimeout(() => {
-        fetchOpenPositions();
-        fetchEvents();
-        setSelectedTicket('');
-        setCheckResult(null);
-        setTransferResult(null);
-      }, 2000);
+      if (result.success) {
+        // Listeyi güncelle
+        setTimeout(() => {
+          fetchOpenPositions();
+          fetchEvents();
+          setSelectedTicket('');
+          setCheckResult(null);
+          setTransferResult(null);
+        }, 2000);
+      }
+    } catch (err) {
+      setErrorModal({
+        title: 'Devir Hatası',
+        message: err?.message ?? String(err),
+      });
+    } finally {
+      setTransferring(false);
     }
   }, [selectedTicket, fetchOpenPositions, fetchEvents]);
 
