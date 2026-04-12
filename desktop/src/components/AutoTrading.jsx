@@ -319,15 +319,70 @@ export default function AutoTrading() {
           </div>
         </div>
 
-        {/* ── Sağ: Otomatik Pozisyon Özeti ─────────────────────── */}
+        {/* ── Sağ: Otomatik Pozisyon Özeti (B8/A12) ────────────── */}
         <div className="auto-card">
-          <h3>Otomatik Pozisyonlar</h3>
-          <div className="auto-empty-msg">
-            Açık poz: {autoPositions.length} | Toplam K/Z:{' '}
-            <span className={pnlClass(autoPositions.reduce((s, p) => s + (p.pnl || 0), 0))}>
-              {formatMoney(autoPositions.reduce((s, p) => s + (p.pnl || 0), 0))}
-            </span>
-          </div>
+          <h3>Otomatik Özet</h3>
+          {(() => {
+            // B8 (A12): Sessiz karttan zenginleştirilmiş özete geçiş.
+            // Eski sürüm sadece "Açık poz: N | Toplam K/Z: X" gösteriyordu;
+            // bu bilgi alttaki tabloda zaten vardı (S2 — sessiz kart).
+            // Şimdi: floating + bugün/bu ay sayıları + strateji dağılımı +
+            // win/loss + scratch (B8 invariant: total = w + l + s).
+            const floatingPnl = autoPositions.reduce((s, p) => s + (p.pnl || 0), 0);
+            const today = new Date().toISOString().slice(0, 10);
+            const thisMonth = today.slice(0, 7);
+            const todayTrades = autoTrades.filter((t) => (t.exit_time || t.entry_time || '').startsWith(today));
+            const monthTrades = autoTrades.filter((t) => (t.exit_time || t.entry_time || '').startsWith(thisMonth));
+            const winners = monthTrades.filter((t) => (t.pnl || 0) > 0).length;
+            const losers = monthTrades.filter((t) => (t.pnl || 0) < 0).length;
+            const scratches = monthTrades.length - winners - losers;
+            const stratCounts = monthTrades.reduce((acc, t) => {
+              const key = (t.strategy || 'other').toLowerCase();
+              acc[key] = (acc[key] || 0) + 1;
+              return acc;
+            }, {});
+            const stratLabel = (k) => ({
+              trend_follow: 'Trend',
+              mean_reversion: 'MR',
+              breakout: 'Breakout',
+            }[k] || k);
+            return (
+              <div className="auto-summary-grid">
+                <div className="auto-summary-row">
+                  <span className="auto-summary-lbl">Anlık Floating</span>
+                  <span className={`auto-summary-val ${pnlClass(floatingPnl)}`}>
+                    {formatMoney(floatingPnl)}
+                  </span>
+                </div>
+                <div className="auto-summary-row">
+                  <span className="auto-summary-lbl">Bugün / Bu Ay</span>
+                  <span className="auto-summary-val">
+                    {todayTrades.length} / {monthTrades.length}
+                  </span>
+                </div>
+                <div className="auto-summary-row" title="Bu ay: kazanan / kaybeden / eşit (pnl=0)">
+                  <span className="auto-summary-lbl">K / Z / Eşit</span>
+                  <span className="auto-summary-val">
+                    <span style={{ color: 'var(--profit)' }}>{winners}</span>
+                    {' / '}
+                    <span style={{ color: 'var(--loss)' }}>{losers}</span>
+                    {' / '}
+                    <span style={{ color: 'var(--text-dim)' }}>{scratches}</span>
+                  </span>
+                </div>
+                {Object.keys(stratCounts).length > 0 && (
+                  <div className="auto-summary-row">
+                    <span className="auto-summary-lbl">Strateji</span>
+                    <span className="auto-summary-val auto-summary-strat">
+                      {Object.entries(stratCounts).map(([k, v]) => (
+                        <span key={k} className="auto-strat-tag">{stratLabel(k)}: {v}</span>
+                      ))}
+                    </span>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
       </div>
 

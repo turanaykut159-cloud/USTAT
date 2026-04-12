@@ -1932,6 +1932,44 @@ h2 {
   text-align: center;
 }
 
+/* B8 (A12): Otomatik Özet zenginleştirilmiş kart */
+.auto-summary-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0;
+}
+.auto-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+.auto-summary-lbl {
+  color: var(--text-secondary);
+  opacity: 0.75;
+}
+.auto-summary-val {
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: right;
+}
+.auto-summary-strat {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.auto-strat-tag {
+  background: rgba(88, 166, 255, 0.08);
+  color: var(--accent);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
 /* ── Alt: Son Otomatik İşlemler (tam genişlik) ────────────────── */
 .auto-trades-row {
   display: grid;

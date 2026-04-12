@@ -1986,15 +1986,23 @@ class Database:
     def get_hybrid_performance(self) -> dict[str, Any]:
         """Hibrit pozisyon performans istatistikleri.
 
+        Widget Denetimi B8: total = winners + losers + scratches mantıksal
+        olarak tutarlı olmalı. Eski sürüm pnl == 0 olan kapanışları
+        (manuel/break-even) hiçbir alana yazmıyordu; UI "total=45 ama
+        winners+losers=31" tutarsızlığı gösteriyordu. Artık scratches
+        alanı eklendi ve invariant `total == winners + losers + scratches`
+        her dönüşte garanti.
+
         Returns:
-            dict: Toplam, kazanan, kaybeden, ortalama PnL, kapanış nedeni dağılımı.
+            dict: Toplam, kazanan, kaybeden, scratch (eşit), ortalama PnL,
+                kapanış nedeni dağılımı.
         """
         rows = self._fetch_all(
             "SELECT close_reason, pnl, swap FROM hybrid_positions WHERE state='CLOSED'",
         )
         if not rows:
             return {
-                "total": 0, "winners": 0, "losers": 0,
+                "total": 0, "winners": 0, "losers": 0, "scratches": 0,
                 "total_pnl": 0.0, "avg_pnl": 0.0,
                 "best_pnl": 0.0, "worst_pnl": 0.0,
                 "win_rate": 0.0, "close_reasons": {},
@@ -2004,6 +2012,8 @@ class Database:
         pnls = [r.get("pnl", 0.0) or 0.0 for r in rows]
         winners = sum(1 for p in pnls if p > 0)
         losers = sum(1 for p in pnls if p < 0)
+        # B8: scratch = pnl == 0 kapanışlar (manuel/break-even/external)
+        scratches = total - winners - losers
         total_pnl = sum(pnls)
         avg_pnl = total_pnl / total if total > 0 else 0.0
 
@@ -2017,6 +2027,7 @@ class Database:
             "total": total,
             "winners": winners,
             "losers": losers,
+            "scratches": scratches,  # B8: invariant total == winners + losers + scratches
             "total_pnl": round(total_pnl, 2),
             "avg_pnl": round(avg_pnl, 2),
             "best_pnl": round(max(pnls), 2) if pnls else 0.0,

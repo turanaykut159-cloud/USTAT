@@ -2451,6 +2451,78 @@ def test_performance_net_equity_separation():
     )
 
 
+# ── Flow 4ze: Hibrit/Otomatik scratch + ozet ayrimi (B8) ─────────
+def test_hybrid_scratch_and_auto_summary_enrichment():
+    """B8: get_hybrid_performance scratches alanini dondurur,
+    HybridTrade Esit hucresini gosterir, AutoTrading Otomatik Ozeti
+    sessiz karttan zenginlestirilmis ozete cevrilir."""
+    db_path = ROOT / "engine" / "database.py"
+    ht_path = ROOT / "desktop" / "src" / "components" / "HybridTrade.jsx"
+    at_path = ROOT / "desktop" / "src" / "components" / "AutoTrading.jsx"
+    db_src = db_path.read_text(encoding="utf-8")
+    ht_src = ht_path.read_text(encoding="utf-8")
+    at_src = at_path.read_text(encoding="utf-8")
+
+    # 1. database.py: get_hybrid_performance scratches alani
+    assert "scratches = total - winners - losers" in db_src, (
+        "engine/database.py::get_hybrid_performance icinde "
+        "'scratches = total - winners - losers' formulu yok — "
+        "B8 invariant (total = w + l + s) saglanmiyor."
+    )
+    db_perf_pattern = re.compile(
+        r"def get_hybrid_performance.*?\"scratches\":\s*scratches",
+        re.DOTALL,
+    )
+    assert db_perf_pattern.search(db_src), (
+        "get_hybrid_performance return dict'inde 'scratches' anahtari "
+        "yok — frontend Esit hucresini dolduramaz."
+    )
+    # Empty case'de de scratches alani olmali (default 0)
+    assert '"scratches": 0' in db_src, (
+        "get_hybrid_performance bos kayit dalinda 'scratches: 0' "
+        "default'u yok — schema istikrarli degil."
+    )
+
+    # 2. HybridTrade.jsx Esit hucresi
+    assert "perfStats.scratches" in ht_src, (
+        "HybridTrade.jsx icinde 'perfStats.scratches' kullanimi yok — "
+        "B8 scratch sayisi UI'de gizli kaliyor."
+    )
+    # Esit etiketi performans grid'inde gozukmeli
+    assert ">Eşit<" in ht_src, (
+        "HybridTrade.jsx icinde 'Eşit' performans hucresi etiketi yok."
+    )
+
+    # 3. AutoTrading.jsx Otomatik Ozet zenginlestirme
+    assert "auto-summary-grid" in at_src, (
+        "AutoTrading.jsx icinde 'auto-summary-grid' yok — Otomatik Ozet "
+        "kart sessiz duplicate olarak kalmis (B8/A12)."
+    )
+    assert "Otomatik Özet" in at_src, (
+        "AutoTrading.jsx Otomatik Pozisyon Özeti karti baslik "
+        "guncellemesi yok — eski 'Otomatik Pozisyonlar' baslikli "
+        "duplicate kart hala duruyor olabilir."
+    )
+    # Strateji dagilim mantigi
+    assert "stratCounts" in at_src, (
+        "AutoTrading.jsx Otomatik Ozet'inde strateji dagilimi "
+        "(stratCounts) yok."
+    )
+
+    # 4. Audit markerlari
+    assert "B8" in db_src, (
+        "engine/database.py icinde 'B8' audit markerin yok."
+    )
+    assert "B8" in ht_src, (
+        "desktop/src/components/HybridTrade.jsx icinde 'B8' "
+        "audit markerin yok."
+    )
+    assert "B8" in at_src, (
+        "desktop/src/components/AutoTrading.jsx icinde 'B8' "
+        "audit markerin yok."
+    )
+
+
 # ── Flow 5: Kill-switch L2 _close_ogul_and_hybrid manuel dokunmaz ──
 def test_baba_l2_only_closes_ogul_and_hybrid():
     from engine.baba import Baba

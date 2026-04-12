@@ -349,6 +349,13 @@ export default function HybridTrade() {
                       <span className="ht-perf-label">Kaybeden</span>
                       <span className="ht-perf-value" style={{ color: 'var(--loss)' }}>{perfStats.losers}</span>
                     </div>
+                    {/* B8: scratch (eşit) işlemler — total = winners + losers + scratches */}
+                    <div className="ht-perf-item" title="Eşit kapanan işlemler (pnl = 0): manuel kapanış, breakeven, dış kapanış">
+                      <span className="ht-perf-label">Eşit</span>
+                      <span className="ht-perf-value" style={{ color: 'var(--text-dim)' }}>
+                        {perfStats.scratches ?? 0}
+                      </span>
+                    </div>
                     <div className="ht-perf-item">
                       <span className="ht-perf-label">Başarı</span>
                       <span className="ht-perf-value" style={{ color: winRateColor(perfStats.win_rate) }}>
