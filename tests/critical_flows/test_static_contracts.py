@@ -2587,6 +2587,81 @@ def test_primnet_thresholds_visible_card():
     )
 
 
+# ── Flow 4zg: DATA_GAP gurultu azaltma (A28/K6) ──────────────────
+def test_data_gap_noise_reduction():
+    """A28 (K6): Ayarlar sayfasinda Sistem log ilk 5 kaydi hepsi
+    'DATA_GAP WARNING' olarak gozukuyordu. Rutin piyasa-saati gap'leri
+    recoverable gurultudur; severity INFO'ya dusurulmeli ve cooldown
+    5 dakikadan 15 dakikaya cikarilmali. Gercek bayatlik
+    check_data_freshness() icinde ayri WARNING loglar."""
+    dp_path = ROOT / "engine" / "data_pipeline.py"
+    dp_src = dp_path.read_text(encoding="utf-8")
+
+    # 1. DATA_GAP DB event severity INFO olmali (WARNING degil)
+    # _detect_gaps icindeki insert_event blogunu bul
+    detect_gaps_match = re.search(
+        r"def _detect_gaps.*?(?=\n    def |\nclass )",
+        dp_src,
+        re.DOTALL,
+    )
+    assert detect_gaps_match, "_detect_gaps fonksiyonu bulunamadi."
+    detect_body = detect_gaps_match.group(0)
+
+    assert 'event_type="DATA_GAP"' in detect_body, (
+        "_detect_gaps icinde 'event_type=\"DATA_GAP\"' insert_event cagrisi "
+        "yok — DB event kanali kirilmis."
+    )
+    # Severity INFO kontrolu (WARNING degil)
+    gap_event_match = re.search(
+        r'event_type="DATA_GAP".*?severity="(\w+)"',
+        detect_body,
+        re.DOTALL,
+    )
+    assert gap_event_match, (
+        "DATA_GAP insert_event cagrisi severity parametresi bulunamadi."
+    )
+    severity = gap_event_match.group(1)
+    assert severity == "INFO", (
+        f"A28 (K6): DATA_GAP severity 'INFO' olmali, mevcut: '{severity}'. "
+        "Rutin piyasa-saati gap'leri recoverable gurultudur; WARNING "
+        "olarak kalirsa Sistem log ilk 5 kaydini doldurur."
+    )
+
+    # 2. Per-symbol cooldown 900 saniye (15 dakika) olmali
+    # "> 900.0" throttle kontrolu
+    assert (
+        "> 900.0" in detect_body or "> 900" in detect_body
+    ), (
+        "A28 (K6): _detect_gaps per-symbol cooldown 900 saniye (15dk) "
+        "olmali. Eski 300s degeri DATA_GAP gurultusunu azaltmiyordu."
+    )
+    # dedup_seconds=900 da kontrol (insert_event dedup)
+    assert "dedup_seconds=900" in detect_body, (
+        "A28 (K6): insert_event dedup_seconds=900 olmali (15 dakika). "
+        "Eski 300 degeri per-symbol dedup araligini dar tutuyordu."
+    )
+
+    # 3. Audit marker
+    assert "A28" in dp_src, (
+        "data_pipeline.py icinde A28 audit markerin yok — regresyon "
+        "takibi icin gerekli."
+    )
+
+    # 4. check_data_freshness hala STALE icin WARNING loglamali
+    # (rutin gap'ler INFO'ya inerken gercek bayatlik WARNING kalir)
+    freshness_match = re.search(
+        r"def check_data_freshness.*?(?=\n    def |\nclass )",
+        dp_src,
+        re.DOTALL,
+    )
+    assert freshness_match, "check_data_freshness fonksiyonu bulunamadi."
+    freshness_body = freshness_match.group(0)
+    assert "logger.warning" in freshness_body, (
+        "check_data_freshness STALE durumunda WARNING loglamali — "
+        "gercek bayatlik tespiti gorunur kalmali."
+    )
+
+
 # ── Flow 5: Kill-switch L2 _close_ogul_and_hybrid manuel dokunmaz ──
 def test_baba_l2_only_closes_ogul_and_hybrid():
     from engine.baba import Baba

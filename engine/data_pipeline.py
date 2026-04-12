@@ -125,9 +125,11 @@ class DataPipeline:
         self._manuel_tickets: set[int] = set()
 
         # DATA_GAP spam throttle: sembol başına son event zamanı
-        # Aynı sembol/timeframe için 5 dakikada en fazla 1 DB event yazılır
+        # A28 (K6): Aynı sembol/timeframe için 15 dakikada en fazla 1 DB event
+        # yazılır. Severity INFO — rutin market-saati gap'leri gürültüdür,
+        # gerçek bayatlık check_data_freshness() içinde ayrı WARNING loglar.
         self._last_gap_event: dict[str, datetime] = {}
-        _GAP_EVENT_COOLDOWN_SEC: float = 300.0  # 5 dakika
+        _GAP_EVENT_COOLDOWN_SEC: float = 900.0  # 15 dakika
 
         # Veri bayatlık izleme — sembol+timeframe bazında son bar zamanı
         self._last_bar_timestamps: dict[str, datetime] = {}
@@ -570,21 +572,24 @@ class DataPipeline:
                     f"beklenen {expected_sec}s)"
                 )
 
-            # DB event throttle: aynı sembol/tf için 5 dakikada 1 kez
+            # DB event throttle: aynı sembol/tf için 15 dakikada 1 kez
+            # A28 (K6): Severity INFO — rutin gap'ler recoverable/piyasa saati içi
+            # beklenen gürültü. Gerçek bayat veri check_data_freshness() içinde
+            # ayrı WARNING olarak loglanır. Cooldown 300s→900s genişletildi.
             if real_gaps:
                 throttle_key = f"{symbol}/{timeframe}"
                 now = datetime.now()
                 last = self._last_gap_event.get(throttle_key)
-                if last is None or (now - last).total_seconds() > 300.0:
+                if last is None or (now - last).total_seconds() > 900.0:
                     self._last_gap_event[throttle_key] = now
                     self._db.insert_event(
                         event_type="DATA_GAP",
                         message=(
                             f"{symbol}/{timeframe}: {len(real_gaps)} gap "
-                            f"tespit edildi (piyasa saati içi)"
+                            f"tespit edildi (piyasa saati içi, rutin)"
                         ),
-                        severity="WARNING",
-                        dedup_seconds=300,
+                        severity="INFO",
+                        dedup_seconds=900,
                     )
 
         return len(gaps)
