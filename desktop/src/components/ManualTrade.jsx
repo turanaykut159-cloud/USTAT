@@ -183,6 +183,10 @@ export default function ManualTrade() {
   }, [symbol, direction]);
 
   // ── Onayla (Emir Gönder) ─────────────────────────────────────
+  // A23 (K1): handleExecute useCallback dependency array sl+tp
+  // eksikti — stale closure riski. Kullanıcı sl/tp değerini değiştirip
+  // 5 saniye içinde "Çalıştır"a basarsa eski (stale) sl/tp gönderiliyordu.
+  // Çözüm: dependency array'e sl ve tp eklendi.
   const handleExecute = useCallback(async () => {
     setExecuting(true);
 
@@ -196,7 +200,7 @@ export default function ManualTrade() {
       handleReset();
       fetchRecentTrades();
     }, 5000);
-  }, [symbol, direction, lot, fetchRecentTrades]);
+  }, [symbol, direction, lot, sl, tp, handleReset, fetchRecentTrades]);
 
   // ── Sıfırla ──────────────────────────────────────────────────
   const handleReset = useCallback(() => {

@@ -2587,6 +2587,49 @@ def test_primnet_thresholds_visible_card():
     )
 
 
+# ── Flow 4zh: ManualTrade handleExecute stale closure fix (A23/K1) ──
+def test_manual_trade_handle_execute_no_stale_closure():
+    """A23 (K1): ManualTrade.jsx::handleExecute useCallback dependency
+    array'i eksik idi — body'de sl/tp kullaniliyor ama dependency array
+    [symbol, direction, lot, fetchRecentTrades] halinde sadece ilk 4
+    degeri izliyordu. Sonuc: kullanici sl/tp degerini degistirip 5 saniye
+    icinde 'Calistir'a basarsa eski (stale) sl/tp degeri MT5'e gidiyordu.
+    Duzeltme: dependency array'e sl, tp, handleReset eklendi.
+
+    Bu test handleExecute useCallback blogunu statik olarak parse eder
+    ve dependency listesinde kritik state'lerin varligini dogrular."""
+    mt_path = ROOT / "desktop" / "src" / "components" / "ManualTrade.jsx"
+    src = mt_path.read_text(encoding="utf-8")
+
+    # handleExecute useCallback blogu
+    match = re.search(
+        r"const handleExecute = useCallback\(\s*async \(\) => \{.*?\},\s*\[(.*?)\]\s*\);",
+        src,
+        re.DOTALL,
+    )
+    assert match, (
+        "ManualTrade.jsx handleExecute useCallback bloku parse edilemedi "
+        "— imza degismis olabilir."
+    )
+    deps_raw = match.group(1)
+    deps = {d.strip() for d in deps_raw.split(",") if d.strip()}
+
+    required = {"symbol", "direction", "lot", "sl", "tp", "fetchRecentTrades"}
+    missing = required - deps
+    assert not missing, (
+        f"A23 (K1): handleExecute useCallback dependency array'inde "
+        f"eksik state/fonksiyon: {sorted(missing)}. Eski bug geri dondu "
+        f"— sl/tp degistirildikten sonra stale closure MT5'e eski "
+        f"degeri gonderir."
+    )
+
+    # Audit marker
+    assert "A23" in src, (
+        "ManualTrade.jsx A23 audit markerin yok — regresyon takibi icin "
+        "gerekli."
+    )
+
+
 # ── Flow 4zg: DATA_GAP gurultu azaltma (A28/K6) ──────────────────
 def test_data_gap_noise_reduction():
     """A28 (K6): Ayarlar sayfasinda Sistem log ilk 5 kaydi hepsi
