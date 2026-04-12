@@ -231,6 +231,9 @@ export default function Nabiz() {
 
       {/* ── Eksik Retention Tablosu ─────────────────────────────── */}
       <MissingRetentionPanel items={conflict.missing_retention || []} />
+
+      {/* ── Widget Denetimi A26 (K4): Kritik esik asimi paneli ── */}
+      <CriticalOverThresholdPanel items={conflict.critical_over_threshold || []} />
     </div>
   );
 }
@@ -471,6 +474,42 @@ function MissingRetentionPanel({ items }) {
 }
 
 
+// Widget Denetimi A26 (K4): Kritik esik tablolari paneli. Backend
+// _build_cleanup_conflict_info içinde NABIZ_TABLE_ROW_THRESHOLDS danger
+// esigini asan tablolari `critical_over_threshold` listesinde dondurur.
+// Eskiden bu durum (ornek: bars 183,078 >= 150,000) sensore carpmiyor,
+// operator erken uyari goremiyordu. Simdi kirmizi banner olarak gorunur.
+function CriticalOverThresholdPanel({ items }) {
+  if (!items || items.length === 0) return null;
+
+  return (
+    <div style={styles.criticalPanel}>
+      <div style={styles.panelHeader}>
+        <h3 style={{ ...styles.panelTitle, color: COLORS.red }}>
+          &#9888; Kritik Esik Asimi
+        </h3>
+        <span style={{ fontSize: 11, color: COLORS.dim }}>{items.length} tablo</span>
+      </div>
+      <div style={styles.missingGrid}>
+        {items.map((item, i) => (
+          <div key={i} style={styles.criticalItem}>
+            <div style={{ fontFamily: 'monospace', fontSize: 12, fontWeight: 600 }}>
+              {item.table}
+            </div>
+            <div style={{ fontSize: 11, color: COLORS.red, marginTop: 4 }}>
+              {formatNumber(item.count)} / {formatNumber(item.danger_threshold)}
+            </div>
+            <div style={{ fontSize: 10, color: COLORS.dim, marginTop: 2 }}>
+              yonetim: {item.managed_by}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+
 // ═══════════════════════════════════════════════════════════════════
 //  STİLLER (inline — Monitor.jsx ile tutarlı)
 // ═══════════════════════════════════════════════════════════════════
@@ -607,5 +646,15 @@ const styles = {
   missingItem: {
     padding: '12px 16px', borderBottom: `1px solid rgba(48,54,61,0.3)`,
     borderRight: `1px solid rgba(48,54,61,0.3)`,
+  },
+  // A26 (K4): Kritik esik paneli — kirmizi ton, missing paneli ile ayirt edilir
+  criticalPanel: {
+    background: 'rgba(248,81,73,0.05)', border: `1px solid rgba(248,81,73,0.3)`,
+    borderRadius: 10, overflow: 'hidden', marginTop: 12,
+  },
+  criticalItem: {
+    padding: '12px 16px', borderBottom: `1px solid rgba(48,54,61,0.3)`,
+    borderRight: `1px solid rgba(48,54,61,0.3)`,
+    background: 'rgba(248,81,73,0.03)',
   },
 };

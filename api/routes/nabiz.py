@@ -277,9 +277,22 @@ def _build_retention_info(engine) -> dict:
 def _build_cleanup_conflict_info(engine) -> dict:
     """Veri yonetim sistemi tutarlilik kontrolu.
 
-    v5.9.3: Cleanup artik sadece bars temizliyor.
-    events ve risk_snapshots tamamen run_retention() tarafindan yonetiliyor.
-    Bu fonksiyon artik retention config tutarliligi ve eksik kapsam kontrolu yapar.
+    v5.9.3: Cleanup artik sadece `bars` temizliyor. events, risk_snapshots,
+    top5_history vs. tamamen run_retention() tarafindan yonetiliyor.
+
+    Widget Denetimi A26 (K4):
+      - Eskiden `retention_covered` set'i `bars`'i icermiyordu ama bars
+        cleanup ile temizleniyordu. Bu yuzden bars "retention YOK" olarak
+        listeleniyor, kullaniciya sessizce yanlis sinyal veriyordu. Cozum:
+        `cleanup_covered` set'i ayri tutulup `managed_tables` birlesimi
+        (`retention_covered | cleanup_covered`) yonetim kapsami olarak
+        kullaniliyor.
+      - Eskiden `has_conflict` sadece retention tamamen kapaliyken True
+        donuyordu. Gercek bir kirmizi esik asimi (ornek: bars 183,078 satir,
+        danger esigi 150,000) sensore carpmiyordu. Simdi: herhangi bir
+        NABIZ_TABLE_ROW_THRESHOLDS tablosu danger esigini astiginda
+        `critical_over_threshold` listesi dolar ve `has_conflict` True olur.
+        Erken uyari sistemi artik kor degil.
     """
     config = getattr(engine, "config", None) if engine else None
     retention_enabled = config.get("retention.enabled", False) if config else False
@@ -295,45 +308,101 @@ def _build_cleanup_conflict_info(engine) -> dict:
             "risk": "retention devre disi — veriler suresiz buyuyor",
         })
 
-    has_conflict = len(affected) > 0
-
-    # Retention eksik tablolar: DB'deki tum tablolari kontrol et
-    # retention config'de tanimlanan tablolar
+    # A26: Yonetim kapsami iki ayri kumeden olusur:
+    #   retention_covered → run_retention() ile yonetilir
+    #   cleanup_covered   → run_cleanup() ile yonetilir (v5.9.3 sonrasi sadece bars)
     retention_covered = {
         "risk_snapshots", "top5_history", "events",
         "config_history", "liquidity_classes", "hybrid_positions",
         "trades",  # trade_archive_days ile kapsaniyor
     }
+    cleanup_covered = {"bars"}
+    managed_tables = retention_covered | cleanup_covered
 
-    # DB'deki buyuyebilecek tablolar
+    # DB tablo boyutlarini tek seferde cek (hem missing hem critical icin)
     db = get_db()
-    growing_tables = {}
+    sizes: dict[str, int] = {}
     if db:
         try:
-            sizes = db.get_table_sizes()
-            for table, count in sizes.items():
-                if table in ("app_state", "strategies"):
-                    continue  # Sabit/kucuk tablolar
-                if table not in retention_covered and count > 0:
-                    growing_tables[table] = count
+            sizes = db.get_table_sizes() or {}
         except Exception:
-            pass
+            sizes = {}
+
+    # Yonetim kapsami disinda buyuyebilecek tablolar
+    growing_tables = {}
+    for table, count in sizes.items():
+        if table in ("app_state", "strategies"):
+            continue  # Sabit/kucuk tablolar
+        if table not in managed_tables and count > 0:
+            growing_tables[table] = count
 
     missing = []
     for table, count in sorted(growing_tables.items(), key=lambda x: -x[1]):
         missing.append({
             "table": table,
-            "status": f"retention YOK ({count:,} satir)",
+            "status": f"yonetim YOK ({count:,} satir)",
             "daily_growth": "buyuyor" if count > 100 else "dusuk",
         })
 
+    # A26: Kirmizi esik taramasi — NABIZ_TABLE_ROW_THRESHOLDS'daki HER tablo
+    # icin danger esigini kontrol et. Tablo yonetim altinda OLSA BILE danger'i
+    # asmissa cakisma sayilir: retention/cleanup yeterince sik calismiyor
+    # demektir ve operator bunu NABIZ banner'indan gormeli.
+    critical_over_threshold = []
+    for table, thresholds in NABIZ_TABLE_ROW_THRESHOLDS.items():
+        count = sizes.get(table, 0)
+        danger = thresholds.get("danger", 0)
+        if danger > 0 and count >= danger:
+            if table in cleanup_covered:
+                managed_by = "cleanup"
+            elif table in retention_covered:
+                managed_by = "retention"
+            else:
+                managed_by = "UNMANAGED"
+            critical_over_threshold.append({
+                "table": table,
+                "count": count,
+                "danger_threshold": danger,
+                "managed_by": managed_by,
+                "risk": (
+                    f"{table} danger esigini asti ({count:,} >= {danger:,}) — "
+                    f"yonetim={managed_by}, "
+                    "retention/cleanup siklastirilmali"
+                ),
+            })
+
+    # A26: has_conflict artik uc katmanli sensor
+    #   1) Retention tamamen kapali
+    #   2) Yonetim kapsami disinda buyuyen tablo var
+    #   3) Yonetim altinda olsa bile danger esigini asan tablo var
+    has_conflict = (
+        len(affected) > 0
+        or len(missing) > 0
+        or len(critical_over_threshold) > 0
+    )
+
+    # Description: hangi senaryolar tetiklendiyse onlari ozetle
+    if has_conflict:
+        parts = []
+        if affected:
+            parts.append(f"{len(affected)} retention-off uyarisi")
+        if missing:
+            parts.append(f"{len(missing)} yonetimsiz tablo")
+        if critical_over_threshold:
+            parts.append(
+                f"{len(critical_over_threshold)} tablo kirmizi esikte"
+            )
+        description = "Cakisma tespit: " + ", ".join(parts) + "."
+    else:
+        description = (
+            "Cakisma yok — cleanup ve retention uyumlu, "
+            "tum izlenen tablolar esik altinda."
+        )
+
     return {
         "has_conflict": has_conflict,
-        "description": (
-            f"{len(affected)} tablo cakismasi tespit edildi."
-            if has_conflict
-            else "Cakisma yok — cleanup ve retention uyumlu."
-        ),
+        "description": description,
         "affected_tables": affected,
         "missing_retention": missing,
+        "critical_over_threshold": critical_over_threshold,
     }

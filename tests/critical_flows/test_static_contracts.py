@@ -2587,6 +2587,110 @@ def test_primnet_thresholds_visible_card():
     )
 
 
+# ── Flow 4zk: NABIZ retention/cleanup coverage + critical threshold (A26/K4) ──
+def test_nabiz_cleanup_conflict_bars_coverage_and_critical_scan():
+    """A26 (K4): NABIZ _build_cleanup_conflict_info iki kritik hata
+    iceriyordu:
+
+    1. `retention_covered` set'i `bars`'i icermiyordu ama bars cleanup
+       ile yonetiliyordu — bars "retention YOK" olarak listelenip
+       kullaniciya sessizce yanlis sinyal veriyordu.
+    2. `has_conflict` sensoru sadece retention tamamen kapaliyken True
+       donuyordu. Bars 183,078 satirla danger esigini (150,000) asmis
+       olsa bile conflict accordion'u gizli kaliyordu — erken uyari kor.
+
+    Duzeltme:
+    - cleanup_covered = {"bars"} eklendi
+    - managed_tables = retention_covered | cleanup_covered
+    - NABIZ_TABLE_ROW_THRESHOLDS taramasi yapiliyor — danger esigini
+      asan tablolar `critical_over_threshold` listesinde raporlaniyor
+    - has_conflict = affected | missing | critical_over_threshold
+    - Frontend Nabiz.jsx'e CriticalOverThresholdPanel eklendi
+    """
+    import re
+    nabiz_path = ROOT / "api" / "routes" / "nabiz.py"
+    assert nabiz_path.exists(), "api/routes/nabiz.py bulunamadi"
+    src = nabiz_path.read_text(encoding="utf-8")
+
+    # 1) cleanup_covered set ayri tutuluyor + bars iceriyor
+    assert re.search(r'cleanup_covered\s*=\s*\{\s*"bars"\s*\}', src), (
+        "api/routes/nabiz.py icinde `cleanup_covered = {\"bars\"}` tanimi yok "
+        "— A26 fix uygulanmamis."
+    )
+
+    # 2) managed_tables birlesimi kullaniliyor
+    assert "managed_tables = retention_covered | cleanup_covered" in src, (
+        "api/routes/nabiz.py icinde `managed_tables = retention_covered | "
+        "cleanup_covered` birlesimi yok."
+    )
+    assert "table not in managed_tables" in src, (
+        "api/routes/nabiz.py icinde `table not in managed_tables` kontrolu "
+        "yok — missing listesi hala `retention_covered` tekil setine bakiyor."
+    )
+
+    # 3) NABIZ_TABLE_ROW_THRESHOLDS danger esik taramasi yapiliyor
+    assert "critical_over_threshold" in src, (
+        "api/routes/nabiz.py icinde `critical_over_threshold` listesi yok."
+    )
+    assert re.search(
+        r'for\s+table,\s*thresholds\s+in\s+NABIZ_TABLE_ROW_THRESHOLDS\.items\(\)',
+        src,
+    ), (
+        "api/routes/nabiz.py _build_cleanup_conflict_info icinde "
+        "NABIZ_TABLE_ROW_THRESHOLDS uzerinden iterasyon yok — esik "
+        "taramasi eksik."
+    )
+    assert re.search(r'count\s*>=\s*danger', src), (
+        "api/routes/nabiz.py icinde `count >= danger` esik karsilastirmasi yok."
+    )
+
+    # 4) has_conflict uc katmanli — affected/missing/critical_over_threshold
+    has_conflict_match = re.search(
+        r'has_conflict\s*=\s*\(\s*len\(affected\).*?len\(missing\).*?'
+        r'len\(critical_over_threshold\).*?\)',
+        src,
+        re.DOTALL,
+    )
+    assert has_conflict_match, (
+        "api/routes/nabiz.py icinde `has_conflict` uc katmanli degil: "
+        "affected, missing ve critical_over_threshold birlesimi bekleniyor."
+    )
+
+    # 5) Return payload'inda critical_over_threshold alani var
+    assert re.search(
+        r'"critical_over_threshold"\s*:\s*critical_over_threshold',
+        src,
+    ), (
+        "api/routes/nabiz.py return payload'inda `critical_over_threshold` "
+        "alani yok — frontend alanı okuyamaz."
+    )
+
+    # 6) A26 audit marker backend'te
+    assert "A26" in src, (
+        "api/routes/nabiz.py icinde A26 audit markerin yok."
+    )
+
+    # 7) Frontend Nabiz.jsx CriticalOverThresholdPanel bileseni ve render
+    nabiz_jsx = ROOT / "desktop" / "src" / "components" / "Nabiz.jsx"
+    assert nabiz_jsx.exists(), "desktop/src/components/Nabiz.jsx bulunamadi"
+    jsx = nabiz_jsx.read_text(encoding="utf-8")
+
+    assert "function CriticalOverThresholdPanel" in jsx, (
+        "Nabiz.jsx icinde CriticalOverThresholdPanel fonksiyonu yok."
+    )
+    assert re.search(
+        r'<CriticalOverThresholdPanel\s+items=\{conflict\.critical_over_threshold',
+        jsx,
+    ), (
+        "Nabiz.jsx render agacinda "
+        "`<CriticalOverThresholdPanel items={conflict.critical_over_threshold...` "
+        "cagrisi yok."
+    )
+    assert "A26" in jsx, (
+        "Nabiz.jsx icinde A26 audit markerin yok."
+    )
+
+
 # ── Flow 4zj: Event 5000 limit truncation alarm (A25/K3) ──
 def test_error_dashboard_event_truncation_alarm():
     """A25 (K3): /api/errors/summary endpoint'i 7 gunluk event sorgusunda
