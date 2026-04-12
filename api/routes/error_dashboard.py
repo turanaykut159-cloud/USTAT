@@ -109,7 +109,13 @@ def _categorize(event_type: str) -> str:
 # ── Response Models ──
 
 class ErrorSummaryResponse(BaseModel):
-    """Dashboard özet verisi."""
+    """Dashboard özet verisi.
+
+    Widget Denetimi A25 (K3): `truncation_warning` alanı 7 günlük event
+    sorgusu 5000 limitine değdiğinde doldurulur — bu durumda eski kayıtlar
+    sessizce düşer ve özet eksiktir. Frontend banner ile kullanıcıya
+    bildirir, retention politikası gözden geçirilir.
+    """
     today_errors: int = 0
     today_warnings: int = 0
     total_errors: int = 0
@@ -121,6 +127,7 @@ class ErrorSummaryResponse(BaseModel):
     by_category: dict = {}
     by_severity: dict = {}
     latest_error: dict | None = None
+    truncation_warning: str | None = None
 
 
 class ErrorGroupItem(BaseModel):
@@ -194,7 +201,14 @@ def _fetch_events_from_db(
     since: str | None = None,
     limit: int = 1000,
 ) -> list[dict]:
-    """Events tablosundan kayıt çek. Sadece WARNING+ seviye."""
+    """Events tablosundan kayıt çek. Sadece WARNING+ seviye.
+
+    Widget Denetimi A25 (K3): Eğer dönen kayıt sayısı `limit`'e eşitse
+    veritabanında daha fazla kayıt olabilir ve bu çağrı eski kayıtları
+    sessizce düşürmüş demektir. Bu durum logger.warning ile loglanır;
+    çağıran (özellikle /summary endpoint'i) `len(events) >= limit` ile
+    truncation'u tespit edip frontend'e banner basar.
+    """
     db = get_db()
     if not db:
         return []
@@ -217,10 +231,21 @@ def _fetch_events_from_db(
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         params.append(limit)
 
-        return db._fetch_all(
+        rows = db._fetch_all(
             f"SELECT * FROM events {where} ORDER BY id DESC LIMIT ?",
             tuple(params),
         )
+
+        # A25 (K3): truncation alarm — kayıt sayısı limite değdi
+        if len(rows) >= limit:
+            logger.warning(
+                "events query truncation: returned=%d limit=%d since=%s "
+                "severity_filter=%s — eski kayıtlar düşmüş olabilir, "
+                "retention politikasını gözden geçirin",
+                len(rows), limit, since, severity_filter,
+            )
+
+        return rows
     except Exception as exc:
         logger.warning("DB events çekme hatası: %s", exc)
         return []
@@ -312,7 +337,17 @@ async def get_error_summary():
 
         # Son 7 günlük eventler
         week_start = (now - timedelta(days=7)).isoformat()
-        events = _fetch_events_from_db(since=week_start, limit=5000)
+        SUMMARY_EVENT_LIMIT = 5000
+        events = _fetch_events_from_db(since=week_start, limit=SUMMARY_EVENT_LIMIT)
+
+        # A25 (K3): truncation alarm hesapla — kayıt sayısı limite değdi mi?
+        truncation_warning: str | None = None
+        if len(events) >= SUMMARY_EVENT_LIMIT:
+            truncation_warning = (
+                f"Son 7 gün içinde {SUMMARY_EVENT_LIMIT}+ event mevcut — "
+                "özet kayıtları eksik olabilir. Düşük öncelikli event "
+                "retention politikası gözden geçirilmeli."
+            )
 
         if not events:
             return ErrorSummaryResponse()
@@ -396,6 +431,7 @@ async def get_error_summary():
             by_category=dict(by_category),
             by_severity=dict(by_severity),
             latest_error=latest_error,
+            truncation_warning=truncation_warning,
         )
     except Exception as exc:
         logger.exception("error_summary HATASI: %s", exc)

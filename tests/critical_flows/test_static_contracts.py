@@ -2587,6 +2587,109 @@ def test_primnet_thresholds_visible_card():
     )
 
 
+# ── Flow 4zj: Event 5000 limit truncation alarm (A25/K3) ──
+def test_error_dashboard_event_truncation_alarm():
+    """A25 (K3): /api/errors/summary endpoint'i 7 gunluk event sorgusunda
+    5000 limit'i ile DB'den okuma yapiyor. Mevcut WARNING akisi (saat
+    tepesi 124, gun toplami >=129) 7 gun x 5000 sinirini delebilir.
+    Limite degildiginde ozet kayar, eski kayitlar sessizce dusurulur ve
+    kullanici bunu fark etmez.
+
+    Duzeltme:
+    - _fetch_events_from_db: len(rows) >= limit ise logger.warning
+    - ErrorSummaryResponse: truncation_warning: str | None alani
+    - get_error_summary: len(events) >= 5000 ise truncation_warning
+      doldurulur
+    - ErrorTracker.jsx: s.truncation_warning varsa sari banner gosterir
+
+    Bu test 5 sozlesme noktasini regex ile dogrular."""
+    ed_path = ROOT / "api" / "routes" / "error_dashboard.py"
+    et_path = ROOT / "desktop" / "src" / "components" / "ErrorTracker.jsx"
+    ed_src = ed_path.read_text(encoding="utf-8")
+    et_src = et_path.read_text(encoding="utf-8")
+
+    # 1. ErrorSummaryResponse schema'sinda truncation_warning alani
+    assert re.search(
+        r"class ErrorSummaryResponse\(BaseModel\):.*?truncation_warning\s*:\s*str\s*\|\s*None\s*=\s*None",
+        ed_src,
+        re.DOTALL,
+    ), (
+        "A25 (K3): ErrorSummaryResponse.truncation_warning alani eksik "
+        "— banner kaynagi yok."
+    )
+
+    # 2. _fetch_events_from_db icinde truncation logger.warning
+    fetch_match = re.search(
+        r"def _fetch_events_from_db\(.*?\nreturn rows\n\s*except",
+        ed_src,
+        re.DOTALL,
+    )
+    # Daha esnek yakalama
+    fetch_block_match = re.search(
+        r"def _fetch_events_from_db\(.*?(?=\ndef |\Z)",
+        ed_src,
+        re.DOTALL,
+    )
+    assert fetch_block_match, "_fetch_events_from_db parse edilemedi"
+    fetch_body = fetch_block_match.group(0)
+    assert "len(rows) >= limit" in fetch_body, (
+        "A25 (K3): _fetch_events_from_db truncation kontrolu "
+        "(len(rows) >= limit) eksik."
+    )
+    assert "logger.warning" in fetch_body and "truncation" in fetch_body, (
+        "A25 (K3): _fetch_events_from_db truncation logger.warning "
+        "cagrisi eksik."
+    )
+
+    # 3. get_error_summary icinde truncation_warning hesaplama
+    summary_match = re.search(
+        r"async def get_error_summary\(.*?(?=\n@router|\ndef |\Z)",
+        ed_src,
+        re.DOTALL,
+    )
+    assert summary_match, "get_error_summary parse edilemedi"
+    summary_body = summary_match.group(0)
+    assert "truncation_warning" in summary_body, (
+        "A25 (K3): get_error_summary truncation_warning yerel degiskeni "
+        "yok."
+    )
+    assert "SUMMARY_EVENT_LIMIT" in summary_body, (
+        "A25 (K3): get_error_summary SUMMARY_EVENT_LIMIT sabiti yok "
+        "(magic number)."
+    )
+    assert re.search(
+        r"len\(events\)\s*>=\s*SUMMARY_EVENT_LIMIT",
+        summary_body,
+    ), (
+        "A25 (K3): get_error_summary truncation kontrol formulu eksik."
+    )
+    assert re.search(
+        r"truncation_warning\s*=\s*truncation_warning",
+        summary_body,
+    ), (
+        "A25 (K3): ErrorSummaryResponse kuruculugunda truncation_warning "
+        "geciliyor mu kontrol edin."
+    )
+
+    # 4. Frontend banner — ErrorTracker.jsx
+    assert "s.truncation_warning" in et_src, (
+        "A25 (K3): ErrorTracker.jsx s.truncation_warning kosulu yok "
+        "— banner render edilmiyor."
+    )
+    assert "error-truncation-banner" in et_src, (
+        "A25 (K3): ErrorTracker.jsx error-truncation-banner className "
+        "eksik (drift koruma anchor)."
+    )
+
+    # 5. A25 audit marker
+    assert "A25" in ed_src, (
+        "error_dashboard.py A25 audit markerin yok."
+    )
+    assert "A25" in et_src, (
+        "ErrorTracker.jsx A25 audit markerin yok."
+    )
+
+
 # ── Flow 4zi: HybridTrade handleCheck/handleTransfer error handling (A24/K2) ──
 def test_hybrid_trade_check_transfer_have_try_catch():
     """A24 (K2): HybridTrade.jsx::handleCheck ve handleTransfer eskiden

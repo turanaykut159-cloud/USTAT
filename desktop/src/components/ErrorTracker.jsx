@@ -283,6 +283,25 @@ export default function ErrorTracker() {
         </div>
       )}
 
+      {/* Widget Denetimi A25 (K3): Truncation banner — backend
+          /api/errors/summary 7 günlük event sorgusunda 5000 limitine
+          değdiğinde bu uyarı görünür. Eski kayıtlar düşmüş demektir,
+          özet eksiktir. Operatör retention politikasını gözden geçirmeli. */}
+      {s.truncation_warning && (
+        <div
+          className="error-truncation-banner"
+          style={{
+            background: '#78350f22', border: '1px solid #d97706', borderRadius: 6,
+            padding: '8px 14px', marginBottom: 14, fontSize: 12, color: '#fbbf24',
+            display: 'flex', alignItems: 'center', gap: 8,
+          }}
+          title="Backend events tablosu 7 gün × 5000 limit aşımı tespit etti"
+        >
+          <span style={{ fontSize: 14 }}>⚠</span>
+          <span><b>Eksik özet:</b> {s.truncation_warning}</span>
+        </div>
+      )}
+
       {/* ── ÇÖZÜMLEME GERİ BİLDİRİM ─────────────────────────── */}
       {resolveMsg && (
         <div style={{
