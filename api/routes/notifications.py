@@ -58,8 +58,8 @@ async def get_notifications(limit: int = 50, unread_only: bool = False):
         )
         for r in rows
     ]
-    unread = sum(1 for i in items if not i.read)
-    return NotificationsResponse(count=len(items), unread_count=unread, notifications=items)
+    global_unread = db.get_unread_notification_count()
+    return NotificationsResponse(count=len(items), unread_count=global_unread, notifications=items)
 
 
 @router.post("/notifications/read")

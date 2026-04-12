@@ -317,14 +317,11 @@ export default function Settings() {
               <FieldRow label="Para Birimi" value={account?.currency || 'TRY'} />
             </div>
 
-            <button className="st-btn st-btn-secondary" onClick={() => {
-              // Electron IPC ile MT5 launcher'a yeni hesap isteği gönder
-              if (window.electronAPI?.restartMT5) {
-                window.electronAPI.restartMT5();
-              } else {
-                alert('MT5 Launcher servisine bağlanılamadı.\nManuel olarak MetaTrader 5\'i yeniden başlatın.');
-              }
-            }}>
+            <button
+              className="st-btn st-btn-secondary"
+              disabled
+              title="Bu özellik yakında eklenecek — şimdilik MT5 terminalinden hesap değiştirin"
+            >
               Farklı Hesap ile Giriş
             </button>
           </section>

@@ -3177,8 +3177,8 @@ def test_no_rogue_mt5_initialize_calls():
         "health_check.py",
         "api/routes/mt5_verify.py",  # MT5 verify endpoint — dokunulabilir degil
     }
-    # archive/, tests/, .agent/, desktop/scripts/ tum test/archive dosyalari atlanacak
-    skip_prefixes = ("archive/", "tests/", ".agent/", "desktop/scripts/")
+    # archive/, tests/, .agent/, desktop/scripts/, .claude/ tum test/archive/worktree dosyalari atlanacak
+    skip_prefixes = ("archive/", "tests/", ".agent/", "desktop/scripts/", ".claude/")
 
     violations: list[str] = []
     for py in ROOT.rglob("*.py"):

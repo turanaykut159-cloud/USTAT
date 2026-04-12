@@ -202,6 +202,7 @@ class Engine:
         self._last_backup_cycle: int = 0  # v5.4.1: periyodik yedekleme sayacı
         self._consecutive_slow_cycles: int = 0  # v5.4.1: ardışık yavaş cycle sayacı
         self._last_successful_cycle_time: float = 0.0  # v5.4.1: son başarılı cycle epoch
+        self._last_cycle_time: datetime | None = None  # v6.0 P0-04: status.py okur
         self._last_weekly_maintenance: date | None = None  # Haftalık bakım tarihi
 
     # ═════════════════════════════════════════════════════════════════
@@ -273,11 +274,11 @@ class Engine:
                 "Kullanıcı Electron'dan MT5 bağlantısı kurunca otomatik aktif olacak."
             )
             self._log_event(
-                "SMOKE_TEST_WARN",
-                f"Smoke test başarısız: {fail_names} — kısıtlı mod",
+                "NO_MT5_RESTRICTED_MODE",
+                "MT5 bağlantısı yok — engine kısıtlı modda başlıyor (smoke test atlandı)",
                 "WARNING",
             )
-            # v5.9.2: Smoke test başarısız olsa bile engine'i BAŞLAT.
+            # v5.9.2: MT5 yoksa engine kısıtlı modda başlar.
             # BABA zaten can_trade=False verecek, risk koruması aktif.
 
         # 1.5. MT5 işlem geçmişi senkronizasyonu (tek seferlik)
@@ -754,6 +755,9 @@ class Engine:
         """
         _pc = _time.perf_counter
         t0 = _pc()
+
+        # v6.0 P0-04: Her cycle başında zaman damgası — status.py okur
+        self._last_cycle_time = datetime.now()
 
         # ── 1. MT5 Heartbeat ──────────────────────────────────────
         if not self.mt5.is_connected:
