@@ -704,11 +704,11 @@ class Ogul:
         Returns:
             ``"BUY"``, ``"SELL"`` veya ``"NOTR"``.
         """
-        detail = self._get_voting_detail(symbol)
+        detail = self.get_voting_detail(symbol)
         return detail["direction"]
 
-    def _get_voting_detail(self, symbol: str) -> dict:
-        """Detaylı oylama sonucu (pozisyon yönetiminde kullanılır).
+    def get_voting_detail(self, symbol: str) -> dict:
+        """Detaylı oylama sonucu (pozisyon yönetiminde ve API'de kullanılır).
 
         Returns:
             dict: direction, buy_votes, sell_votes, total_favorable,

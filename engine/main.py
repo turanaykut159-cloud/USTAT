@@ -205,6 +205,11 @@ class Engine:
         self._last_cycle_time: datetime | None = None  # v6.0 P0-04: status.py okur
         self._last_weekly_maintenance: date | None = None  # Haftalık bakım tarihi
 
+    @property
+    def is_running(self) -> bool:
+        """Engine çalışıyor mu? (P1-API-01: deps.py public erişim)."""
+        return self._running
+
     # ═════════════════════════════════════════════════════════════════
     #  BAŞLATMA / DURDURMA
     # ═════════════════════════════════════════════════════════════════

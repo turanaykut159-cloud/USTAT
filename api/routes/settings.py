@@ -87,8 +87,8 @@ async def get_risk_baseline():
     # Fallback: baba'dan oku
     if not baseline:
         baba = get_baba()
-        if baba and hasattr(baba, "_risk_baseline_date"):
-            baseline = baba._risk_baseline_date
+        if baba and hasattr(baba, "risk_baseline_date"):
+            baseline = baba.risk_baseline_date
             source = "baba"
 
     return RiskBaselineGetResponse(baseline_date=baseline, source=source)
@@ -149,8 +149,8 @@ async def update_risk_baseline(req: RiskBaselineUpdateRequest):
 
     # 4. Baba runtime referansını güncelle
     baba = get_baba()
-    if baba and hasattr(baba, "_risk_baseline_date"):
-        baba._risk_baseline_date = new_date
+    if baba and hasattr(baba, "risk_baseline_date"):
+        baba.risk_baseline_date = new_date
         logger.info(
             f"Baba risk baseline güncellendi: {old_date} → {new_date}"
         )

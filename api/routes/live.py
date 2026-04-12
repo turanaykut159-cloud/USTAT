@@ -304,7 +304,7 @@ async def _send_all_updates(ws: WebSocket):
             "type": "status",
             "regime": regime,
             "regime_confidence": regime_confidence,
-            "kill_switch_level": baba._kill_switch_level,
+            "kill_switch_level": baba.kill_switch_level,
             "can_trade": can_trade,
             "engine_running": True,
             "risk_multiplier": risk_multiplier,

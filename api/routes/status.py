@@ -44,16 +44,16 @@ async def get_status():
     kill_switch_level = 0
     daily_trade_count = 0
     if baba:
-        kill_switch_level = baba._kill_switch_level
-        daily_trade_count = baba._risk_state.get("daily_trade_count", 0)
+        kill_switch_level = baba.kill_switch_level
+        daily_trade_count = baba.daily_trade_count
 
-    # Faz
-    if not engine_running:
+    # Faz — öncelik: risk > lifecycle > connectivity (P1-API-03)
+    if kill_switch_level >= 3:
+        phase = "killed"
+    elif not engine_running:
         phase = "stopped"
     elif not mt5_connected:
         phase = "error"
-    elif kill_switch_level >= 3:
-        phase = "killed"
     else:
         phase = "running"
 

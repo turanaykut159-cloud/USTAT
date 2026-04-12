@@ -52,7 +52,7 @@ API_PORT = 8000
 DIST_DIR = os.path.join(USTAT_DIR, "desktop", "dist")
 LOG_FILE = os.path.join(USTAT_DIR, "startup.log")
 BG_COLOR = "#0d1117"
-APP_TITLE = "ÜSTAT v5.9 VİOP Algorithmic Trading"
+APP_TITLE = "ÜSTAT v6.0 VİOP Algorithmic Trading"
 
 IS_DEV = "--dev" in sys.argv
 NO_TRAY = "--no-tray" in sys.argv
@@ -122,7 +122,7 @@ SPLASH_HTML = f"""<!DOCTYPE html>
 font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#e6edf3;margin:0">
 <div style="text-align:center">
 <h1 style="font-size:48px;margin:0;font-weight:300;letter-spacing:2px">
-\u00dcSTAT <span style="color:#484f58;font-size:24px">v5.9</span></h1>
+\u00dcSTAT <span style="color:#484f58;font-size:24px">v6.0</span></h1>
 <p style="color:#484f58;margin:20px 0 30px;font-size:14px">V\u0130OP Algorithmic Trading</p>
 <div style="width:36px;height:36px;border:3px solid #21262d;border-top-color:#58a6ff;
 border-radius:50%;animation:s 1s linear infinite;margin:0 auto"></div>
@@ -1151,7 +1151,7 @@ def main():
         f.write("")
 
     slog("=" * 60)
-    slog(f"USTAT v5.9 Baslatici (multiprocessing)")
+    slog(f"USTAT v6.0 Baslatici (multiprocessing)")
     slog(f"Python: {sys.executable}")
     slog(f"Mod: {'DEV' if IS_DEV else 'PRODUCTION'}")
     slog("=" * 60)

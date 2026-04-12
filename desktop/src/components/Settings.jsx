@@ -21,7 +21,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { getAccount, getStatus, getEvents, getRiskBaseline, updateRiskBaseline, updateNotificationPrefs } from '../services/api';
+import { getAccount, getStatus, getEvents, getRiskBaseline, updateRiskBaseline, getNotificationPrefs, updateNotificationPrefs } from '../services/api';
 // Widget Denetimi H16: Operatör adı canonical kaynağa bağlandı.
 // localStorage'ta saklanır; TradeHistory.jsx::handleApprove,
 // SideNav.jsx::handleKillSwitch ve TopBar.jsx::handleKsReset
@@ -148,11 +148,12 @@ export default function Settings() {
 
   const fetchData = useCallback(async () => {
     setLoading(true);
-    const [acc, sts, evt, bl] = await Promise.all([
+    const [acc, sts, evt, bl, np] = await Promise.all([
       getAccount(),
       getStatus(),
       getEvents({ limit: logLimit }),
       getRiskBaseline(),
+      getNotificationPrefs(),
     ]);
     setAccount(acc);
     setStatusData(sts);
@@ -163,6 +164,12 @@ export default function Settings() {
       const parts = bl.baseline_date.split(' ');
       setBaselineDateInput(parts[0] || '');
       setBaselineTimeInput(parts[1] || '00:00');
+    }
+    // P1-API-06: Backend tek kaynak — localStorage sadece cache
+    if (np?.prefs) {
+      const merged = { ...DEFAULT_PREFS, ...np.prefs };
+      setPrefs(merged);
+      localStorage.setItem('ustat_notification_prefs', JSON.stringify(merged));
     }
     setLoading(false);
   }, [logLimit]);

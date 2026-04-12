@@ -180,6 +180,34 @@ class HEngine:
         )
 
     # ═════════════════════════════════════════════════════════════════
+    #  PUBLIC ACCESSOR'LAR (P1-API-01: API private sızıntı önleme)
+    # ═════════════════════════════════════════════════════════════════
+
+    @property
+    def primnet_trailing(self) -> float:
+        return self._primnet_trailing
+
+    @property
+    def primnet_target(self) -> float:
+        return self._primnet_target
+
+    @property
+    def max_concurrent(self) -> int:
+        return self._max_concurrent
+
+    @property
+    def daily_hybrid_pnl(self) -> float:
+        return self._daily_hybrid_pnl
+
+    @property
+    def config_daily_limit(self) -> float:
+        return self._config_daily_limit
+
+    @property
+    def native_sltp(self) -> bool:
+        return self._native_sltp
+
+    # ═════════════════════════════════════════════════════════════════
     #  YARDIMCI — Sembol listesi (OĞUL entegrasyonu)
     # ═════════════════════════════════════════════════════════════════
 

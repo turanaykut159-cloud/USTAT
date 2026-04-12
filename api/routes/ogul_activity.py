@@ -78,7 +78,7 @@ async def get_ogul_activity():
 
             # Oylama detayını al (DB sorgusu — hafif)
             try:
-                detail = ogul._get_voting_detail(symbol)
+                detail = ogul.get_voting_detail(symbol)
             except Exception:
                 detail = {}
 

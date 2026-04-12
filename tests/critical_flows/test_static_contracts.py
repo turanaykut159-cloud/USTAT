@@ -2549,11 +2549,11 @@ def test_primnet_thresholds_visible_card():
         "HybridStatusResponse.primnet alani yok — A11 frontend kart "
         "kaynaksiz kalir."
     )
-    assert "trailing_prim=h_engine._primnet_trailing" in route_src, (
+    assert "trailing_prim=h_engine.primnet_trailing" in route_src, (
         "api/routes/hybrid_trade.py icinde primnet_cfg trailing_prim "
         "atamasi yok — engine canonical kaynaktan kopmus."
     )
-    assert "target_prim=h_engine._primnet_target" in route_src, (
+    assert "target_prim=h_engine.primnet_target" in route_src, (
         "api/routes/hybrid_trade.py icinde primnet_cfg target_prim "
         "atamasi yok — engine canonical kaynaktan kopmus."
     )

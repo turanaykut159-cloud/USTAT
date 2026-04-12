@@ -1453,7 +1453,7 @@ class MT5Bridge:
                         # Pozisyonu KAPATMA — _execute_signal'daki OgulSLTP
                         # mekanizması (Stop/Limit pending emirler) ile SL/TP konulacak.
                         # OgulSLTP da başarısız olursa, koruma kuralı ORADA uygulanır.
-                        logger.warning(
+                        logger.error(
                             f"TRADE_ACTION_SLTP {SLTP_MAX_RETRIES} denemede "
                             f"başarısız [{symbol}] — OgulSLTP'ye bırakılıyor "
                             f"(Stop/Limit pending emir ile SL/TP konulacak)"

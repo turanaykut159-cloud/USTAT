@@ -53,7 +53,7 @@ async def trigger_killswitch(req: KillSwitchRequest):
         except Exception as e:
             return KillSwitchResponse(
                 success=False,
-                kill_switch_level=baba._kill_switch_level,
+                kill_switch_level=baba.kill_switch_level,
                 message=f"Kill-switch aktivasyon hatası: {e}",
             )
 
@@ -70,19 +70,19 @@ async def trigger_killswitch(req: KillSwitchRequest):
             else:
                 return KillSwitchResponse(
                     success=False,
-                    kill_switch_level=baba._kill_switch_level,
+                    kill_switch_level=baba.kill_switch_level,
                     message="Aktif kill-switch yok veya onaylama başarısız.",
                 )
         except Exception as e:
             return KillSwitchResponse(
                 success=False,
-                kill_switch_level=baba._kill_switch_level,
+                kill_switch_level=baba.kill_switch_level,
                 message=f"Kill-switch onay hatası: {e}",
             )
 
     # ── Bilinmeyen aksiyon ───────────────────────────────────────
     return KillSwitchResponse(
         success=False,
-        kill_switch_level=baba._kill_switch_level,
+        kill_switch_level=baba.kill_switch_level,
         message=f"Bilinmeyen aksiyon: '{req.action}'. 'activate' veya 'acknowledge' kullanın.",
     )

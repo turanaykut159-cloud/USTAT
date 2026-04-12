@@ -1,5 +1,5 @@
 /**
- * ÜSTAT v5.7 Desktop — Ana uygulama bileşeni.
+ * ÜSTAT v6.0 Desktop — Ana uygulama bileşeni.
  *
  * HashRouter kullanılır (Electron file:// protokolü uyumu).
  * React Router v6 ile 5 sayfa yönlendirme.
@@ -50,6 +50,7 @@ export default function App() {
   }
 
   return (
+    <ErrorBoundary label="App">
     <HashRouter>
       <div className="app-container">
         <TopBar />
@@ -74,5 +75,6 @@ export default function App() {
         </div>
       </div>
     </HashRouter>
+    </ErrorBoundary>
   );
 }

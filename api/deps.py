@@ -100,4 +100,4 @@ def is_engine_running() -> bool:
     """Engine çalışıyor mu?"""
     if _engine is None:
         return False
-    return getattr(_engine, '_running', False)
+    return getattr(_engine, 'is_running', False)

@@ -48,9 +48,9 @@ async def get_risk():
 
             # Baseline tarih (Baba'dan al, yoksa fallback)
             baseline_iso = ""
-            if baba and hasattr(baba, "_risk_baseline_date"):
+            if baba and hasattr(baba, "risk_baseline_date"):
                 from engine.baba import _baseline_to_iso
-                baseline_iso = _baseline_to_iso(baba._risk_baseline_date)
+                baseline_iso = _baseline_to_iso(baba.risk_baseline_date)
 
             # weekly_drawdown_pct: hafta başı equity'den anlık hesapla (baseline filtreli)
             today = date.today()
@@ -92,12 +92,12 @@ async def get_risk():
             resp.risk_multiplier = baba.current_regime.risk_multiplier
 
         # Kill-switch
-        resp.kill_switch_level = baba._kill_switch_level
-        resp.kill_switch_details = dict(baba._kill_switch_details) if baba._kill_switch_details else {}
-        resp.blocked_symbols = list(baba._killed_symbols)
+        resp.kill_switch_level = baba.kill_switch_level
+        resp.kill_switch_details = baba.kill_switch_details
+        resp.blocked_symbols = baba.killed_symbols
 
         # Risk state sayaçlar
-        rs = baba._risk_state
+        rs = baba.risk_state
         resp.daily_trade_count = rs.get("daily_trade_count", 0)
         resp.consecutive_losses = rs.get("consecutive_losses", 0)
 

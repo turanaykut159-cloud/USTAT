@@ -488,8 +488,7 @@ Bu değerler uygulamanın güvenlik parametreleridir. Değiştirilmeden önce me
 | `CB_FAILURE_THRESHOLD` | 5 | engine/mt5_bridge.py | Circuit breaker eşiği |
 | `CB_COOLDOWN_SECS` | 30sn | engine/mt5_bridge.py | Circuit breaker bekleme |
 | `MT5_CALL_TIMEOUT` | 8sn | engine/mt5_bridge.py | MT5 çağrı timeout |
-| `WATCHDOG_STALE_SECS` | 45sn | start_ustat.py | Watchdog heartbeat eşiği |
-| `MAX_AUTO_RESTARTS` | 5 | start_ustat.py | Maks otomatik yeniden başlatma |
+| `SHUTDOWN_MAX_WAIT` | 45sn | start_ustat.py | Graceful shutdown max bekleme |
 | `sltp_max_retries` | 3 | config/default.json | SL/TP ekleme deneme sayısı |
 | `close_max_retries` | 3 | config/default.json | Pozisyon kapatma deneme sayısı |
 

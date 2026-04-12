@@ -2046,6 +2046,31 @@ class Baba:
         """Art arda zarar sayısı."""
         return self._risk_state.get("consecutive_losses", 0)
 
+    @property
+    def risk_state(self) -> dict:
+        """Risk state sözlüğünün salt-okunur kopyası (P1-API-01)."""
+        return dict(self._risk_state)
+
+    @property
+    def kill_switch_details(self) -> dict:
+        """Kill-switch detay sözlüğünün kopyası (P1-API-01)."""
+        return dict(self._kill_switch_details) if self._kill_switch_details else {}
+
+    @property
+    def killed_symbols(self) -> list[str]:
+        """Durdurulmuş kontrat listesi (P1-API-01)."""
+        return list(self._killed_symbols)
+
+    @property
+    def risk_baseline_date(self):
+        """Risk hesaplama başlangıç tarihi (P1-API-01)."""
+        return self._risk_baseline_date
+
+    @risk_baseline_date.setter
+    def risk_baseline_date(self, value):
+        """Risk hesaplama başlangıç tarihini güncelle."""
+        self._risk_baseline_date = value
+
     # ═════════════════════════════════════════════════════════════════
     #  KORELASYON YÖNETİMİ
     # ═════════════════════════════════════════════════════════════════

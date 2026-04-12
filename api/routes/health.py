@@ -89,10 +89,10 @@ async def get_health():
         if mt5_bridge and hasattr(mt5_bridge, "is_trade_allowed"):
             mt5_data["trade_allowed"] = bool(mt5_bridge.is_trade_allowed())
         else:
-            mt5_data["trade_allowed"] = True  # bilinmiyor => varsayilan ACIK
+            mt5_data["trade_allowed"] = False  # bilinmiyor => Anayasa Kural 9 fail-safe: suphe=dur
     except Exception as exc:
         logger.debug(f"trade_allowed okunamadi: {exc}")
-        mt5_data["trade_allowed"] = True
+        mt5_data["trade_allowed"] = False  # Anayasa Kural 9 fail-safe: exception=dur
 
     # ── 2. Katman durumları ───────────────────────────────────────
     layers = _build_layers()

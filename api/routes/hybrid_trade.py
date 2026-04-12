@@ -108,16 +108,16 @@ async def get_hybrid_status():
 
     # PRİMNET config
     primnet_cfg = PrimnetConfig(
-        trailing_prim=h_engine._primnet_trailing,
-        target_prim=h_engine._primnet_target,
+        trailing_prim=h_engine.primnet_trailing,
+        target_prim=h_engine.primnet_target,
     )
 
     return HybridStatusResponse(
         active_count=len(items),
-        max_count=h_engine._max_concurrent,
-        daily_pnl=h_engine._daily_hybrid_pnl,
-        daily_limit=h_engine._config_daily_limit,
-        native_sltp=h_engine._native_sltp,
+        max_count=h_engine.max_concurrent,
+        daily_pnl=h_engine.daily_hybrid_pnl,
+        daily_limit=h_engine.config_daily_limit,
+        native_sltp=h_engine.native_sltp,
         positions=items,
         primnet=primnet_cfg,
     )
