@@ -1981,10 +1981,10 @@ class Database:
 
     def get_unread_notification_count(self) -> int:
         """Global okunmamış bildirim sayısı (v6.0 P0-05)."""
-        row = self._execute(
-            "SELECT COUNT(*) FROM notifications WHERE read=0", fetch=True,
+        rows = self._fetch_all(
+            "SELECT COUNT(*) as cnt FROM notifications WHERE read=0",
         )
-        return row[0][0] if row else 0
+        return rows[0]["cnt"] if rows else 0
 
     # ═════════════════════════════════════════════════════════════════
     #  HİBRİT PERFORMANS İSTATİSTİKLERİ

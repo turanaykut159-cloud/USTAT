@@ -55,6 +55,18 @@
 
 ---
 
+## [6.0.0] — 2026-04-12
+
+### Added
+- #207 — Otomatik İşlem Paneli stat kartlarına (DURUM, AKTİF REJİM, LOT ÇARPANI, OTO. İŞLEM) ayrı ayrı sürükle-bırak sıralama özelliği eklendi. İç içe DndContext + horizontalListSortingStrategy ile yatay sıralama, localStorage ile kalıcı. SortableStatCard helper bileşeni + theme.css stat-drag-hint CSS eklendi. 2 dosya (AutoTrading.jsx, theme.css).
+- #206 — Otomatik İşlem Paneli'ne sürükle-bırak kart sıralama eklendi (5 ana kart: Durum Kartları, Top 5 & Özet, Aktif Pozisyonlar, Son İşlemler, Oğul Aktivite). HybridTrade.jsx referans alındı, @dnd-kit + SortableCard + localStorage kalıcılığı.
+
+### Fixed
+- #205 — Manuel İşlem Paneli "Cannot access 'W' before initialization" hatası düzeltildi — `handleReset` useCallback tanımı `handleExecute`'den önceye taşındı (JavaScript TDZ sorunu).
+- #204 — database.py `get_unread_notification_count()` API 500 hatası düzeltildi — `_execute(fetch=True)` yanlış parametresi `_fetch_all()` ile değiştirildi.
+
+---
+
 ## [6.0.0] — 2026-04-11 "ÜSTAT Plus V6.0"
 
 ### Fixed

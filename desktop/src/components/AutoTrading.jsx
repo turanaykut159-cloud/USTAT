@@ -13,10 +13,26 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  horizontalListSortingStrategy,
+  arrayMove,
+  useSortable,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import {
   getStatus, getTop5, getPositions, getTrades, reactivateSymbols,
   getOgulActivity, getHealth, connectLiveWS,
 } from '../services/api';
 import { formatMoney, formatPrice, pnlClass, elapsed } from '../utils/formatters';
+import SortableCard from './SortableCard';
 
 // ── Yardımcılar ──────────────────────────────────────────────────
 
@@ -44,6 +60,24 @@ const REGIME_META = {
 // Otomatik strateji isimleri
 const AUTO_STRATEGIES = new Set(['trend_follow', 'mean_reversion', 'breakout']);
 
+// ── Sürüklenebilir Stat Kartı (yatay — küçük kartlar için) ───────
+
+function SortableStatCard({ id, children }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.55 : 1,
+    zIndex: isDragging ? 100 : undefined,
+  };
+  return (
+    <div ref={setNodeRef} style={style} className="auto-stat-card" {...attributes} {...listeners}>
+      <div className="stat-drag-hint">⋮⋮</div>
+      {children}
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════
 //  OTOMATİK İŞLEM PANELİ
 // ═══════════════════════════════════════════════════════════════════
@@ -68,6 +102,79 @@ export default function AutoTrading() {
   const [loading, setLoading] = useState(true);
   const [alarms, setAlarms] = useState({});
   const wsRef = useRef(null);
+
+  // ── Sürükle-bırak kart sırası ──────────────────────────────────
+  const DEFAULT_CARD_ORDER = ['stats', 'main', 'positions', 'trades', 'ogul'];
+  const STORAGE_KEY = 'ustat_auto_card_order';
+
+  const [cardOrder, setCardOrder] = useState(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length === DEFAULT_CARD_ORDER.length) return parsed;
+      }
+    } catch { /* bozuk veri — varsayılana dön */ }
+    return DEFAULT_CARD_ORDER;
+  });
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+  );
+
+  const handleDragEnd = useCallback((event) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    setCardOrder((prev) => {
+      const oldIndex = prev.indexOf(active.id);
+      const newIndex = prev.indexOf(over.id);
+      if (oldIndex === -1 || newIndex === -1) return prev;
+
+      const reordered = arrayMove(prev, oldIndex, newIndex);
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(reordered)); } catch {}
+      return reordered;
+    });
+  }, []);
+
+  const handleResetOrder = useCallback(() => {
+    setCardOrder(DEFAULT_CARD_ORDER);
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_CARD_ORDER)); } catch {}
+    setStatOrder(DEFAULT_STAT_ORDER);
+    try { localStorage.setItem(STAT_STORAGE_KEY, JSON.stringify(DEFAULT_STAT_ORDER)); } catch {}
+  }, []);
+
+  // ── Stat kartları sürükle-bırak (yatay) ─────────────────────────
+  const DEFAULT_STAT_ORDER = ['durum', 'rejim', 'lot', 'islem'];
+  const STAT_STORAGE_KEY = 'ustat_auto_stat_order';
+
+  const [statOrder, setStatOrder] = useState(() => {
+    try {
+      const saved = localStorage.getItem(STAT_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length === DEFAULT_STAT_ORDER.length) return parsed;
+      }
+    } catch {}
+    return DEFAULT_STAT_ORDER;
+  });
+
+  const statSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+  );
+
+  const handleStatDragEnd = useCallback((event) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    setStatOrder((prev) => {
+      const oldIndex = prev.indexOf(active.id);
+      const newIndex = prev.indexOf(over.id);
+      if (oldIndex === -1 || newIndex === -1) return prev;
+      const reordered = arrayMove(prev, oldIndex, newIndex);
+      try { localStorage.setItem(STAT_STORAGE_KEY, JSON.stringify(reordered)); } catch {}
+      return reordered;
+    });
+  }, []);
 
   const fetchAll = useCallback(async () => {
     const [st, t5, pos, trades, ogul, h] = await Promise.all([
@@ -174,7 +281,18 @@ export default function AutoTrading() {
 
   return (
     <div className="auto-page">
-      <h2 className="auto-title">Otomatik İşlem Paneli</h2>
+      <h2 className="auto-title">
+        Otomatik İşlem Paneli
+        <button
+          type="button"
+          className="grid-reset-btn"
+          onClick={handleResetOrder}
+          title="Kartları varsayılan sıraya döndür"
+          style={{ marginLeft: '12px' }}
+        >
+          ↺ Sıfırla
+        </button>
+      </h2>
 
       {/* ═══ EMİR RED ALARMI ═══════════════════════════════════════ */}
       {(alarms?.consecutive_rejects ?? 0) >= 2 && (
@@ -196,62 +314,99 @@ export default function AutoTrading() {
         </div>
       )}
 
-      {/* ═══ ÜST: 4 Stat Kartı ════════════════════════════════════ */}
-      <div className="auto-stats-row">
-        {/* 1. Durum */}
-        <div className="auto-stat-card">
-          <div className="auto-stat-label">DURUM</div>
-          <div className="auto-stat-value" style={{ color: durumColor }}>
-            {durumLabel}
-          </div>
-          <div className="auto-stat-sub">
-            {ksLevel > 0 ? `Kill-Switch L${ksLevel}` : 'Kill-Switch yok'}
-          </div>
-        </div>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleDragEnd}
+      >
+        <SortableContext items={cardOrder} strategy={verticalListSortingStrategy}>
 
-        {/* 2. Aktif Rejim */}
-        <div className="auto-stat-card">
-          <div className="auto-stat-label">AKTİF REJİM</div>
-          <div className="auto-stat-value">
-            <span
-              className="regime-badge"
-              style={{ background: regimeMeta.bg, color: regimeMeta.color }}
-            >
-              <span className="regime-dot" style={{ background: regimeMeta.color }} />
-              {regimeMeta.label}
-              {status.regime_confidence > 0 && (
-                <span className="regime-conf">
-                  {(status.regime_confidence * 100).toFixed(0)}%
-                </span>
-              )}
-            </span>
-          </div>
-          <div className="auto-stat-sub">{regimeMeta.strategies}</div>
-        </div>
+      {cardOrder.map((cardId) => {
+        switch (cardId) {
 
-        {/* 3. Lot Çarpanı */}
-        <div className="auto-stat-card">
-          <div className="auto-stat-label">LOT ÇARPANI</div>
-          <div className="auto-stat-value" style={{ color: multColor }}>
-            x{mult.toFixed(2)}
+          case 'stats':
+            return (
+            <SortableCard key="stats" id="stats" label="Durum Kartları">
+      {/* ═══ ÜST: 4 Stat Kartı (ayrı ayrı sürüklenebilir) ════════ */}
+      <DndContext
+        sensors={statSensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleStatDragEnd}
+      >
+        <SortableContext items={statOrder} strategy={horizontalListSortingStrategy}>
+          <div className="auto-stats-row">
+            {statOrder.map((statId) => {
+              switch (statId) {
+                case 'durum':
+                  return (
+                    <SortableStatCard key="durum" id="durum">
+                      <div className="auto-stat-label">DURUM</div>
+                      <div className="auto-stat-value" style={{ color: durumColor }}>
+                        {durumLabel}
+                      </div>
+                      <div className="auto-stat-sub">
+                        {ksLevel > 0 ? `Kill-Switch L${ksLevel}` : 'Kill-Switch yok'}
+                      </div>
+                    </SortableStatCard>
+                  );
+                case 'rejim':
+                  return (
+                    <SortableStatCard key="rejim" id="rejim">
+                      <div className="auto-stat-label">AKTİF REJİM</div>
+                      <div className="auto-stat-value">
+                        <span
+                          className="regime-badge"
+                          style={{ background: regimeMeta.bg, color: regimeMeta.color }}
+                        >
+                          <span className="regime-dot" style={{ background: regimeMeta.color }} />
+                          {regimeMeta.label}
+                          {status.regime_confidence > 0 && (
+                            <span className="regime-conf">
+                              {(status.regime_confidence * 100).toFixed(0)}%
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                      <div className="auto-stat-sub">{regimeMeta.strategies}</div>
+                    </SortableStatCard>
+                  );
+                case 'lot':
+                  return (
+                    <SortableStatCard key="lot" id="lot">
+                      <div className="auto-stat-label">LOT ÇARPANI</div>
+                      <div className="auto-stat-value" style={{ color: multColor }}>
+                        x{mult.toFixed(2)}
+                      </div>
+                      <div className="auto-stat-sub">
+                        {mult === 0 ? 'İşlem izni yok' : mult < 1 ? 'Azaltılmış' : 'Normal'}
+                      </div>
+                    </SortableStatCard>
+                  );
+                case 'islem':
+                  return (
+                    <SortableStatCard key="islem" id="islem">
+                      <div className="auto-stat-label">OTO. İŞLEM</div>
+                      <div className="auto-stat-value" style={{ color: 'var(--text-primary)' }}>
+                        {autoTradeCount}
+                      </div>
+                      <div className="auto-stat-sub">
+                        Açık poz: {autoPositions.length}
+                      </div>
+                    </SortableStatCard>
+                  );
+                default:
+                  return null;
+              }
+            })}
           </div>
-          <div className="auto-stat-sub">
-            {mult === 0 ? 'İşlem izni yok' : mult < 1 ? 'Azaltılmış' : 'Normal'}
-          </div>
-        </div>
+        </SortableContext>
+      </DndContext>
+            </SortableCard>
+            );
 
-        {/* 4. Oto. İşlem Sayısı */}
-        <div className="auto-stat-card">
-          <div className="auto-stat-label">OTO. İŞLEM</div>
-          <div className="auto-stat-value" style={{ color: 'var(--text-primary)' }}>
-            {autoTradeCount}
-          </div>
-          <div className="auto-stat-sub">
-            Açık poz: {autoPositions.length}
-          </div>
-        </div>
-      </div>
-
+          case 'main':
+            return (
+            <SortableCard key="main" id="main" label="Top 5 & Özet">
       {/* ═══ ORTA: Top 5 + Otomatik Pozisyonlar ═══════════════════ */}
       <div className="auto-main-row">
 
@@ -385,9 +540,14 @@ export default function AutoTrading() {
           })()}
         </div>
       </div>
+            </SortableCard>
+            );
 
+          case 'positions':
+            return (
+            <SortableCard key="positions" id="positions" label="Aktif Pozisyonlar">
       {/* ═══ AKTİF OTOMATİK POZİSYONLAR (tam genişlik) ═══════════ */}
-      <div className="op-table-wrap" style={{ marginTop: '20px' }}>
+      <div className="op-table-wrap" style={{ marginTop: '0' }}>
         <h3 style={{ margin: '0 0 8px', fontSize: '14px', fontWeight: 600 }}>
           Aktif Otomatik Pozisyonlar
         </h3>
@@ -454,7 +614,12 @@ export default function AutoTrading() {
           </table>
         )}
       </div>
+            </SortableCard>
+            );
 
+          case 'trades':
+            return (
+            <SortableCard key="trades" id="trades" label="Son İşlemler">
       {/* ═══ ALT: Son Otomatik İşlemler ════════════════════════════ */}
       <div className="auto-trades-row">
         <div className="auto-card">
@@ -497,7 +662,12 @@ export default function AutoTrading() {
           )}
         </div>
       </div>
+            </SortableCard>
+            );
 
+          case 'ogul':
+            return (
+            <SortableCard key="ogul" id="ogul" label="Oğul Aktivite">
       {/* ═══ OĞUL AKTİVİTE — Sinyal Tarama Durumu ═══════════════════ */}
       <div className="auto-trades-row">
         <div className="auto-card ogul-activity-card">
@@ -622,6 +792,16 @@ export default function AutoTrading() {
           )}
         </div>
       </div>
+            </SortableCard>
+            );
+
+          default:
+            return null;
+        }
+      })}
+
+        </SortableContext>
+      </DndContext>
     </div>
   );
 }

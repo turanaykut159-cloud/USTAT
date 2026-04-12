@@ -1959,7 +1959,24 @@ h2 {
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 14px 16px;
+  position: relative;
+  cursor: grab;
 }
+.auto-stat-card:active { cursor: grabbing; }
+
+.stat-drag-hint {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  font-size: 10px;
+  color: var(--text-dim);
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+  letter-spacing: 1px;
+  user-select: none;
+}
+.auto-stat-card:hover .stat-drag-hint { opacity: 0.6; }
 
 .auto-stat-label {
   font-size: 10px;

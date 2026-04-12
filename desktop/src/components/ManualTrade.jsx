@@ -152,6 +152,17 @@ export default function ManualTrade() {
     return () => { cancelled = true; };
   }, []);
 
+  // ── Sıfırla ──────────────────────────────────────────────────
+  const handleReset = useCallback(() => {
+    setDirection('');
+    setCheckResult(null);
+    setExecResult(null);
+    setPhase('select');
+    setLot(1.0);
+    setSl(0);
+    setTp(0);
+  }, []);
+
   // ── Kontrol Et ───────────────────────────────────────────────
   const handleCheck = useCallback(async () => {
     if (!direction) return;
@@ -201,17 +212,6 @@ export default function ManualTrade() {
       fetchRecentTrades();
     }, 5000);
   }, [symbol, direction, lot, sl, tp, handleReset, fetchRecentTrades]);
-
-  // ── Sıfırla ──────────────────────────────────────────────────
-  const handleReset = useCallback(() => {
-    setDirection('');
-    setCheckResult(null);
-    setExecResult(null);
-    setPhase('select');
-    setLot(1.0);
-    setSl(0);
-    setTp(0);
-  }, []);
 
   // Sembol değişince sıfırla
   const handleSymbolChange = useCallback((e) => {
