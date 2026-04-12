@@ -13,6 +13,52 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { getRisk } from '../services/api';
 import { formatMoney } from '../utils/formatters';
 
+// ── Widget Denetimi A13 (H17): Lot çarpanı tier etiketleme ─────
+// BABA `lot_multiplier` alanını verdict.lot_multiplier üzerinden RiskResponse'a
+// akıtır. Haftalık kayıp (`weekly_loss_halved=True`) sonrası ×0.5,
+// graduated lot mantığı ×0.75/×0.50/×0.25, OLAY rejimi ×0.0 vb. değerler
+// burada tek "lot_multiplier" alanına toplanır. UI bu sayısal değeri
+// rozet + açıklama olarak operatöre gösterir — kullanıcı "lotum neden
+// düştü" sorusuna anında yanıt bulur.
+function getLotTier(mult) {
+  if (mult == null || Number.isNaN(mult)) {
+    return { label: '—', cls: 'lot-tier-unknown', hint: '' };
+  }
+  if (mult >= 0.99) {
+    return {
+      label: 'Normal Lot',
+      cls: 'lot-tier-normal',
+      hint: 'Tam risk: graduated azaltma uygulanmıyor.',
+    };
+  }
+  if (mult >= 0.5) {
+    return {
+      label: 'Yarım Lot',
+      cls: 'lot-tier-half',
+      hint: 'Risk azaltma aktif (haftalık kayıp veya graduated lot).',
+    };
+  }
+  if (mult >= 0.24) {
+    return {
+      label: 'Çeyrek Lot',
+      cls: 'lot-tier-quarter',
+      hint: 'Yoğun risk azaltma — günlük/haftalık birikmiş kayıp.',
+    };
+  }
+  if (mult > 0) {
+    return {
+      label: 'Asgari Lot',
+      cls: 'lot-tier-min',
+      hint: 'Kritik risk seviyesi — minimum açılış.',
+    };
+  }
+  return {
+    label: 'Lot İptal',
+    cls: 'lot-tier-blocked',
+    hint: 'OLAY rejimi veya kill-switch — yeni işlem açılmaz.',
+  };
+}
+
 // ── Kill-Switch Neden Etiketleri ────────────────────────────────
 const KS_REASON_MAP = {
   olay_regime: 'OLAY rejimi algılandı',
@@ -232,6 +278,9 @@ export default function RiskManagement() {
 
   const ks = KS_LABELS[risk.kill_switch_level] || KS_LABELS[0];
   const reg = REGIME_LABELS[risk.regime] || { text: risk.regime, cls: 'regime-trend' };
+  // Widget Denetimi A13 (H17): Lot çarpanı tier rozeti + banner.
+  const lotTier = getLotTier(risk.lot_multiplier);
+  const lotReduced = (risk.lot_multiplier ?? 1.0) < 0.99;
 
   return (
     <div className="risk-page">
@@ -277,8 +326,30 @@ export default function RiskManagement() {
           <span className="risk-status-value">
             x{risk.lot_multiplier?.toFixed(2) ?? '—'}
           </span>
+          {/* Widget Denetimi A13 (H17): Tier rozeti — operatör çarpanın
+              hangi katmanı temsil ettiğini renk + etiketle anında görsün. */}
+          <span
+            className={`risk-lot-tier-badge ${lotTier.cls}`}
+            title={lotTier.hint}
+          >
+            {lotTier.label}
+          </span>
         </div>
       </div>
+
+      {/* Widget Denetimi A13 (H17): Lot azaltma banner'ı. lot_multiplier <
+          1.0 olduğunda haftalık/günlük kayıp ya da OLAY/kill-switch nedeniyle
+          BABA risk'i düşürdüğünü operatöre net göster. */}
+      {lotReduced && (
+        <div className={`risk-lot-banner ${lotTier.cls}`}>
+          <span className="risk-lot-banner-icon">⚠</span>
+          <span className="risk-lot-banner-text">
+            <strong>Lot çarpanı düşürüldü:</strong> x
+            {risk.lot_multiplier?.toFixed(2) ?? '—'} ({lotTier.label}). {lotTier.hint}
+            {risk.risk_reason ? ` Neden: ${risk.risk_reason}` : ''}
+          </span>
+        </div>
+      )}
 
       {/* ═══ DRAWDOWN GÖSTERGELERİ ═════════════════════════════════ */}
       <div className="risk-section">

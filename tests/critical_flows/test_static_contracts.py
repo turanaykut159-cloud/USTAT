@@ -2996,6 +2996,88 @@ def test_data_gap_noise_reduction():
     )
 
 
+# ── Flow 4zl: RiskManagement lot tier badge + banner (A13/H17) ──
+def test_risk_management_lot_tier_badge_and_banner():
+    """Widget Denetimi A13 (H17): Risk sayfasinda `lot_multiplier`
+    sayisal cikti olarak gosteriliyordu ama operatore "lot neden dustu"
+    sorusunun cevabi yoktu — graduated lot, haftalik kayip, OLAY rejimi
+    veya kill-switch hangi katmanin lotu indirdiginin gorunurlugu yoktu.
+
+    Cozum (frontend-only, Yesil Bolge):
+    - getLotTier(mult) helper: Normal/Yarim/Ceyrek/Asgari/Iptal tier'larini
+      lot_multiplier degerine gore donduyor.
+    - Lot Carpani kartina rozet (`risk-lot-tier-badge`) eklendi.
+    - lot_multiplier < 0.99 oldugunda altta `risk-lot-banner` aciklayici
+      banner cikiyor (risk_reason ile birlikte).
+    - CSS theme.css'te tier sinifi varyantlari + banner stilleri.
+
+    Bu test 5 sozlesme noktasini regex ile dogrular."""
+    rm_path = ROOT / "desktop" / "src" / "components" / "RiskManagement.jsx"
+    css_path = ROOT / "desktop" / "src" / "styles" / "theme.css"
+    assert rm_path.exists(), "RiskManagement.jsx bulunamadi"
+    assert css_path.exists(), "theme.css bulunamadi"
+    rm_src = rm_path.read_text(encoding="utf-8")
+    css_src = css_path.read_text(encoding="utf-8")
+
+    # 1) getLotTier helper fonksiyonu
+    assert "function getLotTier" in rm_src, (
+        "A13 (H17): RiskManagement.jsx icinde `getLotTier` helper "
+        "fonksiyonu yok — tier hesaplama tek noktada degil."
+    )
+    # Tier label'lari
+    for label in ("Normal Lot", "Yarım Lot", "Çeyrek Lot", "Lot İptal"):
+        assert label in rm_src, (
+            f"A13 (H17): getLotTier '{label}' label'i eksik."
+        )
+
+    # 2) Tier rozeti render'i
+    assert "risk-lot-tier-badge" in rm_src, (
+        "A13 (H17): RiskManagement.jsx icinde `risk-lot-tier-badge` "
+        "className kullanilmiyor — rozet render edilmiyor."
+    )
+    assert re.search(
+        r"const\s+lotTier\s*=\s*getLotTier\(\s*risk\.lot_multiplier",
+        rm_src,
+    ), (
+        "A13 (H17): `lotTier = getLotTier(risk.lot_multiplier)` cagrisi "
+        "render fonksiyonunda yok."
+    )
+
+    # 3) Lot azaltma banner'i
+    assert "risk-lot-banner" in rm_src, (
+        "A13 (H17): RiskManagement.jsx icinde `risk-lot-banner` className "
+        "yok — lot azaltma banner'i render edilmiyor."
+    )
+    assert re.search(
+        r"\{\s*lotReduced\s*&&", rm_src
+    ), (
+        "A13 (H17): `{lotReduced && (...)}` kosullu render bloku eksik — "
+        "banner sadece lot < 1.0 iken cikmali."
+    )
+
+    # 4) CSS'te tier varyantlari + banner sinifi
+    for cls in (
+        "lot-tier-normal",
+        "lot-tier-half",
+        "lot-tier-quarter",
+        "lot-tier-min",
+        "lot-tier-blocked",
+        "risk-lot-banner",
+    ):
+        assert cls in css_src, (
+            f"A13 (H17): theme.css icinde `{cls}` CSS sinifi yok — "
+            "tier rengi/banner stili eksik."
+        )
+
+    # 5) A13 audit markerlari
+    assert "A13" in rm_src, (
+        "A13 (H17): RiskManagement.jsx icinde 'A13' audit markerin yok."
+    )
+    assert "A13" in css_src, (
+        "A13 (H17): theme.css icinde 'A13' audit markerin yok."
+    )
+
+
 # ── Flow 5: Kill-switch L2 _close_ogul_and_hybrid manuel dokunmaz ──
 def test_baba_l2_only_closes_ogul_and_hybrid():
     from engine.baba import Baba
