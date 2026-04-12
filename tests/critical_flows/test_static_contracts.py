@@ -2523,6 +2523,70 @@ def test_hybrid_scratch_and_auto_summary_enrichment():
     )
 
 
+# ── Flow 4zf: PRIMNET esikleri gorunur kart (A11/S4) ─────────────
+def test_primnet_thresholds_visible_card():
+    """A11 (S4): HybridTrade Ozet karti PRIMNET trailing/target prim
+    esiklerini modal acmadan gostermeli. Backend HybridStatusResponse
+    uzerinden primnet.trailing_prim ve primnet.target_prim canli akiyor.
+    Eger kart silinirse, kullanici esikleri sadece PrimnetDetail
+    modalini acarak gorebilir — gorunurluk regresyonu sayilir."""
+    ht_path = ROOT / "desktop" / "src" / "components" / "HybridTrade.jsx"
+    schemas_path = ROOT / "api" / "schemas.py"
+    route_path = ROOT / "api" / "routes" / "hybrid_trade.py"
+    css_path = ROOT / "desktop" / "src" / "styles" / "theme.css"
+
+    ht_src = ht_path.read_text(encoding="utf-8")
+    schemas_src = schemas_path.read_text(encoding="utf-8")
+    route_src = route_path.read_text(encoding="utf-8")
+    css_src = css_path.read_text(encoding="utf-8")
+
+    # 1. Backend schema canli (PrimnetConfig + HybridStatusResponse.primnet)
+    assert "class PrimnetConfig" in schemas_src, (
+        "api/schemas.py icinde PrimnetConfig sinifi yok — backend kanali "
+        "kirilmis."
+    )
+    assert "primnet: PrimnetConfig" in schemas_src, (
+        "HybridStatusResponse.primnet alani yok — A11 frontend kart "
+        "kaynaksiz kalir."
+    )
+    assert "trailing_prim=h_engine._primnet_trailing" in route_src, (
+        "api/routes/hybrid_trade.py icinde primnet_cfg trailing_prim "
+        "atamasi yok — engine canonical kaynaktan kopmus."
+    )
+    assert "target_prim=h_engine._primnet_target" in route_src, (
+        "api/routes/hybrid_trade.py icinde primnet_cfg target_prim "
+        "atamasi yok — engine canonical kaynaktan kopmus."
+    )
+
+    # 2. Frontend HybridTrade.jsx kart icerigi
+    assert "PRİMNET Eşikleri" in ht_src, (
+        "HybridTrade.jsx Ozet kartinda 'PRİMNET Eşikleri' baslikli kart "
+        "yok — A11/S4 gorunurluk bulgu duzeltmesi geri alinmis."
+    )
+    assert "hybridStatus.primnet?.trailing_prim" in ht_src, (
+        "HybridTrade.jsx kart icinde 'hybridStatus.primnet?.trailing_prim' "
+        "referansi yok — eski hardcode dondu mu?"
+    )
+    assert "hybridStatus.primnet?.target_prim" in ht_src, (
+        "HybridTrade.jsx kart icinde 'hybridStatus.primnet?.target_prim' "
+        "referansi yok — eski hardcode dondu mu?"
+    )
+
+    # 3. CSS sinifi mevcut
+    assert ".op-sc-value--primnet" in css_src, (
+        "theme.css icinde '.op-sc-value--primnet' modifier sinifi yok — "
+        "A11 kart gorsel olarak digerleriyle ayni boyutta cikar."
+    )
+
+    # 4. Audit markerlari
+    assert "A11" in ht_src, (
+        "HybridTrade.jsx icinde A11 audit markerin yok."
+    )
+    assert "A11" in css_src, (
+        "theme.css icinde A11 audit markerin yok."
+    )
+
+
 # ── Flow 5: Kill-switch L2 _close_ogul_and_hybrid manuel dokunmaz ──
 def test_baba_l2_only_closes_ogul_and_hybrid():
     from engine.baba import Baba

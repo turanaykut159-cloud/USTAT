@@ -326,6 +326,20 @@ export default function HybridTrade() {
                     </div>
                   </div>
                 </div>
+                {/* A11 (S4): PRIMNET esikleri gorunur kart — backend
+                    /hybrid/status -> primnet.trailing_prim/target_prim
+                    canlı değerler. Kullanıcı modal açmadan eşikleri görür. */}
+                <div
+                  className="op-summary-card"
+                  title="PRİMNET trailing & hedef eşikleri (1 prim = %1). Modal açmadan canlı değer."
+                >
+                  <span className="op-sc-label">PRİMNET Eşikleri</span>
+                  <span className="op-sc-value op-sc-value--primnet">
+                    Trailing <strong>{(hybridStatus.primnet?.trailing_prim ?? 1.5).toFixed(1)}</strong>
+                    {' · '}
+                    Hedef <strong>±{(hybridStatus.primnet?.target_prim ?? 9.5).toFixed(1)}</strong>
+                  </span>
+                </div>
               </div>
             </SortableCard>
           );

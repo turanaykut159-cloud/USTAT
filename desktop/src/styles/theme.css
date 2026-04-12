@@ -2547,6 +2547,19 @@ h2 {
   line-height: 1.1;
 }
 
+/* A11 (S4): PRIMNET eşik kartı — küçük font, iki değer yan yana */
+.op-sc-value--primnet {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  color: var(--text-secondary);
+}
+.op-sc-value--primnet strong {
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 15px;
+}
+
 .warning-text {
   color: var(--warning);
 }
