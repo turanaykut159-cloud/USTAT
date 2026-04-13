@@ -584,12 +584,30 @@ class Ogul:
             logger.info("Sinyal üretimi engellendi: işlem saatleri dışında")
             return
 
+        # 9. MT5 netting koruması — doğrudan MT5'ten açılmış pozisyonları kontrol et
+        # v5.9 bugfix: OĞUL kendi listelerinde olmayan (MT5'ten/GCM'den açılan)
+        # pozisyonları göremiyordu → netting ile istemeden kapatıyordu
+        mt5_occupied_symbols: set[str] = set()
+        mt5_positions = self.mt5.get_positions()
+        if mt5_positions:
+            mt5_occupied_symbols = {p["symbol"] for p in mt5_positions}
+
         # 10. Her sembol için sinyal üretimi
         from engine.netting_lock import is_symbol_locked, acquire_symbol, release_symbol
 
         for symbol in symbols:
             # Sembol başına 1 aktif işlem kuralı
             if symbol in self.active_trades:
+                continue
+
+            # v5.9 bugfix: MT5'te açık pozisyonu olan sembol atla (netting koruması)
+            # GCM MT5'ten doğrudan açılan işlemlerin OĞUL tarafından
+            # istemeden kapatılmasını önler (VİOP netting sistemi)
+            if symbol in mt5_occupied_symbols:
+                logger.debug(
+                    f"MT5 açık pozisyon var: {symbol} — "
+                    f"sinyal atlanıyor (netting koruması)"
+                )
                 continue
 
             # v5.4.1: Atomik netting kilidi kontrolü (race condition önleme)

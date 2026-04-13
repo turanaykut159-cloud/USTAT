@@ -55,6 +55,13 @@
 
 ---
 
+## [6.0.0] — 2026-04-13
+
+### Security
+- #208 — OĞUL netting koruması: MT5'ten/GCM'den doğrudan açılan pozisyonlar artık OĞUL sinyal döngüsünde kontrol ediliyor. `process_signals()` sinyal döngüsüne girmeden önce `mt5.get_positions()` ile MT5 açık pozisyonları sorgulanıyor, sembolde mevcut pozisyon varsa sinyal atlanıyor. Kök neden: VİOP netting sisteminde OĞUL'un BUY sinyali, kullanıcının mevcut SELL pozisyonunu istemeden kapattı (F_ASELS, -2.495 TL zarar). 1 dosya (ogul.py).
+
+---
+
 ## [6.0.0] — 2026-04-12
 
 ### Added
