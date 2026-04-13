@@ -19,7 +19,7 @@ import {
   BarChart, Bar, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
 } from 'recharts';
-import { getUstatBrain, getPerformance, getStatus } from '../services/api';
+import { getUstatBrain, getStatus } from '../services/api';
 // Widget Denetimi H13: Kontrat profilleri win rate renk eşiği canonical
 // kaynağa (formatters.js::WIN_RATE_BREAKEVEN_PCT) bağlandı. Eski satırda
 // hardcode 50 vardı; artık `winRateClass` helper'ı tüm win rate renk
@@ -173,20 +173,17 @@ function ErrorAttributionPanel({ data }) {
 
 export default function UstatBrain() {
   const [brain, setBrain] = useState(null);
-  const [perf, setPerf] = useState(null);
   const [status, setStatus] = useState(null);
   const [days, setDays] = useState(90);
   const [loading, setLoading] = useState(true);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
-    const [b, p, s] = await Promise.all([
+    const [b, s] = await Promise.all([
       getUstatBrain(days),
-      getPerformance(days),
       getStatus(),
     ]);
     setBrain(b);
-    setPerf(p);
     setStatus(s);
     setLoading(false);
   }, [days]);
