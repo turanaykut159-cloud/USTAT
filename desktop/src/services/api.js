@@ -37,19 +37,22 @@ export async function getStatus() {
   } catch (err) {
     console.error('[ÜSTAT API] getStatus:', err?.message ?? err);
     return {
-      // A5: Backend erişilemezse dahi version fallback mevcut.
-      // TopBar/Settings/LockScreen "V6.0" display'i hiçbir koşulda kırılmaz.
+      // P1-B (2026-04-13): Fail-closed — hata durumunda "her şey yolunda"
+      // sinyali vermiyoruz. Tüketiciler _stale=true rozetiyle uyarı gösterir.
+      // A5: Version fallback hâlâ mevcut (TopBar/Settings/LockScreen kırılmaz).
       version: '6.0.0',
       engine_running: false,
       mt5_connected: false,
-      regime: 'TREND',
+      regime: 'UNKNOWN',
       regime_confidence: 0,
-      risk_multiplier: 1,
+      risk_multiplier: 0,
       phase: 'stopped',
       kill_switch_level: 0,
       daily_trade_count: 0,
       uptime_seconds: 0,
-      warnings: [],
+      warnings: ['API erişilemiyor — veriler bilinmiyor'],
+      _stale: true,
+      _error: err?.message ?? 'unknown',
     };
   }
 }
@@ -148,11 +151,17 @@ export async function getRisk() {
   } catch (err) {
     console.error('[ÜSTAT API] getRisk:', err?.message ?? err);
     return {
-      daily_pnl: 0, can_trade: true, kill_switch_level: 0,
-      regime: 'TREND', risk_multiplier: 1, open_positions: 0,
-      // A18: hata durumunda bile max_open_positions güvenli fallback değeri (5).
-      // Dashboard rozetinin "n / X" formatı hiçbir koşulda kırılmaz.
+      // P1-B (2026-04-13): Fail-closed — can_trade=false, risk_multiplier=0.
+      // A18: max_open_positions güvenli fallback (5) korunur (UI "n/X" kırılmasın).
+      daily_pnl: 0,
+      can_trade: false,
+      kill_switch_level: 0,
+      regime: 'UNKNOWN',
+      risk_multiplier: 0,
+      open_positions: 0,
       max_open_positions: 5,
+      _stale: true,
+      _error: err?.message ?? 'unknown',
     };
   }
 }
@@ -606,8 +615,16 @@ export async function getHealth() {
   } catch (err) {
     console.error('[ÜSTAT API] getHealth:', err?.message ?? err);
     return {
-      cycle: {}, mt5: {}, orders: {},
-      layers: {}, recent_events: [], system: {},
+      // P1-B + P2-B (2026-04-13): trade_allowed=null → TopBar üçlü mantık
+      // "ALGO DURUMU BİLİNMİYOR" rozeti gösterir (fail-open düzeltildi).
+      cycle: {},
+      mt5: { trade_allowed: null },
+      orders: {},
+      layers: {},
+      recent_events: [],
+      system: {},
+      _stale: true,
+      _error: err?.message ?? 'unknown',
     };
   }
 }
