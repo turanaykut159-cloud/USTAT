@@ -57,6 +57,9 @@
 
 ## [6.0.0] — 2026-04-13
 
+### Added
+- #210 — OĞUL Motor Toggle: GCM MT5 Algoritmik Ticaret butonu mantığında, OĞUL motorunun sinyal üretimini UI'den açıp kapatma özelliği eklendi. TopBar'da ve Otomatik İşlem Paneli DURUM kartında toggle buton. Varsayılan KAPALI, açık pozisyon varken kapatma engellenir. 8 dosya (ogul.py, schemas.py, ogul_toggle.py [yeni], server.py, status.py, api.js, TopBar.jsx, AutoTrading.jsx, theme.css).
+
 ### Fixed
 - #209 — OgulSLTP plain STOP → STOP LIMIT migrasyonu: GCM VİOP plain STOP emirlerini reddediyordu (ORDER_TYPE_BUY_STOP/SELL_STOP → retcode=10035). `send_stop()` → `send_stop_limit()` değiştirildi, `modify_pending_order()` çağrısına `new_stoplimit` parametresi eklendi. Limit fiyatı config'den `ogul.stop_limit_gap_prim=0.3` ile hesaplanıyor. H-Engine PRİMNET ile aynı emir tipi. Kök neden: OĞUL pozisyon açıyor → SL yerleştiremiyor → pozisyonu zorla kapatıyor → trade kaydedilmiyor → günlük sayaç artmıyor. 1 dosya (ogul_sltp.py).
 

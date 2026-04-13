@@ -296,6 +296,72 @@ body {
   background: var(--loss);
 }
 
+/* ── OĞUL Motor Toggle butonu ────────────────────────────────── */
+.tb-ogul-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s, box-shadow 0.2s;
+  white-space: nowrap;
+}
+
+.tb-ogul-toggle--on {
+  color: var(--profit);
+  background: rgba(63, 185, 80, 0.15);
+  border: 1px solid var(--profit);
+}
+
+.tb-ogul-toggle--on:hover {
+  background: rgba(63, 185, 80, 0.3);
+  box-shadow: 0 0 0 2px rgba(63, 185, 80, 0.2);
+}
+
+.tb-ogul-toggle--off {
+  color: var(--loss);
+  background: rgba(248, 81, 73, 0.15);
+  border: 1px solid var(--loss);
+}
+
+.tb-ogul-toggle--off:hover {
+  background: rgba(248, 81, 73, 0.3);
+  box-shadow: 0 0 0 2px rgba(248, 81, 73, 0.2);
+}
+
+.tb-ogul-toggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.tb-ogul-msg {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  margin-left: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--loss);
+  background: rgba(248, 81, 73, 0.15);
+  border: 1px solid rgba(248, 81, 73, 0.4);
+  border-radius: 4px;
+  max-width: 280px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  animation: tb-ogul-fade 5s ease-out forwards;
+}
+
+@keyframes tb-ogul-fade {
+  0%, 80% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
 /* ── Algo Trading uyari rozeti (retcode 10027) ──────────────── */
 .tb-algo-warn {
   display: inline-flex;
@@ -1959,24 +2025,24 @@ h2 {
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 14px 16px;
-  position: relative;
-  cursor: grab;
 }
-.auto-stat-card:active { cursor: grabbing; }
 
-.stat-drag-hint {
-  position: absolute;
-  top: 4px;
-  right: 6px;
-  font-size: 10px;
-  color: var(--text-dim);
-  opacity: 0;
-  transition: opacity 0.2s;
-  pointer-events: none;
-  letter-spacing: 1px;
-  user-select: none;
+/* SortableCard stat kartı — grid-card varsayılanlarını override */
+.auto-stat-sortable {
+  margin-bottom: 0 !important;
+  min-width: 0;
+  flex: 1;
 }
-.auto-stat-card:hover .stat-drag-hint { opacity: 0.6; }
+.auto-stat-sortable .drag-handle {
+  padding: 5px 10px;
+  font-size: 10px;
+}
+.auto-stat-body {
+  padding: 10px 14px 12px;
+}
+.auto-stats-dnd-wrapper {
+  margin-bottom: 12px;
+}
 
 .auto-stat-label {
   font-size: 10px;
@@ -1998,6 +2064,44 @@ h2 {
 .auto-stat-sub {
   font-size: 11px;
   color: var(--text-secondary);
+}
+
+/* ── OĞUL Motor Toggle (DURUM kartı içi) ───────────────────────── */
+.ogul-toggle-btn {
+  margin-top: 6px;
+  padding: 3px 10px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+  width: 100%;
+}
+
+.ogul-toggle-btn--on {
+  color: var(--profit);
+  background: rgba(63, 185, 80, 0.15);
+  border: 1px solid var(--profit);
+}
+
+.ogul-toggle-btn--on:hover {
+  background: rgba(63, 185, 80, 0.3);
+}
+
+.ogul-toggle-btn--off {
+  color: var(--loss);
+  background: rgba(248, 81, 73, 0.15);
+  border: 1px solid var(--loss);
+}
+
+.ogul-toggle-btn--off:hover {
+  background: rgba(248, 81, 73, 0.3);
+}
+
+.ogul-toggle-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* ── Ana İçerik (2 kolon: Top5 + Pozisyonlar) ────────────────── */

@@ -48,6 +48,7 @@ from api.routes import (
     news,
     notifications,
     ogul_activity,
+    ogul_toggle,
     performance,
     positions,
     risk,
@@ -226,6 +227,7 @@ app.include_router(notifications.router, prefix="/api", tags=["notifications"])
 app.include_router(ustat_brain.router, prefix="/api", tags=["ustat-brain"])
 app.include_router(health.router, prefix="/api", tags=["health"])
 app.include_router(ogul_activity.router, prefix="/api", tags=["ogul"])
+app.include_router(ogul_toggle.router, prefix="/api", tags=["ogul-toggle"])
 app.include_router(live.router, tags=["websocket"])
 app.include_router(settings.router, prefix="/api", tags=["settings"])
 app.include_router(mt5_verify.router, prefix="/api", tags=["mt5"])

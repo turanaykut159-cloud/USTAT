@@ -391,6 +391,28 @@ export async function acknowledgeKillSwitch(user = 'operator') {
   }
 }
 
+// ── OĞUL Motor Toggle ───────────────────────────────────────────
+
+export async function getOgulToggle() {
+  try {
+    const { data } = await client.get('/ogul-toggle');
+    return data;
+  } catch (err) {
+    console.error('[ÜSTAT API] getOgulToggle:', err?.message ?? err);
+    return { success: false, enabled: false, has_positions: false, message: 'Bağlantı hatası.' };
+  }
+}
+
+export async function setOgulToggle(action) {
+  try {
+    const { data } = await client.post('/ogul-toggle', { action });
+    return data;
+  } catch (err) {
+    console.error('[ÜSTAT API] setOgulToggle:', err?.message ?? err);
+    return { success: false, enabled: false, has_positions: false, message: 'Bağlantı hatası.' };
+  }
+}
+
 // ── Manuel İşlem ─────────────────────────────────────────────────
 
 export async function checkManualTrade(symbol, direction) {

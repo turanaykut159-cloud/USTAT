@@ -10,7 +10,7 @@ from datetime import datetime
 
 from fastapi import APIRouter
 
-from api.deps import get_baba, get_engine, get_mt5, get_pipeline, get_uptime, is_engine_running
+from api.deps import get_baba, get_engine, get_mt5, get_ogul, get_pipeline, get_uptime, is_engine_running
 from api.schemas import StatusResponse, SuccessResponse, WarningItem
 # v6.0 — Widget Denetimi A5 / H1: Versiyon tek kaynak engine/__init__.py::VERSION.
 # TopBar/Settings/LockScreen hardcode "V6.0" stringleri artik /api/status.version
@@ -101,6 +101,10 @@ async def get_status():
     if mt5 and hasattr(mt5, 'circuit_breaker_active'):
         circuit_breaker_active = mt5.circuit_breaker_active
 
+    # v6.0: OĞUL motor toggle durumu
+    ogul = get_ogul()
+    ogul_enabled = ogul.ogul_enabled if ogul else False
+
     return StatusResponse(
         version=ENGINE_VERSION,  # A5/H1: engine/__init__.py::VERSION tek kaynak
         engine_running=engine_running,
@@ -118,6 +122,7 @@ async def get_status():
         data_fresh=data_fresh,
         last_successful_cycle=last_successful_cycle,
         circuit_breaker_active=circuit_breaker_active,
+        ogul_enabled=ogul_enabled,
     )
 
 

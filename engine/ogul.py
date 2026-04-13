@@ -430,9 +430,34 @@ class Ogul:
         # Pyramid tracking per symbol
         self._pyramid_last_add: dict[str, float] = {}     # symbol → son ekleme fiyatı
 
+        # ── OĞUL Motor Toggle (v6.0 — kullanıcı arayüzünden açılıp kapatılabilir) ──
+        # Varsayılan KAPALI: uygulama açılışında OĞUL sinyal üretmez,
+        # kullanıcı UI'den elle açar. Diğer motorlar (Manuel, Hibrit) bağımsızdır.
+        self._ogul_enabled: bool = False
+
         # ── Stop Limit SL/TP yönetimi (v5.9.2 — GCM VİOP netting fix) ──
         from engine.ogul_sltp import OgulSLTP
         self._sltp = OgulSLTP(mt5=mt5, config=config)
+
+    # ═════════════════════════════════════════════════════════════════
+    #  OĞUL MOTOR TOGGLE — Kullanıcı arayüzünden açılıp kapatılır
+    # ═════════════════════════════════════════════════════════════════
+
+    @property
+    def ogul_enabled(self) -> bool:
+        """OĞUL motoru sinyal üretebilir mi?"""
+        return self._ogul_enabled
+
+    @ogul_enabled.setter
+    def ogul_enabled(self, value: bool) -> None:
+        old = self._ogul_enabled
+        self._ogul_enabled = bool(value)
+        if old != self._ogul_enabled:
+            logger.info(
+                "OĞUL motor toggle: %s → %s",
+                "AKTİF" if old else "KAPALI",
+                "AKTİF" if self._ogul_enabled else "KAPALI",
+            )
 
     # ═════════════════════════════════════════════════════════════════
     #  ÜSTAT ENTEGRASYONu — Dinamik Parametre Okuma
@@ -561,6 +586,12 @@ class Ogul:
         # Y-1: public `kill_switch_level` property kullan (private alana dokunma)
         if self.baba and getattr(self.baba, "kill_switch_level", 0) >= 3:
             logger.warning("process_signals: L3 aktif — sinyal üretimi engellendi")
+            return
+
+        # v6.0: OĞUL motor toggle — kullanıcı UI'den kapattıysa sinyal üretme
+        # HIZLI DÖNGÜ (EOD, manage_active, sync) yukarıda çalıştı — güvenlik korunur.
+        # Sadece SİNYAL DÖNGÜSÜ (yeni işlem açma) engellenir.
+        if not self._ogul_enabled:
             return
 
         # ═══ SİNYAL DÖNGÜSÜ (M5 mum kapanışında tetiklenir — v5.7) ═════

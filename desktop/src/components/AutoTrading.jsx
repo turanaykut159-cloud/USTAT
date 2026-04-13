@@ -29,7 +29,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import {
   getStatus, getTop5, getPositions, getTrades, reactivateSymbols,
-  getOgulActivity, getHealth, connectLiveWS,
+  getOgulActivity, getHealth, connectLiveWS, setOgulToggle,
 } from '../services/api';
 import { formatMoney, formatPrice, pnlClass, elapsed } from '../utils/formatters';
 import SortableCard from './SortableCard';
@@ -60,24 +60,6 @@ const REGIME_META = {
 // Otomatik strateji isimleri
 const AUTO_STRATEGIES = new Set(['trend_follow', 'mean_reversion', 'breakout']);
 
-// ── Sürüklenebilir Stat Kartı (yatay — küçük kartlar için) ───────
-
-function SortableStatCard({ id, children }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.55 : 1,
-    zIndex: isDragging ? 100 : undefined,
-  };
-  return (
-    <div ref={setNodeRef} style={style} className="auto-stat-card" {...attributes} {...listeners}>
-      <div className="stat-drag-hint">⋮⋮</div>
-      {children}
-    </div>
-  );
-}
-
 // ═══════════════════════════════════════════════════════════════════
 //  OTOMATİK İŞLEM PANELİ
 // ═══════════════════════════════════════════════════════════════════
@@ -101,6 +83,8 @@ export default function AutoTrading() {
   });
   const [loading, setLoading] = useState(true);
   const [alarms, setAlarms] = useState({});
+  const [ogulToggling, setOgulToggling] = useState(false);
+  const [ogulMsg, setOgulMsg] = useState('');
   const wsRef = useRef(null);
 
   // ── Sürükle-bırak kart sırası ──────────────────────────────────
@@ -243,6 +227,28 @@ export default function AutoTrading() {
     };
   }, []);
 
+  // ── OĞUL Motor Toggle ──────────────────────────────────────────
+  const ogulEnabled = status.ogul_enabled === true;
+
+  const handleOgulToggle = useCallback(async () => {
+    if (ogulToggling) return;
+    setOgulToggling(true);
+    try {
+      const action = ogulEnabled ? 'disable' : 'enable';
+      const res = await setOgulToggle(action);
+      if (res.success) {
+        setStatus((prev) => ({ ...prev, ogul_enabled: res.enabled }));
+        setOgulMsg('');
+      } else if (res.message) {
+        setOgulMsg(res.message);
+        setTimeout(() => setOgulMsg(''), 5000);
+      }
+      await fetchAll();
+    } finally {
+      setOgulToggling(false);
+    }
+  }, [ogulEnabled, ogulToggling, fetchAll]);
+
   // ── Hesaplamalar ─────────────────────────────────────────────────
   const regime = status.regime || 'TREND';
   const regimeMeta = REGIME_META[regime] || REGIME_META.TREND;
@@ -326,8 +332,7 @@ export default function AutoTrading() {
 
           case 'stats':
             return (
-            <SortableCard key="stats" id="stats" label="Durum Kartları">
-      {/* ═══ ÜST: 4 Stat Kartı (ayrı ayrı sürüklenebilir) ════════ */}
+      <div key="stats" className="auto-stats-dnd-wrapper">
       <DndContext
         sensors={statSensors}
         collisionDetection={closestCenter}
@@ -339,60 +344,82 @@ export default function AutoTrading() {
               switch (statId) {
                 case 'durum':
                   return (
-                    <SortableStatCard key="durum" id="durum">
-                      <div className="auto-stat-label">DURUM</div>
-                      <div className="auto-stat-value" style={{ color: durumColor }}>
-                        {durumLabel}
+                    <SortableCard key="durum" id="durum" label="DURUM" className="auto-stat-sortable">
+                      <div className="auto-stat-body">
+                        <div className="auto-stat-value" style={{ color: durumColor }}>
+                          {durumLabel}
+                        </div>
+                        <div className="auto-stat-sub">
+                          {ksLevel > 0 ? `Kill-Switch L${ksLevel}` : 'Kill-Switch yok'}
+                        </div>
+                        <button
+                          className={`ogul-toggle-btn ${ogulEnabled ? 'ogul-toggle-btn--on' : 'ogul-toggle-btn--off'}`}
+                          onClick={handleOgulToggle}
+                          disabled={ogulToggling}
+                          title={ogulEnabled
+                            ? 'OĞUL motoru AKTİF — tıklayarak kapatın'
+                            : 'OĞUL motoru KAPALI — tıklayarak açın'}
+                        >
+                          {ogulToggling ? '...' : ogulEnabled ? 'OĞUL: AÇIK' : 'OĞUL: KAPALI'}
+                        </button>
+                        {ogulMsg && (
+                          <div style={{
+                            marginTop: 4, fontSize: 9, color: 'var(--loss)',
+                            lineHeight: 1.2, wordBreak: 'break-word',
+                          }}>
+                            {ogulMsg}
+                          </div>
+                        )}
                       </div>
-                      <div className="auto-stat-sub">
-                        {ksLevel > 0 ? `Kill-Switch L${ksLevel}` : 'Kill-Switch yok'}
-                      </div>
-                    </SortableStatCard>
+                    </SortableCard>
                   );
                 case 'rejim':
                   return (
-                    <SortableStatCard key="rejim" id="rejim">
-                      <div className="auto-stat-label">AKTİF REJİM</div>
-                      <div className="auto-stat-value">
-                        <span
-                          className="regime-badge"
-                          style={{ background: regimeMeta.bg, color: regimeMeta.color }}
-                        >
-                          <span className="regime-dot" style={{ background: regimeMeta.color }} />
-                          {regimeMeta.label}
-                          {status.regime_confidence > 0 && (
-                            <span className="regime-conf">
-                              {(status.regime_confidence * 100).toFixed(0)}%
-                            </span>
-                          )}
-                        </span>
+                    <SortableCard key="rejim" id="rejim" label="AKTİF REJİM" className="auto-stat-sortable">
+                      <div className="auto-stat-body">
+                        <div className="auto-stat-value">
+                          <span
+                            className="regime-badge"
+                            style={{ background: regimeMeta.bg, color: regimeMeta.color }}
+                          >
+                            <span className="regime-dot" style={{ background: regimeMeta.color }} />
+                            {regimeMeta.label}
+                            {status.regime_confidence > 0 && (
+                              <span className="regime-conf">
+                                {(status.regime_confidence * 100).toFixed(0)}%
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                        <div className="auto-stat-sub">{regimeMeta.strategies}</div>
                       </div>
-                      <div className="auto-stat-sub">{regimeMeta.strategies}</div>
-                    </SortableStatCard>
+                    </SortableCard>
                   );
                 case 'lot':
                   return (
-                    <SortableStatCard key="lot" id="lot">
-                      <div className="auto-stat-label">LOT ÇARPANI</div>
-                      <div className="auto-stat-value" style={{ color: multColor }}>
-                        x{mult.toFixed(2)}
+                    <SortableCard key="lot" id="lot" label="LOT ÇARPANI" className="auto-stat-sortable">
+                      <div className="auto-stat-body">
+                        <div className="auto-stat-value" style={{ color: multColor }}>
+                          x{mult.toFixed(2)}
+                        </div>
+                        <div className="auto-stat-sub">
+                          {mult === 0 ? 'İşlem izni yok' : mult < 1 ? 'Azaltılmış' : 'Normal'}
+                        </div>
                       </div>
-                      <div className="auto-stat-sub">
-                        {mult === 0 ? 'İşlem izni yok' : mult < 1 ? 'Azaltılmış' : 'Normal'}
-                      </div>
-                    </SortableStatCard>
+                    </SortableCard>
                   );
                 case 'islem':
                   return (
-                    <SortableStatCard key="islem" id="islem">
-                      <div className="auto-stat-label">OTO. İŞLEM</div>
-                      <div className="auto-stat-value" style={{ color: 'var(--text-primary)' }}>
-                        {autoTradeCount}
+                    <SortableCard key="islem" id="islem" label="OTO. İŞLEM" className="auto-stat-sortable">
+                      <div className="auto-stat-body">
+                        <div className="auto-stat-value" style={{ color: 'var(--text-primary)' }}>
+                          {autoTradeCount}
+                        </div>
+                        <div className="auto-stat-sub">
+                          Açık poz: {autoPositions.length}
+                        </div>
                       </div>
-                      <div className="auto-stat-sub">
-                        Açık poz: {autoPositions.length}
-                      </div>
-                    </SortableStatCard>
+                    </SortableCard>
                   );
                 default:
                   return null;
@@ -401,7 +428,7 @@ export default function AutoTrading() {
           </div>
         </SortableContext>
       </DndContext>
-            </SortableCard>
+      </div>
             );
 
           case 'main':

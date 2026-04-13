@@ -33,6 +33,7 @@ class StatusResponse(BaseModel):
     data_fresh: bool = True                       # veri güncel mi?
     last_successful_cycle: str | None = None       # son başarılı cycle ISO timestamp
     circuit_breaker_active: bool = False            # MT5 circuit breaker durumu
+    ogul_enabled: bool = False                       # OĞUL motor toggle durumu
 
 
 class WarningItem(BaseModel):
@@ -352,6 +353,25 @@ class KillSwitchResponse(BaseModel):
     kill_switch_level: int = 0
     message: str = ""
     failed_tickets: list[int] = []  # L3 kapanışta kapatılamayan pozisyon ticket'ları
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  OĞUL MOTOR TOGGLE
+# ═══════════════════════════════════════════════════════════════════
+
+class OgulToggleRequest(BaseModel):
+    """POST /api/ogul-toggle — OĞUL motorunu aç/kapat."""
+    action: str = Field(
+        ...,
+        description="enable (sinyal üretimini aç) veya disable (sinyal üretimini kapat)",
+    )
+
+class OgulToggleResponse(BaseModel):
+    """POST /api/ogul-toggle response."""
+    success: bool
+    enabled: bool = False
+    has_positions: bool = False
+    message: str = ""
 
 
 # ═══════════════════════════════════════════════════════════════════

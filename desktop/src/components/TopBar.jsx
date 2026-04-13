@@ -6,7 +6,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { getStatus, getAccount, acknowledgeKillSwitch, getAgentStatus, getHealth } from '../services/api';
+import { getStatus, getAccount, acknowledgeKillSwitch, getAgentStatus, getHealth, setOgulToggle } from '../services/api';
 import { formatMoney } from '../utils/formatters';
 // Widget Denetimi H16: kill-switch acknowledge kullanıcı kimliği canonical
 // kaynağa bağlandı — eski satır 134 hardcode `'operator'` literal'i
@@ -49,6 +49,9 @@ export default function TopBar() {
   const [initialLoading, setInitialLoading] = useState(true);
   const [agentAlive, setAgentAlive] = useState(false);
   const [tradeAllowed, setTradeAllowed] = useState(true);
+  const [ogulEnabled, setOgulEnabled] = useState(false);
+  const [ogulToggling, setOgulToggling] = useState(false);
+  const [ogulMsg, setOgulMsg] = useState('');
   const [isMaximized, setIsMaximized] = useState(false);
   // ── v5.9: Pencere durumu kontrolü ────────────────────────────
   useEffect(() => {
@@ -77,6 +80,7 @@ export default function TopBar() {
     const [s, a] = await Promise.all([getStatus(), getAccount()]);
     setStatus(s);
     setAccount(a);
+    setOgulEnabled(s.ogul_enabled === true);
     setInitialLoading(false);
   }, []);
 
@@ -141,6 +145,27 @@ export default function TopBar() {
       setKsResetting(false);
     }
   }, [ksResetting, fetchData]);
+
+  // ── OĞUL Motor Toggle ──────────────────────────────────────────
+  const handleOgulToggle = useCallback(async () => {
+    if (ogulToggling) return;
+    setOgulToggling(true);
+    try {
+      const action = ogulEnabled ? 'disable' : 'enable';
+      const res = await setOgulToggle(action);
+      if (res.success) {
+        setOgulEnabled(res.enabled);
+        setOgulMsg('');
+      } else if (res.message) {
+        // Açık pozisyon varken kapatma engeli — geçici toast mesaj
+        setOgulMsg(res.message);
+        setTimeout(() => setOgulMsg(''), 5000);
+      }
+      await fetchData();
+    } finally {
+      setOgulToggling(false);
+    }
+  }, [ogulEnabled, ogulToggling, fetchData]);
 
   // ── Hesaplanan değerler ────────────────────────────────────────
   const phase = status.phase || 'stopped';
@@ -218,6 +243,23 @@ export default function TopBar() {
           <span className="tb-conn-dot" />
           {agentAlive ? 'AJAN' : 'Ajan Yok'}
         </span>
+
+        <button
+          className={`tb-ogul-toggle ${ogulEnabled ? 'tb-ogul-toggle--on' : 'tb-ogul-toggle--off'}`}
+          onClick={handleOgulToggle}
+          disabled={ogulToggling}
+          title={ogulEnabled
+            ? 'OĞUL motoru AKTİF — sinyal üretimi ve emir gönderimi çalışıyor.\nTıklayarak kapatabilirsiniz.'
+            : 'OĞUL motoru KAPALI — sinyal üretimi durdurulmuş.\nTıklayarak açabilirsiniz.'}
+        >
+          {ogulToggling ? '...' : ogulEnabled ? '🔓 OĞUL AÇIK' : '🔒 OĞUL KAPALI'}
+        </button>
+
+        {ogulMsg && (
+          <span className="tb-ogul-msg" title={ogulMsg}>
+            {ogulMsg}
+          </span>
+        )}
 
         {isConnected && !tradeAllowed && (
           <span
