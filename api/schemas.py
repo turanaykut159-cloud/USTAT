@@ -948,6 +948,7 @@ class NewsActiveResponse(BaseModel):
     events: list[NewsEventItem] = []
     best_sentiment: float | None = None
     worst_sentiment: float | None = None
+    worst_severity: str | None = None
 
 
 class LiveNews(BaseModel):

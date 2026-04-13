@@ -82,11 +82,23 @@ async def news_active():
     best_s = max((it.sentiment_score for it in items), default=None) if items else None
     worst_s = min((it.sentiment_score for it in items), default=None) if items else None
 
+    # Severity sıralaması: CRITICAL > HIGH > MEDIUM > LOW > NONE
+    # NewsPanel üst rozeti için en kötü severity hesaplanır.
+    _SEV_RANK = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1, "NONE": 0}
+    worst_sev = None
+    if items:
+        worst_sev = max(
+            (it.severity for it in items),
+            key=lambda s: _SEV_RANK.get(s or "NONE", 0),
+            default=None,
+        )
+
     return NewsActiveResponse(
         count=len(items),
         events=items,
         best_sentiment=best_s,
         worst_sentiment=worst_s,
+        worst_severity=worst_sev,
     )
 
 
