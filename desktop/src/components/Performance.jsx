@@ -380,7 +380,13 @@ export default function Performance() {
           PERFORMANS İÇERİĞİ
           ═════════════════════════════════════════════════════════════ */}
           {/* ═══ ÖZET KARTLAR (5) ══════════════════════════════════════ */}
-          <div className="pf-stats-row">
+          {/* P1-A: Bu kartlar getPerformance(days) sonucundan beslenir.
+              Backend artık "baseline + son N gün" kesişimini uygular.
+              Equity eğrisi ve aggregate metrikler periyot butonuna duyarlı. */}
+          <div
+            className="pf-stats-row"
+            title={`Seçili pencere: Son ${days} gün (istatistik tabanı ${(baselineInfo.stats_baseline || STATS_BASELINE).slice(0, 10)} sonrası)`}
+          >
             <PfStat label="Net Kâr/Zarar" value={fmt(perf?.total_pnl)} cls={pnlCls(perf?.total_pnl)} />
             <PfStat label="Win Rate" value={fmtPct(perf?.win_rate)} cls={winRateClass(perf?.win_rate)} />
             <PfStat label="Sharpe Oranı" value={fmtNum(perf?.sharpe_ratio)} cls={perf?.sharpe_ratio >= 1 ? 'profit' : ''} />
@@ -391,7 +397,7 @@ export default function Performance() {
           {/* ═══ EQUİTY EĞRİSİ ════════════════════════════════════════ */}
           <div className="pf-chart-card pf-chart-full">
             <div className="pf-chart-header">
-              <h3>Equity Eğrisi</h3>
+              <h3>Equity Eğrisi — Son {days} Gün</h3>
               <span className="pf-chart-sub">{eq.length} veri noktası</span>
               <div className="pf-chart-legend">
                 <span className="pf-legend-item">
@@ -459,10 +465,22 @@ export default function Performance() {
             ) : <div className="pf-empty">Drawdown verisi yok</div>}
           </div>
 
-          {/* ═══ STRATEJİ + SEMBOL (yan yana) ══════════════════════════ */}
+          {/* ═══ STRATEJİ + SEMBOL (yan yana) ══════════════════════════
+              NOT: Aşağıdaki iki kart `getTradeStats` (baseline-anchored) verisinden
+              beslenir; periyot butonundan ETKİLENMEZ. Bu tasarımdır — aggregate
+              sembol/strateji metrikleri tarihsel anchor'a ihtiyaç duyar. */}
           <div className="pf-two-col">
             <div className="pf-chart-card">
-              <div className="pf-chart-header"><h3>Strateji Bazlı K/Z</h3></div>
+              <div className="pf-chart-header">
+                <h3>Strateji Bazlı K/Z</h3>
+                <span
+                  className="pf-chart-sub"
+                  title={`Baseline (${(baselineInfo.stats_baseline || STATS_BASELINE).slice(0, 10)}) sonrası tüm işlemler`}
+                  style={{ fontSize: 10, opacity: 0.6 }}
+                >
+                  baseline'dan beri
+                </span>
+              </div>
               {strategyData.length > 0 ? (
                 <ResponsiveContainer width="100%" height={200}>
                   <BarChart data={strategyData} layout="vertical" margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
@@ -482,7 +500,16 @@ export default function Performance() {
             </div>
 
             <div className="pf-chart-card">
-              <div className="pf-chart-header"><h3>Sembol Bazlı K/Z (Top 10)</h3></div>
+              <div className="pf-chart-header">
+                <h3>Sembol Bazlı K/Z (Top 10)</h3>
+                <span
+                  className="pf-chart-sub"
+                  title={`Baseline (${(baselineInfo.stats_baseline || STATS_BASELINE).slice(0, 10)}) sonrası tüm işlemler`}
+                  style={{ fontSize: 10, opacity: 0.6 }}
+                >
+                  baseline'dan beri
+                </span>
+              </div>
               {symbolData.length > 0 ? (
                 <ResponsiveContainer width="100%" height={200}>
                   <BarChart data={symbolData} layout="vertical" margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
