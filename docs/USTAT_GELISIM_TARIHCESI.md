@@ -57,6 +57,9 @@
 
 ## [6.0.0] — 2026-04-13
 
+### Fixed
+- #209 — OgulSLTP plain STOP → STOP LIMIT migrasyonu: GCM VİOP plain STOP emirlerini reddediyordu (ORDER_TYPE_BUY_STOP/SELL_STOP → retcode=10035). `send_stop()` → `send_stop_limit()` değiştirildi, `modify_pending_order()` çağrısına `new_stoplimit` parametresi eklendi. Limit fiyatı config'den `ogul.stop_limit_gap_prim=0.3` ile hesaplanıyor. H-Engine PRİMNET ile aynı emir tipi. Kök neden: OĞUL pozisyon açıyor → SL yerleştiremiyor → pozisyonu zorla kapatıyor → trade kaydedilmiyor → günlük sayaç artmıyor. 1 dosya (ogul_sltp.py).
+
 ### Security
 - #208 — OĞUL netting koruması: MT5'ten/GCM'den doğrudan açılan pozisyonlar artık OĞUL sinyal döngüsünde kontrol ediliyor. `process_signals()` sinyal döngüsüne girmeden önce `mt5.get_positions()` ile MT5 açık pozisyonları sorgulanıyor, sembolde mevcut pozisyon varsa sinyal atlanıyor. Kök neden: VİOP netting sisteminde OĞUL'un BUY sinyali, kullanıcının mevcut SELL pozisyonunu istemeden kapattı (F_ASELS, -2.495 TL zarar). 1 dosya (ogul.py).
 
