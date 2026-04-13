@@ -33,11 +33,17 @@ async def get_performance(
     if not db:
         return PerformanceResponse()
 
-    # ── İşlemler (baseline sonrası) ────────────────────────────────
+    # ── İşlemler (baseline ∩ son N gün) ─────────────────────────────
     # Widget Denetimi A7: baseline tek kaynaktan (config/default.json
     # risk.stats_baseline_date → fallback: api.constants.STATS_BASELINE).
+    # P1-A (2026-04-13): days parametresi artık gerçekten uygulanır.
+    # Pencere = max(baseline, today - days) — periyot butonu equity
+    # eğrisini ve aggregate metrikleri etkiler.
+    from datetime import datetime, timedelta
     baseline = get_stats_baseline()
-    trades = db.get_trades(since=baseline, limit=5000)
+    days_cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
+    effective_since = max(baseline[:10], days_cutoff)
+    trades = db.get_trades(since=effective_since, limit=5000)
     if not trades:
         return PerformanceResponse()
 
@@ -90,8 +96,8 @@ async def get_performance(
 
     # ── Sharpe Ratio (yüzde getiri bazlı, Madde 2.2) ─────────────
     sharpe_ratio = 0.0
-    # A7: Aynı baseline, tutarlılık için üstteki get_trades ile eşlenir.
-    _snap_since = baseline[:10] if baseline else STATS_BASELINE
+    # A7 + P1-A: Aynı pencere (baseline ∩ son N gün), trades ile eşlenir.
+    _snap_since = effective_since if effective_since else STATS_BASELINE
     daily_snapshots = db.get_daily_end_snapshots(
         since=f"{_snap_since}T00:00:00", limit=365,
     )
