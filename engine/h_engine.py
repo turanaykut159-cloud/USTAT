@@ -2449,8 +2449,14 @@ class HEngine:
 
         PRİMNET yenilemesi piyasa açılışında (09:40+) çalışır, gece yarısında değil.
         MT5'in yeni uzlaşma fiyatlarını yüklemesi için piyasa açık olmalı.
+
+        v5.9.3 — Restore self-heal: Aynı gün restart edilmiş ve ticket=0
+        kalan pozisyon varsa, günlük reset'i tekrar çalıştırarak emir
+        yerleştirmeyi zorlar (referans fiyat piyasa açılışında hazırdır).
         """
         today = date.today().isoformat()
+        # Fix 3 (v5.9.3): previous_date'i gün değişmeden ÖNCE sakla
+        previous = self._daily_pnl_date
         if self._daily_pnl_date != today:
             self._daily_pnl_date = today
             self._daily_hybrid_pnl = 0.0
@@ -2458,12 +2464,35 @@ class HEngine:
 
         # PRİMNET yenileme — piyasa açılışında (uzlaşma fiyatları hazır)
         now = datetime.now()
-        if (self._daily_reset_done != today
+        needs_daily_reset = (
+            self._daily_reset_done != today
+            and self.hybrid_positions
+            and self._is_trading_hours(now)
+        )
+
+        # v5.9.3 — Restore self-heal: Aynı gün restart sonrası ticket=0
+        # kalan pozisyonlar varsa, daily reset zaten yapılmış olsa bile
+        # yeniden çalıştır (emir boşluğunu kapat).
+        if (not needs_daily_reset
+                and self._use_stop_limit
                 and self.hybrid_positions
                 and self._is_trading_hours(now)):
+            has_missing_orders = any(
+                hp.state == "ACTIVE"
+                and (hp.trailing_order_ticket == 0
+                     or hp.target_order_ticket == 0)
+                for hp in self.hybrid_positions.values()
+            )
+            if has_missing_orders:
+                needs_daily_reset = True
+                logger.warning(
+                    "PRİMNET: ticket=0 pozisyon tespit edildi — "
+                    "emir yenileme tekrar çalıştırılıyor"
+                )
+
+        if needs_daily_reset:
             self._daily_reset_done = today
-            yesterday = self._daily_pnl_date if self._daily_pnl_date != today else "?"
-            self._primnet_daily_reset(yesterday)
+            self._primnet_daily_reset(previous)
 
         # DB'den güncel toplam
         try:
@@ -2544,6 +2573,10 @@ class HEngine:
             # MT5'e yaz
             if self._use_stop_limit and new_ref > 0:
                 # Eski emirleri iptal et, yenilerini koy
+                # v5.9.3 — Netting sync rollback kalıbı: trailing başarısız
+                # olursa ticket'lar sıfırlanır ve software SL devreye girer.
+                # Trailing OK ama hedef başarısız → trailing iptal edilir
+                # (tutarlılık — netting sync ile aynı kalıp).
                 self._cancel_stop_limit_orders(hp)
 
                 # Trailing Stop Limit emri (SL)
@@ -2561,21 +2594,53 @@ class HEngine:
                         sl_prim - self._stop_limit_gap_prim, new_ref,
                     )
 
+                new_trail_ticket = 0
+                new_tgt_ticket = 0
+                orders_ok = True
+
                 trail_res = self.mt5.send_stop_limit(
                     hp.symbol, trail_dir, hp.volume,
                     new_sl, trail_limit,
                     comment=f"TRL_{ticket}",
                 )
                 if trail_res is not None:
-                    hp.trailing_order_ticket = trail_res["order_ticket"]
+                    new_trail_ticket = trail_res["order_ticket"]
                 else:
-                    logger.error(
+                    orders_ok = False
+                    logger.critical(
                         f"PRİMNET yenileme trailing Stop Limit başarısız: "
-                        f"ticket={ticket} {hp.symbol}"
+                        f"ticket={ticket} {hp.symbol} — KORUMA DÜŞTÜ, "
+                        f"software SL devrede (gap riski!)"
+                    )
+                    self.db.insert_notification(
+                        notif_type="primnet_protection_down",
+                        title="PRİMNET Koruma Düştü",
+                        message=(
+                            f"{hp.symbol}: Günlük yenileme trailing emri "
+                            f"gönderilemedi. Software SL aktif — gap riski var."
+                        ),
+                        severity="critical",
                     )
 
-                # Hedef Stop Limit
-                self._place_target_stop_limit(hp)
+                # Hedef Stop Limit — sadece trailing başarılıysa
+                if orders_ok:
+                    self._place_target_stop_limit(hp)
+                    new_tgt_ticket = hp.target_order_ticket
+                    if new_tgt_ticket == 0:
+                        # Hedef başarısız → trailing'i de geri çek (tutarlılık)
+                        if new_trail_ticket:
+                            self.mt5.cancel_pending_order(new_trail_ticket)
+                            logger.warning(
+                                f"PRİMNET yenileme: hedef gönderilemedi — "
+                                f"trailing ({new_trail_ticket}) rollback edildi: "
+                                f"ticket={ticket} {hp.symbol}"
+                            )
+                            new_trail_ticket = 0
+                        orders_ok = False
+
+                # Ticket'ları güncelle
+                hp.trailing_order_ticket = new_trail_ticket
+                hp.target_order_ticket = new_tgt_ticket
 
             elif self._native_sltp:
                 modify_result = self.mt5.modify_position(ticket, sl=new_sl, tp=new_tp)

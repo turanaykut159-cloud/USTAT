@@ -57,6 +57,13 @@
 
 ## [6.0.0] — 2026-04-13
 
+### Security
+- #218 — PRİMNET günlük yenileme rollback koruması: `_primnet_daily_reset` içinde eski emirler iptal edildikten sonra yeni emir reddedilirse (retcode=10019 No money vb.) rollback uygulanıyor — netting sync ile aynı kalıp. Trailing OK/hedef başarısız → trailing da iptal. Tümü başarısız → CRITICAL alarm + software SL devrede bildirimi. 1 dosya (h_engine.py).
+- #217 — PRİMNET restore self-heal: Restart sonrası ticket=0 kalan pozisyonlar piyasa açılışında `_primnet_daily_reset` ile otomatik emir alıyor. `_refresh_daily_pnl`'e `has_missing_orders` kontrolü eklendi. 1 dosya (h_engine.py).
+
+### Fixed
+- #216 — `_refresh_daily_pnl` previous_date "?" sorunu: `_daily_pnl_date` yeni güne çekilmeden ÖNCE saklanıyor, `_primnet_daily_reset` log'unda gerçek tarih gösteriliyor. 1 dosya (h_engine.py).
+
 ### Added
 - #211 — MT5 Journal (Günlük): MT5 terminal günlük kayıtlarını (Journal) okuyup veritabanında 3 gün saklayan sistem. MT5 log dosyalarını periyodik parse eder, Hata Takip sayfasında filtrelenebilir tablo olarak gösterir (tarih, kaynak, mesaj arama). MT5 kapatıldığında bile kayıtlar korunur. 8 dosya: mt5_journal.py [yeni], mt5_journal route [yeni], database.py, main.py, schemas.py, server.py, deps.py, api.js, ErrorTracker.jsx.
 - #210 — OĞUL Motor Toggle: GCM MT5 Algoritmik Ticaret butonu mantığında, OĞUL motorunun sinyal üretimini UI'den açıp kapatma özelliği eklendi. TopBar'da ve Otomatik İşlem Paneli DURUM kartında toggle buton. Varsayılan KAPALI, açık pozisyon varken kapatma engellenir. 8 dosya (ogul.py, schemas.py, ogul_toggle.py [yeni], server.py, status.py, api.js, TopBar.jsx, AutoTrading.jsx, theme.css).
