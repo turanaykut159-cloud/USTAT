@@ -58,6 +58,7 @@
 ## [6.0.0] — 2026-04-13
 
 ### Added
+- #211 — MT5 Journal (Günlük): MT5 terminal günlük kayıtlarını (Journal) okuyup veritabanında 3 gün saklayan sistem. MT5 log dosyalarını periyodik parse eder, Hata Takip sayfasında filtrelenebilir tablo olarak gösterir (tarih, kaynak, mesaj arama). MT5 kapatıldığında bile kayıtlar korunur. 8 dosya: mt5_journal.py [yeni], mt5_journal route [yeni], database.py, main.py, schemas.py, server.py, deps.py, api.js, ErrorTracker.jsx.
 - #210 — OĞUL Motor Toggle: GCM MT5 Algoritmik Ticaret butonu mantığında, OĞUL motorunun sinyal üretimini UI'den açıp kapatma özelliği eklendi. TopBar'da ve Otomatik İşlem Paneli DURUM kartında toggle buton. Varsayılan KAPALI, açık pozisyon varken kapatma engellenir. 8 dosya (ogul.py, schemas.py, ogul_toggle.py [yeni], server.py, status.py, api.js, TopBar.jsx, AutoTrading.jsx, theme.css).
 
 ### Fixed

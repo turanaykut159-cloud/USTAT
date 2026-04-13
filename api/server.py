@@ -43,6 +43,7 @@ from api.routes import (
     killswitch,
     live,
     manual_trade,
+    mt5_journal,
     mt5_verify,
     nabiz,
     news,
@@ -233,6 +234,7 @@ app.include_router(settings.router, prefix="/api", tags=["settings"])
 app.include_router(mt5_verify.router, prefix="/api", tags=["mt5"])
 app.include_router(error_dashboard.router, prefix="/api", tags=["errors"])
 app.include_router(news.router, prefix="/api", tags=["news"])
+app.include_router(mt5_journal.router, prefix="/api", tags=["mt5-journal"])
 app.include_router(nabiz.router, prefix="/api", tags=["nabiz"])
 
 

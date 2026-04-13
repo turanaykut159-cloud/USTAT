@@ -413,6 +413,32 @@ export async function setOgulToggle(action) {
   }
 }
 
+// ── MT5 Journal ──────────────────────────────────────────────────
+
+export async function getMT5Journal({ date, source, search, limit = 500, offset = 0 } = {}) {
+  try {
+    const params = { limit, offset };
+    if (date) params.date = date;
+    if (source) params.source = source;
+    if (search) params.search = search;
+    const { data } = await client.get('/mt5-journal', { params });
+    return data;
+  } catch (err) {
+    console.error('[ÜSTAT API] getMT5Journal:', err?.message ?? err);
+    return { entries: [], total: 0, available_dates: [], available_sources: [] };
+  }
+}
+
+export async function syncMT5Journal() {
+  try {
+    const { data } = await client.post('/mt5-journal/sync');
+    return data;
+  } catch (err) {
+    console.error('[ÜSTAT API] syncMT5Journal:', err?.message ?? err);
+    return { success: false, message: 'Bağlantı hatası.', synced: 0 };
+  }
+}
+
 // ── Manuel İşlem ─────────────────────────────────────────────────
 
 export async function checkManualTrade(symbol, direction) {

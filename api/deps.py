@@ -96,6 +96,11 @@ def get_news_bridge():
     return _engine.news_bridge if _engine and hasattr(_engine, 'news_bridge') else None
 
 
+def get_mt5_journal():
+    """MT5Journal instance'ına eriş."""
+    return _engine.mt5_journal if _engine and hasattr(_engine, 'mt5_journal') else None
+
+
 def is_engine_running() -> bool:
     """Engine çalışıyor mu?"""
     if _engine is None:

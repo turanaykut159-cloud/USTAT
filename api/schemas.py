@@ -958,3 +958,24 @@ class LiveNews(BaseModel):
     worst_severity: str | None = None
     best_sentiment: float | None = None
     events: list[dict] = []
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  MT5 JOURNAL
+# ═══════════════════════════════════════════════════════════════════
+
+class MT5JournalEntry(BaseModel):
+    """Tek bir MT5 Journal kaydı."""
+    id: int = 0
+    timestamp: str = ""
+    source: str = ""
+    message: str = ""
+    log_date: str = ""
+
+
+class MT5JournalResponse(BaseModel):
+    """GET /api/mt5-journal — MT5 Günlük kayıtları."""
+    entries: list[MT5JournalEntry] = []
+    total: int = 0
+    available_dates: list[str] = []
+    available_sources: list[str] = []

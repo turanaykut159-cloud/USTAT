@@ -225,6 +225,19 @@ CREATE TABLE IF NOT EXISTS notifications (
     read      INTEGER NOT NULL DEFAULT 0,
     details   TEXT    DEFAULT '{}'
 );
+
+-- MT5 Journal (Günlük) kayıtları — 3 günlük saklama
+CREATE TABLE IF NOT EXISTS mt5_journal (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT    NOT NULL,
+    source    TEXT    NOT NULL DEFAULT '',
+    message   TEXT    NOT NULL,
+    log_date  TEXT    NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_mt5j_timestamp ON mt5_journal (timestamp);
+CREATE INDEX IF NOT EXISTS idx_mt5j_source    ON mt5_journal (source);
+CREATE INDEX IF NOT EXISTS idx_mt5j_log_date  ON mt5_journal (log_date);
 """
 
 

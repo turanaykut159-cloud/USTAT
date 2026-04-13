@@ -29,6 +29,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   getErrorSummary, getErrorGroups, getErrorTrends,
   resolveError, resolveAllErrors, getSession,
+  getMT5Journal, syncMT5Journal,
 } from '../services/api';
 // Widget Denetimi H7: Kategori/severity renkleri, etiketleri ve filtre
 // seçenekleri frontend canonical modülüne (errorTaxonomy.js) taşındı.
@@ -46,6 +47,24 @@ import {
 
 // ── Sabitler ──
 const POLL_INTERVAL = 15_000; // 15sn
+
+// MT5 Journal kaynak renkleri
+const JOURNAL_SOURCE_COLORS = {
+  Terminal: '#1e40af',
+  Trades: '#166534',
+  Network: '#7c3aed',
+  Experts: '#b45309',
+  Services: '#0e7490',
+};
+
+// MT5 Journal tablo stilleri
+const jThStyle = {
+  padding: '8px 10px', textAlign: 'left', fontSize: 11,
+  color: '#94a3b8', fontWeight: 600, whiteSpace: 'nowrap',
+};
+const jTdStyle = {
+  padding: '6px 10px', textAlign: 'left', fontSize: 12,
+};
 
 // ── EOD Sabitleri — Widget Denetimi A17 ──
 // Bu değerler FALLBACK; gerçek saatler /api/settings/session üzerinden
@@ -153,6 +172,18 @@ export default function ErrorTracker() {
   const [resolveMsg, setResolveMsg] = useState(null);
   const [hoveredMsg, setHoveredMsg] = useState(null);
 
+  // ── MT5 Journal State ──
+  const [journalEntries, setJournalEntries] = useState([]);
+  const [journalDates, setJournalDates] = useState([]);
+  const [journalSources, setJournalSources] = useState([]);
+  const [journalTotal, setJournalTotal] = useState(0);
+  const [jDateFilter, setJDateFilter] = useState('');
+  const [jSourceFilter, setJSourceFilter] = useState('');
+  const [jSearch, setJSearch] = useState('');
+  const [jSearchInput, setJSearchInput] = useState('');
+  const [jLoading, setJLoading] = useState(false);
+  const [jSyncing, setJSyncing] = useState(false);
+
   // ── A17: Session saatlerini mount'ta çek; hata durumunda default kalır ──
   useEffect(() => {
     let cancelled = false;
@@ -205,6 +236,48 @@ export default function ErrorTracker() {
     const timer = setInterval(fetchAll, POLL_INTERVAL);
     return () => clearInterval(timer);
   }, [fetchAll]);
+
+  // ── MT5 Journal veri çekme ──
+  const fetchJournal = useCallback(async () => {
+    setJLoading(true);
+    try {
+      const data = await getMT5Journal({
+        date: jDateFilter || undefined,
+        source: jSourceFilter || undefined,
+        search: jSearch || undefined,
+        limit: 500,
+      });
+      setJournalEntries(data.entries || []);
+      setJournalTotal(data.total || 0);
+      setJournalDates(data.available_dates || []);
+      setJournalSources(data.available_sources || []);
+    } catch (err) {
+      console.error('[ErrorTracker] journal:', err?.message);
+    } finally {
+      setJLoading(false);
+    }
+  }, [jDateFilter, jSourceFilter, jSearch]);
+
+  useEffect(() => {
+    fetchJournal();
+    const timer = setInterval(fetchJournal, 30_000); // 30sn
+    return () => clearInterval(timer);
+  }, [fetchJournal]);
+
+  const handleJournalSync = useCallback(async () => {
+    setJSyncing(true);
+    try {
+      await syncMT5Journal();
+      await fetchJournal();
+    } finally {
+      setJSyncing(false);
+    }
+  }, [fetchJournal]);
+
+  const handleJSearchSubmit = useCallback((e) => {
+    e.preventDefault();
+    setJSearch(jSearchInput);
+  }, [jSearchInput]);
 
   // ── Çözümleme (try/catch ile) ──
   const handleResolve = useCallback(async (errorType, messagePrefix) => {
@@ -552,6 +625,143 @@ export default function ErrorTracker() {
           </div>
         </div>
       )}
+
+      {/* ── MT5 JOURNAL (GÜNLÜK) ────────────────────────────────── */}
+      <div style={{
+        background: '#1e293b', borderRadius: 8, padding: '14px 16px',
+        marginTop: 24, border: '1px solid #334155',
+      }}>
+        {/* Başlık + Sync butonu */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0' }}>
+              MT5 Günlük
+            </span>
+            <span style={{
+              fontSize: 11, color: '#64748b',
+              background: '#0f172a', padding: '2px 8px', borderRadius: 4,
+            }}>
+              {journalTotal} kayıt
+            </span>
+          </div>
+          <button
+            onClick={handleJournalSync}
+            disabled={jSyncing}
+            style={{
+              fontSize: 11, padding: '4px 10px', borderRadius: 4,
+              border: '1px solid #334155', background: '#0f172a',
+              color: jSyncing ? '#475569' : '#94a3b8', cursor: jSyncing ? 'default' : 'pointer',
+            }}
+          >
+            {jSyncing ? 'Senkronize ediliyor...' : '⟳ Senkronize Et'}
+          </button>
+        </div>
+
+        {/* Filtreler */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+          <select
+            value={jDateFilter}
+            onChange={e => setJDateFilter(e.target.value)}
+            style={{
+              fontSize: 11, padding: '4px 8px', borderRadius: 4,
+              background: '#0f172a', border: '1px solid #334155', color: '#e2e8f0',
+            }}
+          >
+            <option value="">Tüm Günler</option>
+            {journalDates.map(d => (
+              <option key={d} value={d}>{d}</option>
+            ))}
+          </select>
+
+          <select
+            value={jSourceFilter}
+            onChange={e => setJSourceFilter(e.target.value)}
+            style={{
+              fontSize: 11, padding: '4px 8px', borderRadius: 4,
+              background: '#0f172a', border: '1px solid #334155', color: '#e2e8f0',
+            }}
+          >
+            <option value="">Tüm Kaynaklar</option>
+            {journalSources.map(src => (
+              <option key={src} value={src}>{src}</option>
+            ))}
+          </select>
+
+          <form onSubmit={handleJSearchSubmit} style={{ display: 'flex', gap: 4 }}>
+            <input
+              type="text"
+              value={jSearchInput}
+              onChange={e => setJSearchInput(e.target.value)}
+              placeholder="Mesaj ara..."
+              style={{
+                fontSize: 11, padding: '4px 8px', borderRadius: 4, width: 160,
+                background: '#0f172a', border: '1px solid #334155', color: '#e2e8f0',
+              }}
+            />
+            <button
+              type="submit"
+              style={{
+                fontSize: 11, padding: '4px 8px', borderRadius: 4,
+                background: '#1e40af', border: 'none', color: '#e2e8f0', cursor: 'pointer',
+              }}
+            >
+              Ara
+            </button>
+            {jSearch && (
+              <button
+                type="button"
+                onClick={() => { setJSearch(''); setJSearchInput(''); }}
+                style={{
+                  fontSize: 11, padding: '4px 8px', borderRadius: 4,
+                  background: '#7f1d1d', border: 'none', color: '#e2e8f0', cursor: 'pointer',
+                }}
+              >
+                ✕
+              </button>
+            )}
+          </form>
+        </div>
+
+        {/* Tablo */}
+        <div style={{ overflowX: 'auto', maxHeight: 420, overflowY: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid #334155', position: 'sticky', top: 0, background: '#1e293b', zIndex: 1 }}>
+                <th style={{ ...jThStyle, width: 160 }}>ZAMAN</th>
+                <th style={{ ...jThStyle, width: 80 }}>KAYNAK</th>
+                <th style={jThStyle}>MESAJ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {jLoading && journalEntries.length === 0 ? (
+                <tr><td colSpan={3} style={{ ...jTdStyle, color: '#64748b' }}>Yükleniyor...</td></tr>
+              ) : journalEntries.length === 0 ? (
+                <tr><td colSpan={3} style={{ ...jTdStyle, color: '#64748b' }}>
+                  {journalTotal === 0 ? 'MT5 Journal kaydı bulunamadı — MT5 bağlantısı sonrası kayıtlar oluşacaktır.' : 'Filtrelerle eşleşen kayıt yok.'}
+                </td></tr>
+              ) : journalEntries.map(e => (
+                <tr key={e.id} style={{ borderBottom: '1px solid #1e293b' }}>
+                  <td style={{ ...jTdStyle, color: '#94a3b8', fontFamily: 'monospace', fontSize: 11, whiteSpace: 'nowrap' }}>
+                    {e.timestamp ? e.timestamp.replace('T', ' ').slice(0, 23) : ''}
+                  </td>
+                  <td style={{ ...jTdStyle }}>
+                    <span style={{
+                      fontSize: 10, padding: '1px 6px', borderRadius: 3,
+                      background: JOURNAL_SOURCE_COLORS[e.source] || '#334155',
+                      color: '#e2e8f0',
+                    }}>
+                      {e.source}
+                    </span>
+                  </td>
+                  <td style={{ ...jTdStyle, color: '#e2e8f0', wordBreak: 'break-all' }}>
+                    {e.message}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }

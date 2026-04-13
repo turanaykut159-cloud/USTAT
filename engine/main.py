@@ -38,6 +38,7 @@ from engine.logger import get_logger
 from engine.models.regime import RegimeType
 from engine.models.risk import RiskParams
 from engine.mt5_bridge import MT5Bridge
+from engine.mt5_journal import MT5Journal
 from engine.h_engine import HEngine
 from engine.health import HealthCollector, CycleTimings
 from engine.ogul import Ogul
@@ -185,8 +186,12 @@ class Engine:
         )
         logger.info("PreMarketBriefing başlatıldı.")
 
+        # ── MT5 Journal (v6.0) ────────────────────────────────────
+        self.mt5_journal = MT5Journal(db=self.db)
+        logger.info("MT5Journal başlatıldı.")
+        self._last_journal_sync: float = 0.0  # epoch — 5dk aralıkla sync
+
         # ── Lifecycle Guard (v5.9.3) ──────────────────────────────
-        self.guard = LifecycleGuard()
         # MT5Bridge'e guard referansı ver (emir kilidi için)
         self.mt5._lifecycle_guard = self.guard
 
@@ -931,6 +936,9 @@ class Engine:
         # ── 7.5. Günlük DB temizliği (FAZ 2.8) ─────────────────
         self._run_daily_cleanup()
 
+        # ── 7.6. MT5 Journal sync (5 dakikada bir) ──────────────
+        self._sync_mt5_journal()
+
         # ── 8. Cycle Loglama ──────────────────────────────────────
         self._log_cycle_summary(regime, risk_verdict, top5)
         t10 = _pc()
@@ -1337,6 +1345,27 @@ class Engine:
                 )
         except Exception as exc:
             logger.error(f"DB temizlik hatası: {exc}")
+
+    def _sync_mt5_journal(self) -> None:
+        """MT5 Journal kayıtlarını 5 dakikada bir veritabanına senkronize et."""
+        now = _time.time()
+        if now - self._last_journal_sync < 300:  # 5 dakika = 300 saniye
+            return
+        self._last_journal_sync = now
+
+        try:
+            # MT5 bağlıysa ve data_path henüz ayarlanmadıysa, heartbeat'ten al
+            if self.mt5._connected and not self.mt5_journal._logs_dir:
+                import MetaTrader5 as mt5_lib
+                info = mt5_lib.terminal_info()
+                if info and hasattr(info, "data_path") and info.data_path:
+                    self.mt5_journal.set_terminal_path(info.data_path)
+
+            count = self.mt5_journal.sync()
+            if count > 0:
+                logger.debug("MT5 Journal sync: %d yeni kayıt", count)
+        except Exception as exc:
+            logger.error("MT5 Journal sync hatası: %s", exc)
 
     def _log_event(
         self,
