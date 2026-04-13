@@ -192,6 +192,7 @@ class Engine:
         self._last_journal_sync: float = 0.0  # epoch — 5dk aralıkla sync
 
         # ── Lifecycle Guard (v5.9.3) ──────────────────────────────
+        self.guard = LifecycleGuard()
         # MT5Bridge'e guard referansı ver (emir kilidi için)
         self.mt5._lifecycle_guard = self.guard
 
