@@ -1,5 +1,5 @@
 """
-MT5 Journal Parser — v6.0
+MT5 Journal Parser — v6.0.1
 
 MT5 terminal günlük (Journal) kayıtlarını okur, veritabanına yazar
 ve 3 günlük saklama politikası uygular.
@@ -7,20 +7,21 @@ ve 3 günlük saklama politikası uygular.
 MT5 log dosyaları konumu:
   <terminal_data_path>/logs/YYYYMMDD.log
 
-Format:
-  0	2026.04.13 16:40:20.263	Terminal	GCM MT5 Terminal x64 build 5738 started...
+Gerçek dosya formatı (UTF-16-LE, BOM ile):
+  PO\t0\t08:54:32.238\tTerminal\tGCM MT5 Terminal x64 build 5738 started...
+  DK\t0\t08:54:32.239\tTerminal\tWindows 11 build 26200, 16 x AMD Ryzen 7...
+  GR\t1\t08:54:43.443\tNetwork\t'7023084': outdated server build...
 
-Her satır: <sekme_harfi>\t<tarih_saat>\t<kaynak>\t<mesaj>
+Her satır: <2char_prefix>\t<severity>\t<HH:MM:SS.mmm>\t<Source>\t<Message>
+Tarih dosya adından gelir (20260413.log → 2026-04-13).
 """
 
 from __future__ import annotations
 
 import os
 import re
-import glob
 import logging
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -29,16 +30,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger("engine.mt5_journal")
 
 # ── Log satır regex ──────────────────────────────────────────────────
-# Örnek: "0\t2026.04.13 16:40:20.263\tTerminal\tGCM MT5 Terminal..."
-# Bazen satır başında karakter olmayabilir, esnek parse
+# Gerçek format: "PO\t0\t08:54:32.238\tTerminal\tMessage..."
+# Gruplar: (1) saat, (2) kaynak, (3) mesaj
 _LINE_RE = re.compile(
-    r"^[^\t]*?\t?"                          # opsiyonel prefix
-    r"(\d{4}\.\d{2}\.\d{2}\s+"             # tarih: 2026.04.13
-    r"\d{2}:\d{2}:\d{2}\.\d{3})"           # saat: 16:40:20.263
+    r"^[^\t]*\t"                               # 2-char prefix
+    r"[^\t]*\t"                                # severity (0 veya 1)
+    r"(\d{2}:\d{2}:\d{2}\.\d{3})"             # saat: 08:54:32.238
     r"\t"
-    r"(\w+)"                                # kaynak: Terminal/Trades/Network/...
+    r"([^\t]+)"                                # kaynak: Terminal/Trades/Network/...
     r"\t"
-    r"(.+)$"                                # mesaj
+    r"(.+)$"                                   # mesaj
 )
 
 # ── Saklama süresi ───────────────────────────────────────────────────
@@ -81,14 +82,13 @@ class MT5Journal:
                 self._logs_dir, f"{target_date.strftime('%Y%m%d')}.log"
             )
             if os.path.isfile(log_file):
-                count = self._read_log_file(log_file, target_date.strftime("%Y-%m-%d"))
+                count = self._read_log_file(
+                    log_file, target_date.strftime("%Y-%m-%d")
+                )
                 total_inserted += count
 
         # Eski kayıtları temizle
         self._cleanup_old_entries()
-
-        if total_inserted > 0:
-            logger.info("MT5 Journal sync: %d yeni kayıt eklendi", total_inserted)
 
         return total_inserted
 
@@ -185,28 +185,20 @@ class MT5Journal:
 
     def _set_logs_dir(self, data_path: str) -> None:
         """Terminal data_path'ten logs dizinini belirle."""
-        # mt5.terminal_info().data_path -> C:\Users\pc\AppData\Roaming\MetaQuotes\Terminal\<ID>
         logs_dir = os.path.join(data_path, "logs")
         if os.path.isdir(logs_dir):
             self._logs_dir = logs_dir
             logger.info("MT5 Journal logs dizini: %s", logs_dir)
         else:
-            # Fallback: bilinen GCM terminal dizini
-            fallback = r"C:\Users\pc\AppData\Roaming\MetaQuotes\Terminal"
-            if os.path.isdir(fallback):
-                # İlk bulunan terminal dizinini kullan
-                for entry in os.listdir(fallback):
-                    candidate = os.path.join(fallback, entry, "logs")
-                    if os.path.isdir(candidate) and len(entry) > 20:
-                        self._logs_dir = candidate
-                        logger.info("MT5 Journal logs dizini (fallback): %s", candidate)
-                        break
-
-            if not self._logs_dir:
-                logger.warning("MT5 Journal logs dizini bulunamadı: %s", logs_dir)
+            logger.warning("MT5 Journal logs dizini bulunamadı: %s", logs_dir)
 
     def _read_log_file(self, filepath: str, log_date: str) -> int:
-        """Tek bir log dosyasını oku, yeni satırları veritabanına ekle."""
+        """Tek bir log dosyasını oku, yeni satırları veritabanına ekle.
+
+        Args:
+            filepath: Log dosyası tam yolu (ör. .../logs/20260413.log)
+            log_date: ISO tarih (ör. "2026-04-13") — dosya adından türetilmiş
+        """
         file_key = os.path.basename(filepath)
         last_pos = self._last_read_pos.get(file_key, 0)
 
@@ -217,18 +209,23 @@ class MT5Journal:
 
             entries = []
             with open(filepath, "r", encoding="utf-16-le", errors="replace") as f:
-                f.seek(last_pos)
+                if last_pos > 0:
+                    f.seek(last_pos)
+                else:
+                    # BOM karakterini atla (ilk okumada)
+                    first_char = f.read(1)
+                    if first_char != "\ufeff":
+                        f.seek(0)
+
                 for line in f:
                     line = line.strip()
                     if not line:
                         continue
 
-                    parsed = self._parse_line(line)
+                    parsed = self._parse_line(line, log_date)
                     if parsed:
                         ts, source, message = parsed
-                        # ISO formatına çevir: 2026.04.13 16:40:20.263 -> 2026-04-13T16:40:20.263
-                        iso_ts = ts.replace(".", "-", 2).replace(" ", "T", 1)
-                        entries.append((iso_ts, source, message, log_date))
+                        entries.append((ts, source, message, log_date))
 
                 new_pos = f.tell()
 
@@ -242,24 +239,36 @@ class MT5Journal:
             logger.error("MT5 log okuma hatası (%s): %s", filepath, e)
             return 0
 
-    def _parse_line(self, line: str) -> tuple[str, str, str] | None:
-        """Tek bir log satırını parse et."""
+    def _parse_line(self, line: str, log_date: str) -> tuple[str, str, str] | None:
+        """Tek bir log satırını parse et.
+
+        Args:
+            line: Ham log satırı (BOM ve boşluk temizlenmiş)
+            log_date: ISO tarih (ör. "2026-04-13") — timestamp oluşturmak için
+
+        Returns:
+            (timestamp, source, message) veya None
+        """
         m = _LINE_RE.match(line)
         if m:
-            return m.group(1).strip(), m.group(2).strip(), m.group(3).strip()
+            time_str = m.group(1).strip()    # 08:54:32.238
+            source = m.group(2).strip()      # Terminal
+            message = m.group(3).strip()     # mesaj
+            # Tam ISO timestamp: 2026-04-13T08:54:32.238
+            timestamp = f"{log_date}T{time_str}"
+            return timestamp, source, message
 
-        # Alternatif: tab ile split dene
+        # Fallback: tab ile split dene
         parts = line.split("\t")
-        if len(parts) >= 3:
-            # İlk tab'dan sonra tarih, sonra kaynak, sonra mesaj
-            for i, part in enumerate(parts):
-                if re.match(r"\d{4}\.\d{2}\.\d{2}", part.strip()):
-                    ts = parts[i].strip()
-                    source = parts[i + 1].strip() if i + 1 < len(parts) else ""
-                    message = "\t".join(parts[i + 2:]).strip() if i + 2 < len(parts) else ""
-                    if ts and message:
-                        return ts, source, message
-                    break
+        if len(parts) >= 5:
+            # Format: prefix \t severity \t time \t source \t message
+            time_part = parts[2].strip()
+            if re.match(r"\d{2}:\d{2}:\d{2}", time_part):
+                source = parts[3].strip()
+                message = "\t".join(parts[4:]).strip()
+                if source and message:
+                    timestamp = f"{log_date}T{time_part}"
+                    return timestamp, source, message
 
         return None
 
@@ -268,7 +277,6 @@ class MT5Journal:
         if not entries:
             return
 
-        # Mevcut son timestamp'i al — sadece yenileri ekle
         sql = """
             INSERT OR IGNORE INTO mt5_journal (timestamp, source, message, log_date)
             VALUES (?, ?, ?, ?)

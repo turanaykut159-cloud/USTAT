@@ -611,12 +611,12 @@ class Engine:
 
                 # FAZ-A: Günlük veri retention (günde bir kez, piyasa kapanışında)
                 today = date.today()
+                from datetime import datetime as _dt
+                current_hour = _dt.now().hour
                 retention_enabled = self.config.get("retention.enabled", False)
                 if retention_enabled and self._last_retention_date != today:
                     # v5.9.3: Piyasa kapanışına yakın çalıştır (17:00+)
                     # Eski: 18:00 → uygulama 18:15'te kapanınca retention hiç çalışmıyordu
-                    from datetime import datetime as _dt
-                    current_hour = _dt.now().hour
                     if current_hour >= 17:
                         try:
                             retention_cfg = {
@@ -1352,19 +1352,28 @@ class Engine:
         now = _time.time()
         if now - self._last_journal_sync < 300:  # 5 dakika = 300 saniye
             return
-        self._last_journal_sync = now
 
         try:
-            # MT5 bağlıysa ve data_path henüz ayarlanmadıysa, heartbeat'ten al
-            if self.mt5._connected and not self.mt5_journal._logs_dir:
-                import MetaTrader5 as mt5_lib
-                info = mt5_lib.terminal_info()
-                if info and hasattr(info, "data_path") and info.data_path:
-                    self.mt5_journal.set_terminal_path(info.data_path)
+            # MT5 bağlıysa ve data_path henüz ayarlanmadıysa, bridge'den al
+            if not self.mt5_journal._logs_dir:
+                if self.mt5._connected:
+                    dp = self.mt5._data_path
+                    if dp:
+                        self.mt5_journal.set_terminal_path(dp)
+                        logger.info("MT5 Journal logs_dir ayarlandı: %s", dp)
+                    else:
+                        # data_path henüz hazır değil — cooldown yakma, sonraki cycle'da tekrar dene
+                        return
+                else:
+                    # MT5 bağlı değil — cooldown yakma
+                    return
+
+            # Cooldown'u ancak logs_dir hazırsa yak
+            self._last_journal_sync = now
 
             count = self.mt5_journal.sync()
             if count > 0:
-                logger.debug("MT5 Journal sync: %d yeni kayıt", count)
+                logger.info("MT5 Journal sync: %d yeni kayıt", count)
         except Exception as exc:
             logger.error("MT5 Journal sync hatası: %s", exc)
 

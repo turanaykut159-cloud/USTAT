@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from fastapi import APIRouter, Query
 
-from api.deps import get_mt5_journal
+from api.deps import get_mt5, get_mt5_journal
 from api.schemas import MT5JournalEntry, MT5JournalResponse
 
 logger = logging.getLogger("ustat.api.mt5_journal")
@@ -70,6 +70,13 @@ async def sync_journal():
         return {"success": False, "message": "MT5 Journal modülü aktif değil", "synced": 0}
 
     try:
+        # logs_dir ayarlanmamışsa bridge'den data_path al
+        if not journal._logs_dir:
+            mt5 = get_mt5()
+            if mt5 and mt5._data_path:
+                journal.set_terminal_path(mt5._data_path)
+                logger.info("MT5 Journal logs_dir API sync'ten ayarlandı: %s", mt5._data_path)
+
         count = journal.sync()
         return {"success": True, "message": f"{count} yeni kayıt eklendi", "synced": count}
     except Exception as e:

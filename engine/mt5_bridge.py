@@ -102,6 +102,7 @@ class MT5Bridge:
         self._config = config
         self._connected: bool = False
         self._last_heartbeat: float = 0.0
+        self._data_path: str = ""  # MT5 terminal data_path (journal log'ları için)
 
         # v5.8/CEO-FAZ2: Sembol eşleme kilidi — _resolve_symbols() sırasında
         # diğer thread'lerin dict'ten okuma yapmasını engeller.
@@ -801,6 +802,11 @@ class MT5Bridge:
                 if self._health:
                     self._health.record_disconnect()
                 return self._ensure_connection()
+
+            # v6.0: data_path kaydet (MT5 Journal log dizini için)
+            dp = getattr(info, 'data_path', '')
+            if dp and not self._data_path:
+                self._data_path = dp
 
             # MT5 Algo Trading butonu durumu — False ise emir gonderimi blokajli
             prev_allowed = self._trade_allowed
