@@ -450,11 +450,16 @@ export default function AutoTrading() {
             </div>
 
             {(() => {
+              // P3-A: Watchlist toplam sayısı backend'ten (top5.all_scores).
+              // Eğer boşsa fallback 15 (default kontrat sayısı).
+              const totalCount = top5.all_scores
+                ? Object.keys(top5.all_scores).length
+                : 15;
               const deactCount = (status.deactivated_symbols || []).length;
-              const activeCount = 15 - deactCount;
+              const activeCount = Math.max(totalCount - deactCount, 0);
               return (
                 <div className={`top5-status-bar ${deactCount > 0 ? 'top5-status-warn' : 'top5-status-ok'}`}>
-                  <span>{activeCount}/15 aktif</span>
+                  <span>{activeCount}/{totalCount} aktif</span>
                   {deactCount > 0 && (
                     <button
                       className="top5-reactivate-btn"
