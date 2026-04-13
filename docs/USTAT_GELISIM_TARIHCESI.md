@@ -58,6 +58,22 @@
 ## [6.0.0] — 2026-04-13
 
 ### Security
+- #226 — TopBar ALGO durumu üçlü mantık (Bulgu 5): Health endpoint hata verince eski kod ALGO'yu sessizce "AÇIK" sayıyordu (fail-open). Artık `tradeAllowed` true/false/null üç durum tutar; null → gri "ALGO DURUMU BİLİNMİYOR" rozeti, false → kırmızı "ALGO KAPALI" rozeti. 1 dosya (TopBar.jsx). (312cd6f)
+- #225 — API client fail-closed fallback (Bulgu 3): `getStatus`/`getRisk`/`getHealth` ağ/HTTP hatasında eski kod iyimser default döndürüyordu (`regime: 'OPEN'`, `can_trade: true`). Artık `regime: 'UNKNOWN'`, `risk_multiplier: 0`, `can_trade: false`, `mt5.trade_allowed: null` ve `_stale: true` + `_error` meta alanları döner. 1 dosya (services/api.js). (1d87a19)
+
+### Fixed
+- #224 — Performance `days` parametresi gerçekten uygulanıyor (Bulgu 1): Backend `days` query parametresi tanımlıydı ama sadece `STATS_BASELINE` kullanılıyordu — 30/90/180/365 gün butonları aynı veriyi döndürüyordu. `effective_since = max(baseline, today - days)` ile pencere artık baseline ∩ son N gün kesişimine kısıldı. Sharpe hesabı için `_snap_since` aynı pencereyi kullanır. 1 dosya (api/routes/performance.py). (4b04887)
+- #223 — AutoTrading aktif kontrat sayısı dinamikleşti (Bulgu 6): Hardcoded `15 - deactCount` → `Object.keys(top5.all_scores).length - deactCount`. WATCHED_SYMBOLS değişirse kart otomatik takip eder. 1 dosya (AutoTrading.jsx). (3cb400f)
+
+### Added
+- #222 — Performance pencere etiketi UX (Bulgu 2): "Equity Eğrisi — Son {days} Gün" başlığı + kategori grafiklerinde "(baseline'dan beri)" notu + ana stat row tooltip ile UI artık pencere kaynağını açıkça gösterir. 1 dosya (Performance.jsx). (6af3e4a)
+- #221 — TradeHistory genel istatistik etiketi (Bulgu 4): Risk paneline "ⓘ Genel İstatistik" rozet, etiketlerde `*` işaret + footer dipnot — kullanıcı filtrelenmiş tablo metrikleriyle baseline aggregate'i karıştırmaz. 1 dosya (TradeHistory.jsx). (a0e1814)
+- #220 — News REST yanıtında `worst_severity` alanı (Bulgu 7): WebSocket payload'unda olan en yüksek severity (`CRITICAL>HIGH>MEDIUM>LOW>NONE`) artık `/api/news/active` REST cevabında da var. NewsPanel banner'ı ws kesilse bile severity'yi gösterebilir. 2 dosya (api/schemas.py, api/routes/news.py). (9907960)
+
+### Removed
+- #219 — UstatBrain ölü `getPerformance` fetch'i temizlendi (Bulgu 8): Kullanılmayan `perf` state ve `getPerformance` import/çağrısı kaldırıldı. Performance verisi yalnızca Performance sayfasından okunuyor. 1 dosya (UstatBrain.jsx). (dccf181)
+
+### Security (önceki)
 - #218 — PRİMNET günlük yenileme rollback koruması: `_primnet_daily_reset` içinde eski emirler iptal edildikten sonra yeni emir reddedilirse (retcode=10019 No money vb.) rollback uygulanıyor — netting sync ile aynı kalıp. Trailing OK/hedef başarısız → trailing da iptal. Tümü başarısız → CRITICAL alarm + software SL devrede bildirimi. 1 dosya (h_engine.py).
 - #217 — PRİMNET restore self-heal: Restart sonrası ticket=0 kalan pozisyonlar piyasa açılışında `_primnet_daily_reset` ile otomatik emir alıyor. `_refresh_daily_pnl`'e `has_missing_orders` kontrolü eklendi. 1 dosya (h_engine.py).
 
