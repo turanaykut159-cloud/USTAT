@@ -62,6 +62,10 @@
 - #210 — OĞUL Motor Toggle: GCM MT5 Algoritmik Ticaret butonu mantığında, OĞUL motorunun sinyal üretimini UI'den açıp kapatma özelliği eklendi. TopBar'da ve Otomatik İşlem Paneli DURUM kartında toggle buton. Varsayılan KAPALI, açık pozisyon varken kapatma engellenir. 8 dosya (ogul.py, schemas.py, ogul_toggle.py [yeni], server.py, status.py, api.js, TopBar.jsx, AutoTrading.jsx, theme.css).
 
 ### Fixed
+- #215 — MT5 Journal sync cooldown mantığı: logs_dir henüz ayarlanmamışken cooldown süresinin (300sn) yanması engellendi. Bridge üzerinden `_data_path` alınması sağlandı, doğrudan MetaTrader5 import kaldırıldı. 1 dosya (main.py).
+- #214 — MT5 Journal parser regex: Gerçek MT5 log formatı `<prefix>\t<severity>\t<HH:MM:SS.mmm>\t<Source>\t<Message>` olarak düzeltildi (tarih dosya adından alınıyor). Eski regex tarih+saat arıyordu, hiçbir satır eşleşmiyordu. 1 dosya (mt5_journal.py).
+- #213 — `current_hour` değişken scope hatası: Retention bloğu içinde tanımlanan değişken dış blokta kullanılıyordu → CYCLE_ERROR. Tanım her iki bloğun üstüne taşındı. 1 dosya (main.py).
+- #212 — LifecycleGuard satırı kurtarma: MT5 Journal ekleme sırasında `self.guard = LifecycleGuard()` satırı yanlışlıkla silindi → Engine her başlatmada crash, 5+ restart döngüsü. Satır geri eklendi. 1 dosya (main.py). (d436105)
 - #209 — OgulSLTP plain STOP → STOP LIMIT migrasyonu: GCM VİOP plain STOP emirlerini reddediyordu (ORDER_TYPE_BUY_STOP/SELL_STOP → retcode=10035). `send_stop()` → `send_stop_limit()` değiştirildi, `modify_pending_order()` çağrısına `new_stoplimit` parametresi eklendi. Limit fiyatı config'den `ogul.stop_limit_gap_prim=0.3` ile hesaplanıyor. H-Engine PRİMNET ile aynı emir tipi. Kök neden: OĞUL pozisyon açıyor → SL yerleştiremiyor → pozisyonu zorla kapatıyor → trade kaydedilmiyor → günlük sayaç artmıyor. 1 dosya (ogul_sltp.py).
 
 ### Security
