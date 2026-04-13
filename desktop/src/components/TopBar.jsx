@@ -48,7 +48,9 @@ export default function TopBar() {
   const [ksResetting, setKsResetting] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [agentAlive, setAgentAlive] = useState(false);
-  const [tradeAllowed, setTradeAllowed] = useState(true);
+  // P2-B (2026-04-13): Üçlü mantık — true (açık), false (kapalı), null (bilinmiyor)
+  // Initial state null çünkü ilk health çağrısı tamamlanana kadar durum bilinmez.
+  const [tradeAllowed, setTradeAllowed] = useState(null);
   const [ogulEnabled, setOgulEnabled] = useState(false);
   const [ogulToggling, setOgulToggling] = useState(false);
   const [ogulMsg, setOgulMsg] = useState('');
@@ -103,10 +105,13 @@ export default function TopBar() {
       try {
         const h = await getHealth();
         const allowed = h?.mt5?.trade_allowed;
-        // undefined => bilinmiyor, varsayilan ACIK. Sadece kesin false'ta uyari.
-        setTradeAllowed(allowed !== false);
+        // P2-B: Üçlü mantık — true => trade açık, false => kapalı, null/undefined => bilinmiyor.
+        // Eski "allowed !== false" davranışı fail-open idi; artık tam değeri saklıyoruz.
+        if (allowed === true) setTradeAllowed(true);
+        else if (allowed === false) setTradeAllowed(false);
+        else setTradeAllowed(null);
       } catch {
-        // sessizce gecildi — bagimsiz uyari
+        setTradeAllowed(null);
       }
     };
     checkHealth();
@@ -261,7 +266,8 @@ export default function TopBar() {
           </span>
         )}
 
-        {isConnected && !tradeAllowed && (
+        {/* P2-B: Üçlü mantık — false (kırmızı) | null (gri, bilinmiyor) | true (uyarı yok) */}
+        {isConnected && tradeAllowed === false && (
           <span
             className="tb-algo-warn"
             title={
@@ -271,6 +277,23 @@ export default function TopBar() {
             }
           >
             ⚠ ALGO KAPALI
+          </span>
+        )}
+        {isConnected && tradeAllowed === null && (
+          <span
+            className="tb-algo-warn"
+            style={{
+              background: 'rgba(139,148,158,0.18)',
+              color: '#8b949e',
+              borderColor: '#484f58',
+            }}
+            title={
+              'Algo Trading durumu BİLİNMİYOR — /api/health endpoint\'inden trade_allowed bilgisi alınamadı.\n\n' +
+              'Olası nedenler: API/Engine erişilemiyor, MT5 heartbeat henüz tamamlanmadı, ' +
+              'health endpoint hata döndürdü. Birkaç saniye içinde durum netleşir; sürerse logları kontrol edin.'
+            }
+          >
+            ⚠ ALGO DURUMU BİLİNMİYOR
           </span>
         )}
       </div>
