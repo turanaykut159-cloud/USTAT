@@ -133,11 +133,17 @@ def _config_get(cfg: dict[str, Any], dotted_key: str) -> Any:
 
 
 def _sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(65536), b""):
-            h.update(chunk)
-    return h.hexdigest()
+    """Anayasa metin dosyaları için CRLF/LF agnostik SHA256.
+
+    Windows checkout'unda autocrlf CRLF üretir, Linux'ta LF. Aynı içerik
+    iki ortamda farklı binary hash verir → manifest drift. Çözüm: text
+    olarak oku, satır sonlarını LF'ye normalize et, UTF-8 byte üzerinden
+    hashle. Binary dosyalar için (bu fonksiyon sadece .md çağrılır)
+    farketmez ama burada güvenli yol budur.
+    """
+    text = path.read_text(encoding="utf-8")
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
 def check_protected_files(manifest: dict[str, Any], r: Result) -> None:
@@ -269,6 +275,13 @@ def check_anayasa_hash(manifest: dict[str, Any], r: Result, auto_fill: bool = Fa
 
 
 def main() -> int:
+    # Windows cp1254 codec hatasini onle — UTF-8 stdout zorla
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
     auto_fill = "--fill-hash" in sys.argv
     quiet = "--quiet" in sys.argv
 

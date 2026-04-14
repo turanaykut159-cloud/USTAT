@@ -170,6 +170,10 @@ class HEngine:
         self._netting_sync_min_margin_level: float = primnet_cfg.get(
             "netting_sync_min_margin_level", 150.0,
         )
+        # v6.1 — Broker SL sync periyodik denetim aralığı (sn)
+        self._sl_sync_check_interval_sec: float = float(primnet_cfg.get(
+            "sl_sync_check_interval_sec", 60,
+        ))
 
         sltp_mode = "NATIVE (MT5)" if self._native_sltp else "SOFTWARE (H-Oğul)"
         stop_limit_mode = "STOP LIMIT EMİR" if self._use_stop_limit else "TRADE_ACTION_SLTP"
@@ -884,15 +888,15 @@ class HEngine:
                     self._verify_trailing_sync(hp, current_price, profit, swap)
 
     def _sync_check_due(self, hp: HybridPosition) -> bool:
-        """Broker SL sync denetimi 60 sn'de bir tetiklenir.
+        """Broker SL sync denetimi config'deki aralıkta tetiklenir (vars. 60 sn).
 
-        İlk çağrıda (last_sl_check_at boş) True döner. Sonra 60 sn pencere.
+        İlk çağrıda (last_sl_check_at boş) True döner. Sonra interval pencere.
         """
         if not hp.last_sl_check_at:
             return True
         try:
             last = datetime.fromisoformat(hp.last_sl_check_at)
-            return (datetime.now() - last).total_seconds() >= 60.0
+            return (datetime.now() - last).total_seconds() >= self._sl_sync_check_interval_sec
         except Exception:
             return True
 

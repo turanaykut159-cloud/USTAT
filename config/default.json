@@ -179,7 +179,8 @@
       "target_prim": 9.5,
       "step_prim": 0.5,
       "use_stop_limit": true,
-      "stop_limit_gap_prim": 0.3
+      "stop_limit_gap_prim": 0.3,
+      "sl_sync_check_interval_sec": 60
     }
   },
   "ogul": {

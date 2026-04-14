@@ -53,15 +53,22 @@ def get_staged_files() -> list[str]:
     out = subprocess.run(
         ["git", "diff", "--cached", "--name-only"],
         cwd=ROOT, capture_output=True, text=True, check=True,
+        encoding="utf-8", errors="replace",
     ).stdout
     return [l for l in out.strip().split("\n") if l]
 
 
 def read_diff(files: list[str]) -> str:
-    """Git diff (staged + worktree) birlesik text"""
+    """Git diff (staged + worktree) birlesik text — UTF-8 zorla.
+
+    Default text=True Windows'ta cp1254 kullanir; binary patch hunk veya
+    Turkce karakter icin UnicodeDecodeError olusur. errors=replace ile
+    bozuk byte'lar kayipla da olsa devam eder (analiz icin yeterli).
+    """
     out = subprocess.run(
         ["git", "diff", "HEAD", "--"] + files,
         cwd=ROOT, capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
     ).stdout
     return out
 
@@ -144,6 +151,13 @@ def scan_triggers(files: list[str], diff_text: str, protected: dict,
 
 
 def main() -> int:
+    # Windows cp1254 codec hatasini onle — UTF-8 stdout zorla
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
     p = argparse.ArgumentParser()
     p.add_argument("files", nargs="*")
     p.add_argument("--from-git-staged", action="store_true")

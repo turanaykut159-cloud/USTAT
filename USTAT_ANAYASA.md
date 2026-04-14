@@ -72,6 +72,7 @@ Aşağıdaki maddeler uygulamanın bozulmadan evrilmesinin şartlarıdır. Her m
 | **CI-08** | — | MT5 başlatma sorumluluğu SADECE Electron (`mt5Manager.js::launchMT5`). Engine MT5'i başlatamaz. | `mt5_bridge.connect(launch=False)` + process kontrol |
 | **CI-09** | AX-7 | `mt5.initialize()` evrensel koruma: her çağrıdan ÖNCE `terminal64.exe` process kontrolü. Yeni `mt5.initialize()` çağrısı yasak. | `mt5_bridge.connect`, `health_check`, `mt5_verify` |
 | **CI-10** | — | Fail-closed: güvenlik modülü sessizce düşerse sistem "kilitli" duruma geçer. Sessiz fail YASAK. | `main._main_loop` hata izolasyonu |
+| **CI-11** | — | Broker SL Sync Periyodik Doğrulama: Her `trailing_active=True` hibrit pozisyon için `sl_sync_check_interval_sec` (vars. 60sn) aralıklı `_verify_trailing_sync` çağrısı zorunlu. Desync tespitinde `sl_sync_warning=True` + `SL_DESYNC` DB eventi + cancel+replace. Kâr kilidi sessiz kaybolamaz. | `h_engine.run_cycle`, `_verify_trailing_sync`, `_sync_check_due`; test: `tests/critical_flows/test_static_contracts.py::test_broker_sl_sync_periodic_check_contract` |
 
 **Kural:** Bir CI-XX maddesi için test eşlemesi yoksa, o madde anayasada YER ALMAZ. Test olmadan koruma yok.
 
