@@ -110,6 +110,7 @@ async def get_hybrid_status():
     primnet_cfg = PrimnetConfig(
         trailing_prim=h_engine.primnet_trailing,
         target_prim=h_engine.primnet_target,
+        step_prim=h_engine.primnet_step,
     )
 
     return HybridStatusResponse(

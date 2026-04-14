@@ -192,6 +192,10 @@ class HEngine:
         return self._primnet_target
 
     @property
+    def primnet_step(self) -> float:
+        return self._primnet_step
+
+    @property
     def max_concurrent(self) -> int:
         return self._max_concurrent
 

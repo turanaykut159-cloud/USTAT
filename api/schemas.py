@@ -614,6 +614,7 @@ class PrimnetConfig(BaseModel):
     """PRİMNET yapılandırma bilgisi (frontend hesaplama için)."""
     trailing_prim: float = 1.5
     target_prim: float = 9.5
+    step_prim: float = 0.5
 
 
 class HybridStatusResponse(BaseModel):
