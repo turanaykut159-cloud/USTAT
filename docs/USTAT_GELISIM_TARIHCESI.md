@@ -55,9 +55,15 @@
 
 ---
 
+## [Unreleased] - 2026-04-14
+
+### Fixed
+- fix(primnet-ui): T3+T5+T9+T10.3-T10.6 — 7 UI bulgusu (M-2026-04-14-primnet-7fix) (#234) (M-2026-04-14-primnet-7fix)
+
 ## [6.0.0] — 2026-04-14
 
 ### Fixed
+- #234 — PRİMNET detay modalı 7 UI bulgusu (M-2026-04-14-primnet-7fix): (T3) TP etiketinde gerçek fiyat (~9.19) gösterimi; (T5) merdivene 0.5 prim kademe granülariteli kâr trajektörü; (T9) footer "TRAILING STOP/beklemede" → "İLK ZARAR-DURDUR · kâr-trailing beklemede" (initial vs trailing ayrımı); (T10.3) GİRİŞ satırı "İlk zarar-durdur ... kâr-trailing henüz başlamadı"; (T10.4) STOP satırı kâr/zarar koşullu metin; (T10.5) AÇIKLAMA sütunu "Şu an:" / "Fiyat buraya gelirse:" tarihsel-projeksiyonel ayrımı; (T10.6) güncel satır K/Z prim yuvarlama drift'i yerine MT5 gerçek pnl+swap kullanımı. 1 dosya (desktop/src/components/PrimnetDetail.jsx). Detay: `docs/2026-04-14_primnet_canli_gozlem_notlari.md`.
 - #233 — `_find_orders_by_comment` orphan debug log spam: Aynı (symbol, comment_prefix) için tanı logları her döngüde basılıyordu. (symbol, prefix) anahtarlı 60s throttle eklendi; log hacmi yaklaşık 60x azaldı, davranış değişmedi. 1 dosya (engine/h_engine.py). (5e32cbd)
 - #232 — T12 PRİMNET trailing SL-gap 10s → ~0s: `_trailing_via_stop_limit` GCM VİOP pending-modify reddi nedeniyle 3× retry (~8s) + fallback cancel+place kullanıyordu (T+0 modify → T+10 yeni emir). Place-first-then-cancel pattern'ine çevrildi: yeni stop önce konur, başarılıysa eski iptal (iki stop ~300ms eşzamanlı), başarısızsa eski yerinde kalır (fail-safe). 1 dosya (engine/h_engine.py). (b660f84)
 - #231 — PRİMNET UI motor-uyumlu grid snap + yön-bilinçli açıklama + monotonic kilitli kâr + TRAILING STOP etiketi: (a) fmtPrim 1→2 ondalık; (b) `snapStopPrim` helper motor `_calc_primnet_trailing_sl` JS portu (BUY floor, SELL ceil); (c) buildLadder gridStep = cfg.step_prim; (d) buildExplanation cmpProfit/cmpLoss yön-bilinçli; (e) Row computation stopPrimSnapped alanı + T8 monotonic slPrim; (f) Rules row "Adım: {step_prim} prim (grid)" eklendi; (g) Footer "SL" → "TRAILING STOP" (aktif/beklemede alt etiketi). `PrimnetConfig.step_prim` schema'ya ve `hybrid_trade.py` payload'ına eklendi. 4 dosya (api/schemas.py, api/routes/hybrid_trade.py, engine/h_engine.py [primnet_step property], desktop/src/components/PrimnetDetail.jsx). (d1ed241)

@@ -60,13 +60,15 @@ function fmtMoneyFull(val) {
 // ── Açıklama metni üretici ────────────────────────────────────
 
 function buildExplanation(row, data, cfg) {
-  const { prim, stopPrimSnapped, statusClass, isEntry, isStop, isTarget } = row;
-  const { entryPrim } = data;
+  const { prim, stopPrimSnapped, statusClass, isEntry, isStop, isTarget, isCurrent } = row;
+  const { entryPrim, slPrim } = data;
   const dir = data.direction;
   const trail = cfg.trailing_prim;
   // Yon-bilincli karsilastirma metni (BUY: stop > giris = kar; SELL: stop < giris = kar)
   const cmpProfit = dir === 'BUY' ? '>' : '<';
   const cmpLoss = dir === 'BUY' ? '<' : '>';
+  // T10.5: tarihsel/projeksiyonel satirlar icin onek
+  const prefix = isCurrent ? 'Şu an: ' : 'Fiyat buraya gelirse: ';
 
   if (statusClass === 'unreachable') {
     return `±${cfg.target_prim} hedefinde kapatıldı, buraya ulaşılamaz`;
@@ -76,29 +78,37 @@ function buildExplanation(row, data, cfg) {
   }
   if (statusClass === 'locked') {
     const sp = stopPrimSnapped;
-    const lockedPrim = dir === 'BUY'
-      ? sp - entryPrim
-      : entryPrim - sp;
-    return `Stop ${fmtPrim(sp)} ${cmpProfit} Giriş → ${lockedPrim.toFixed(2)} prim kâr kilitli`;
+    const lockedPrim = dir === 'BUY' ? sp - entryPrim : entryPrim - sp;
+    return `${prefix}stop ${fmtPrim(sp)} ${cmpProfit} giriş → ${lockedPrim.toFixed(2)} prim kâr kilitli`;
   }
   if (statusClass === 'breakeven') {
     const sp = stopPrimSnapped;
-    return `Stop ${fmtPrim(sp)} = Giriş → Başabaş`;
+    return `${prefix}stop ${fmtPrim(sp)} = giriş → başabaş`;
   }
   if (statusClass === 'trailing') {
     const sp = stopPrimSnapped;
-    return `Stop ${fmtPrim(sp)} ${cmpLoss} Giriş → Kilitli kâr yok`;
+    return `${prefix}stop ${fmtPrim(sp)} ${cmpLoss} giriş → kilitli kâr yok`;
   }
   if (isEntry) {
+    // T10.3: ilk zarar-durdur ile sonraki trailing stop'u ayir
     const initialStop = dir === 'BUY' ? entryPrim - trail : entryPrim + trail;
-    return `Pozisyon açıldı. Stop: ${fmtPrim(initialStop)} (${dir === 'BUY' ? '-' : '+'}${trail} prim)`;
+    return `Pozisyon açıldı. İlk zarar-durdur: ${fmtPrim(initialStop)} (${dir === 'BUY' ? '-' : '+'}${trail} prim) — kâr-trailing henüz başlamadı`;
   }
   if (statusClass === 'open') {
     const initialStop = dir === 'BUY' ? entryPrim - trail : entryPrim + trail;
-    return `Zararda. Stop ${fmtPrim(initialStop)}'da`;
+    return `${prefix}zararda, ilk zarar-durdur ${fmtPrim(initialStop)}'da bekliyor`;
   }
   if (isStop || statusClass === 'stop') {
-    return 'ZARAR DURDUR tetiklendi → KAPAT';
+    // T10.4: stop kar bolgesindeyse (locked) "kar kilidi", aksi halde "zarar durdur"
+    const stopInProfit = dir === 'BUY' ? slPrim > entryPrim : slPrim < entryPrim;
+    if (stopInProfit) {
+      return isCurrent
+        ? 'Kâr kilidi tetiklendi → KAPAT (kâr ile çıkış)'
+        : 'Bu seviyede kâr-stop tetiklenir → KAPAT';
+    }
+    return isCurrent
+      ? 'ZARAR DURDUR tetiklendi → KAPAT'
+      : 'Bu seviyede zarar-durdur tetiklenir → KAPAT';
   }
   if (statusClass === 'outside') {
     return 'Stop tetiklenmiş, pozisyon kapalı';
@@ -130,9 +140,10 @@ function buildLadder(pos, cfg) {
   // Merdiven kademeleri:
   // 1) Tam sayilar: -10 ile +10
   // 2) Hedef kapanis: ±9.5
-  // 3) Giris primi (2 ondalik)
-  // 4) Stop primi (giris ± trailing, grid snap motor ile ayni)
-  // 5) Guncel fiyat (dinamik, kademeler arasina eklenir)
+  // 3) Kar tarafinda 0.5 kademe granulariteliligi (trailing step gorunur olsun) — T5
+  // 4) Giris primi (2 ondalik)
+  // 5) Stop primi (giris ± trailing, grid snap motor ile ayni)
+  // 6) Guncel fiyat (dinamik, kademeler arasina eklenir)
   const stepSet = new Set();
 
   // 1. Tam sayi kademeler
@@ -140,6 +151,20 @@ function buildLadder(pos, cfg) {
 
   // 2. Hedef kapanis yarimlari
   stepSet.add(9.5); stepSet.add(-9.5);
+
+  // 3. T5: Kar tarafinda 0.5 kademeler (entry ile hedef arasi)
+  // Trailing grid 0.5 prim — her kademede stop kilitlenir, kullanici traj goru
+  if (dir === 'BUY') {
+    const startBuy = Math.ceil(entryPrim * 2) / 2;  // entry ustundeki ilk 0.5
+    for (let s = startBuy; s <= cfg.target_prim; s += 0.5) {
+      stepSet.add(Math.round(s * 10) / 10);
+    }
+  } else {
+    const startSell = Math.floor(entryPrim * 2) / 2;  // entry altindaki ilk 0.5
+    for (let s = startSell; s >= -cfg.target_prim; s -= 0.5) {
+      stepSet.add(Math.round(s * 10) / 10);
+    }
+  }
 
   // 3. Giris primi — 2 ondalik
   const entryRounded = Math.round(entryPrim * 100) / 100;
@@ -414,7 +439,12 @@ export default function PrimnetDetail({ position, primnetConfig, onClose }) {
           <span className="pn-rule-sep">|</span>
           <span className="pn-rule-item pn-rule-step">Adim: {cfg.step_prim || 0.5} prim (grid)</span>
           <span className="pn-rule-sep">|</span>
-          <span className="pn-rule-item pn-rule-target">Hedef: ±{cfg.target_prim} prim</span>
+          <span className="pn-rule-item pn-rule-target">
+            Hedef: ±{cfg.target_prim} prim
+            {pos.current_tp > 0 && (
+              <span className="pn-rule-price"> (~{fmtPrice(pos.current_tp)})</span>
+            )}
+          </span>
         </div>
 
         {/* ── Prim merdiveni ───────────────────── */}
@@ -453,8 +483,9 @@ export default function PrimnetDetail({ position, primnetConfig, onClose }) {
                         {r.prim === 0 && <span className="pn-ref-dot">●</span>}
                       </td>
                       <td className="pn-col-price">{r.price.toFixed(2)}</td>
-                      <td className={`pn-col-pnl ${r.pnlTL >= 0 ? 'pn-profit' : 'pn-loss'}`}>
-                        {fmtMoney(r.pnlTL)}
+                      <td className={`pn-col-pnl ${(isCurrent ? ((pos.pnl || 0) + (pos.swap || 0)) : r.pnlTL) >= 0 ? 'pn-profit' : 'pn-loss'}`}>
+                        {/* T10.6: guncel satirda MT5 gercek K/Z'sini goster (prim yuvarlama drift'ini engelle) */}
+                        {fmtMoney(isCurrent ? ((pos.pnl || 0) + (pos.swap || 0)) : r.pnlTL)}
                       </td>
                       <td className="pn-col-stop">{r.stopLevel}</td>
                       <td className={`pn-col-status pn-st--${r.statusClass}`}>
@@ -484,11 +515,10 @@ export default function PrimnetDetail({ position, primnetConfig, onClose }) {
         <div className="pn-footer">
           <span className="pn-foot-item">Ref: <b>{fmtPrice(ref)}</b></span>
           <span className="pn-foot-item">
-            TRAILING STOP: <b className="pn-loss">{fmtPrice(pos.current_sl)}</b>
             {pos.trailing_active ? (
-              <span className="pn-foot-sub pn-profit"> · aktif</span>
+              <>TRAILING STOP: <b className="pn-profit">{fmtPrice(pos.current_sl)}</b><span className="pn-foot-sub pn-profit"> · kâr-trailing aktif</span></>
             ) : (
-              <span className="pn-foot-sub"> · beklemede</span>
+              <>İLK ZARAR-DURDUR: <b className="pn-loss">{fmtPrice(pos.current_sl)}</b><span className="pn-foot-sub"> · kâr-trailing beklemede</span></>
             )}
           </span>
           <span className="pn-foot-item">TP (hedef): <b className="pn-profit">{fmtPrice(pos.current_tp)}</b></span>
