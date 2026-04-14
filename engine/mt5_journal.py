@@ -290,8 +290,12 @@ class MT5Journal:
             logger.error("MT5 Journal batch insert hatası: %s", e)
 
     def _cleanup_old_entries(self) -> None:
-        """3 günden eski kayıtları sil."""
-        cutoff = (datetime.now() - timedelta(days=RETENTION_DAYS)).strftime("%Y-%m-%d")
+        """Saklama penceresi dışındaki kayıtları sil.
+
+        RETENTION_DAYS=3 → bugün + önceki 2 gün tutulur (toplam 3 gün).
+        Örn: bugün 2026-04-14 ise cutoff=2026-04-12, 04-11 ve öncesi silinir.
+        """
+        cutoff = (datetime.now() - timedelta(days=RETENTION_DAYS - 1)).strftime("%Y-%m-%d")
         try:
             self._db._execute(
                 "DELETE FROM mt5_journal WHERE log_date < ?", [cutoff]
