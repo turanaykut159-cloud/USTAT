@@ -63,6 +63,9 @@
 ### Fixed
 - fix(primnet-ui): T3+T5+T9+T10.3-T10.6 — 7 UI bulgusu (M-2026-04-14-primnet-7fix) (#234) (M-2026-04-14-primnet-7fix)
 
+### Changed
+- chore(governance): #236 — CI-11 anayasal kuralı (Broker SL Sync Periyodik Doğrulama) USTAT_ANAYASA.md'ye eklendi. Altyapı düzeltmeleri: `tools/check_constitution.py` artık CRLF/LF agnostik SHA256 hesaplıyor (Windows checkout autocrlf drift'i çözüldü) ve `sys.stdout.reconfigure(utf-8)` ile cp1254 codec hatası bertaraf; `tools/check_triggers.py` aynı stdout reconfigure + `subprocess.run` UTF-8 zorlaması. `governance/protected_assets.yaml` `anayasa_sha256` CI-11 sonrası güncellendi (`5befa31a...`). 60 sn sync interval hardcoded yerine `config/default.json::hybrid.primnet.sl_sync_check_interval_sec`'a taşındı; `engine/h_engine.py::_sync_check_due` artık config'den okuyor. 6 dosya. (aa90da2)
+
 ## [6.0.0] — 2026-04-14
 
 ### Fixed
