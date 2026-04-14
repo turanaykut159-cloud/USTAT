@@ -27,7 +27,7 @@
     "consecutive_loss_limit": 3,
     "cooldown_hours": 4,
     "fake_signal_threshold": 5,
-    "baseline_date": "2026-04-01 00:01",
+    "baseline_date": "2026-04-12 00:01",
     "stats_baseline_date": "2026-02-01",
     "master_floating_loss_pct": 0.05,
     "sltp_max_retries": 3,
