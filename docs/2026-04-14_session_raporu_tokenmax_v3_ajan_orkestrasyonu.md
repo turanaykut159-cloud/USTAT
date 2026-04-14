@@ -4,7 +4,7 @@
 **Konu:** Claude/Cowork session'larında token disiplini + 6 özel subagent için orkestrasyon rehberi
 **Sınıf:** C1 (Yeşil Bölge — sadece dokümantasyon ve yeni dosyalar; hiçbir kod/config/engine değişmedi)
 **Çalışan uygulamaya etki:** YOK
-**Commit:** [commit hash sonra eklenecek]
+**Commit:** `1ba306a`
 
 ---
 
