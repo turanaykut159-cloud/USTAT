@@ -1495,98 +1495,85 @@ class HEngine:
             )
 
         old_sl = hp.current_sl
+        old_ticket = hp.trailing_order_ticket
 
-        # Mevcut trailing emir var mı? → MODIFY, yoksa → yeni emir gönder
-        if hp.trailing_order_ticket > 0:
-            # Önce emrin hâlâ bekliyor olduğunu kontrol et
+        # T12 düzeltmesi (v5.9.3): ÖNCE-YENİ-SONRA-ESKİ pattern.
+        # GCM VİOP modify_pending_order'ı retcode=10006 ile reddediyordu →
+        # 3 deneme + sonra cancel+place yaklaşık ~10 saniye SL-gap üretiyordu.
+        # Artık:
+        #   1) Eski emir varsa bile YENİ stop_limit gönderilir
+        #   2) Yeni başarılı ise eski ticket iptal edilir
+        #   3) Yeni başarısız ise eski emir yerinde kalır (fail-safe)
+        # Böylece korumasız pencere ~0 saniyeye iner.
+
+        if old_ticket > 0:
             pending = self.mt5.get_pending_orders(hp.symbol)
             order_exists = any(
-                o.get("ticket") == hp.trailing_order_ticket for o in (pending or [])
+                o.get("ticket") == old_ticket for o in (pending or [])
             )
-
-            if order_exists:
-                # TRADE_ACTION_MODIFY — stop + stoplimit birlikte güncelle
-                result = self.mt5.modify_pending_order(
-                    hp.trailing_order_ticket, stop_price,
-                    new_stoplimit=limit_price,
-                )
-                if result is not None:
-                    self._close_retry_counts.pop(f"tr_sl_{hp.ticket}", None)
-                    logger.info(
-                        f"Trailing Stop güncellendi: ticket={hp.trailing_order_ticket} "
-                        f"{hp.symbol} stop={stop_price:.4f} limit={limit_price:.4f}"
-                    )
-                else:
-                    retry_key = f"tr_sl_{hp.ticket}"
-                    fail_count = self._close_retry_counts.get(retry_key, 0) + 1
-                    self._close_retry_counts[retry_key] = fail_count
-                    if fail_count <= 3:
-                        logger.warning(
-                            f"Trailing Stop modify başarısız: "
-                            f"ticket={hp.trailing_order_ticket} {hp.symbol} "
-                            f"(deneme {fail_count}/3)"
-                        )
-                    if fail_count == 3:
-                        # Modify 3x başarısız — emri iptal edip yeniden gönder
-                        logger.warning(
-                            f"Trailing Stop 3x modify başarısız — "
-                            f"iptal edip yeniden gönderiliyor: {hp.symbol}"
-                        )
-                        self.mt5.cancel_pending_order(hp.trailing_order_ticket)
-                        hp.trailing_order_ticket = 0
-                        self._close_retry_counts.pop(retry_key, None)
-            else:
-                # Emir tetiklenmiş veya iptal edilmiş — yenisini gönder
+            if not order_exists:
+                # Emir tetiklenmiş / iptal edilmiş — eski referans düşür
                 logger.info(
-                    f"Trailing Stop emri kayboldu: "
-                    f"ticket={hp.trailing_order_ticket} {hp.symbol} — yenisi gönderiliyor"
+                    f"Trailing Stop emri kayboldu: ticket={old_ticket} "
+                    f"{hp.symbol} — yenisi gönderiliyor"
                 )
+                old_ticket = 0
                 hp.trailing_order_ticket = 0
 
-        # Yeni emir gönder (ilk kez veya eski iptal edilmiş)
-        if hp.trailing_order_ticket == 0:
-            # v5.9.2 — Defansif orphan temizliği: yeni emir göndermeden ÖNCE
-            # MT5'teki aynı comment prefix ile bekleyen TÜM emirleri iptal et.
-            # Kural: "eğer emir değişirse eski emiri sil" → önce sil, sonra yerleştir.
+        # Her zaman: önce yeni emri yerleştir
+        # Eski ticket > 0 ise bu noktada iki stop geçici olarak aktiftir (~300ms)
+        result = self.mt5.send_stop_limit(
+            hp.symbol, order_direction, hp.volume,
+            stop_price, limit_price,
+            comment=f"TRL_{hp.ticket}",
+        )
+
+        if result is not None:
+            new_ticket = result["order_ticket"]
+            hp.trailing_order_ticket = new_ticket
+            logger.info(
+                f"Trailing Stop Limit yerleştirildi: "
+                f"order={new_ticket} {hp.symbol} "
+                f"{order_direction} stop={stop_price:.4f} limit={limit_price:.4f}"
+            )
+
+            # Yeni başarılı → eski emri iptal et (place-first-then-cancel)
+            if old_ticket > 0 and old_ticket != new_ticket:
+                cancel_res = self.mt5.cancel_pending_order(old_ticket)
+                if cancel_res is not None:
+                    logger.info(
+                        f"Eski trailing emri iptal: order={old_ticket} "
+                        f"{hp.symbol} (yeni={new_ticket})"
+                    )
+                else:
+                    logger.warning(
+                        f"Eski trailing emri iptal edilemedi: order={old_ticket} "
+                        f"{hp.symbol} — defansif orphan temizliği sonraki döngüde yapılacak"
+                    )
+
+            # Ek defansif orphan temizliği (aynı comment prefix'li sarkı emirler)
             trail_comment_prefix = f"TRL_{hp.ticket}"
             orphans = self._find_orders_by_comment(hp.symbol, trail_comment_prefix)
             for orphan in orphans:
                 o_ticket = orphan.get("ticket", 0)
-                if o_ticket == 0:
+                if o_ticket == 0 or o_ticket == new_ticket:
                     continue
                 cancel_result = self.mt5.cancel_pending_order(o_ticket)
                 if cancel_result is not None:
                     logger.warning(
-                        f"Orphan trailing emri yeni emir öncesi iptal: "
+                        f"Orphan trailing emri temizlendi: "
                         f"order={o_ticket} {hp.symbol} "
                         f"comment='{orphan.get('comment', '')}'"
                     )
-                else:
-                    logger.error(
-                        f"Orphan trailing emri iptal edilemedi: "
-                        f"order={o_ticket} {hp.symbol}"
-                    )
-
-            result = self.mt5.send_stop_limit(
-                hp.symbol, order_direction, hp.volume,
-                stop_price, limit_price,
-                comment=f"TRL_{hp.ticket}",
+        else:
+            # Yeni emir başarısız — ESKI emir yerinde kalır (fail-safe)
+            logger.error(
+                f"Trailing Stop Limit gönderilemedi: {hp.symbol} {order_direction} "
+                f"stop={stop_price:.4f} limit={limit_price:.4f} — "
+                f"{'eski emir yerinde kalıyor (old_ticket=' + str(old_ticket) + ')' if old_ticket > 0 else 'software SL ile devam edilecek'}"
             )
-            if result is not None:
-                hp.trailing_order_ticket = result["order_ticket"]
-                logger.info(
-                    f"Trailing Stop Limit yerleştirildi: "
-                    f"order={hp.trailing_order_ticket} {hp.symbol} "
-                    f"{order_direction} stop={stop_price:.4f} limit={limit_price:.4f}"
-                )
-            else:
-                logger.error(
-                    f"Trailing Stop Limit gönderilemedi: {hp.symbol} {order_direction} "
-                    f"stop={stop_price:.4f} limit={limit_price:.4f} — software SL ile devam edilecek"
-                )
-                # MT5 emri gönderilemedi AMA bellekte SL güncellenir:
-                # Software SL (_check_software_sltp) güvenlik ağı olarak
-                # bu seviyeyi kullanacak. KİLİT bozulmaz.
+            # Bellek SL yine güncellenir → software SL (_check_software_sltp)
+            # güvenlik ağı olarak bu seviyeyi kullanır. KİLİT bozulmaz.
 
         # Bellek + DB güncelle (send_stop_limit başarısız olsa bile!)
         # Bu sayede software SL her zaman doğru seviyede kalır
