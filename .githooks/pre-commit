@@ -1,78 +1,146 @@
 #!/usr/bin/env bash
-# USTAT pre-commit hook — 'bir yeri tamir ederken basini bozuyorsun' koruma katmani.
+# USTAT Plus V6.0 pre-commit hook
+# Anayasa (USTAT_ANAYASA.md) Bolum F - Teknik Zorunluluklar.
 #
 # Calisan kontroller:
 #   1. AST dogrulama (tum degisen .py dosyalari)
-#   2. Kritik akis testleri (tests/critical_flows)
-#   3. Kirmizi bolge uyarisi (dokunulan dosyalari listeler)
+#   2. Anayasa dogrulamasi (tools/check_constitution.py)
+#   3. Kritik akis testleri (tests/critical_flows)
+#   4. Governance testleri (tests/governance)
+#   5. Korunan varlik (sicil) etki analizi + onay ifadesi kontrolu
+#   6. C3 cift dogrulama (24 saat soguma + sha eslemesi)
 #
-# Atlamak icin: git commit --no-verify  (yalnizca barlis zamanda izin)
+# Atlamak icin: git commit --no-verify
+#   (Bu i3 seviyesi ihlaldir; docs/anayasa_degisiklikleri/ihlaller.md icinde kayda gecmelidir)
 #
 # Kurulum:
 #   git config core.hooksPath .githooks
 
 set -e
 
-# ── Renkler ──────────────────────────────────────────────────────
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 NC='\033[0m'
 
-echo -e "${YELLOW}USTAT pre-commit kontrol baslatiliyor...${NC}"
+echo -e "${YELLOW}USTAT Plus V6.0 pre-commit kontrol baslatiliyor...${NC}"
 
-# ── 1. Degisen Python dosyalari AST kontrolu ─────────────────────
-echo -e "\n[1/3] AST dogrulama (degisen .py dosyalari)"
+# ── 1. AST kontrolu ──────────────────────────────────────────────
+echo -e "\n[1/6] AST dogrulama"
 STAGED_PY=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.py$' || true)
-
 if [ -n "$STAGED_PY" ]; then
   for f in $STAGED_PY; do
-    if [ -f "$f" ]; then
-      python -c "import ast; ast.parse(open('$f', encoding='utf-8').read())" 2>/dev/null \
-        || { echo -e "${RED}HATA: $f AST bozuk${NC}"; exit 1; }
-      echo "  OK: $f"
-    fi
+    [ -f "$f" ] && python -c "import ast; ast.parse(open('$f', encoding='utf-8').read())" 2>/dev/null \
+      || { echo -e "${RED}HATA: $f AST bozuk${NC}"; exit 1; }
   done
+  echo "  OK ($(echo $STAGED_PY | wc -w) dosya)"
 else
   echo "  (degisen Python dosyasi yok)"
 fi
 
-# ── 2. Kritik akis testleri ──────────────────────────────────────
-echo -e "\n[2/3] Kritik akis testleri"
-if [ -d "tests/critical_flows" ]; then
-  python -m pytest tests/critical_flows -q --tb=short \
-    || { echo -e "${RED}HATA: Kritik akis testleri patladi — commit reddedildi${NC}"; exit 2; }
+# ── 2. Anayasa dogrulama (manifest-kod senkron) ──────────────────
+echo -e "\n[2/6] Anayasa dogrulama (tools/check_constitution.py)"
+if [ -f "tools/check_constitution.py" ]; then
+  python tools/check_constitution.py --quiet
+  CODE=$?
+  if [ $CODE -eq 2 ]; then
+    echo -e "${RED}HATA: Anayasa dogrulama kritik ihlal verdi.${NC}"
+    python tools/check_constitution.py
+    exit 2
+  elif [ $CODE -eq 1 ]; then
+    echo -e "  ${YELLOW}(uyarilar var, commit devam ediyor)${NC}"
+  else
+    echo "  OK"
+  fi
 else
-  echo -e "  ${YELLOW}(tests/critical_flows yok — testler atlandi)${NC}"
+  echo -e "  ${YELLOW}(tools/check_constitution.py yok — atlandi)${NC}"
 fi
 
-# ── 3. Kirmizi bolge uyarisi ─────────────────────────────────────
-echo -e "\n[3/3] Kirmizi bolge etki analizi"
-RED_ZONE_FILES="engine/baba.py engine/ogul.py engine/mt5_bridge.py engine/main.py engine/ustat.py engine/database.py engine/data_pipeline.py config/default.json start_ustat.py api/server.py"
+# ── 3. Kritik akis testleri ──────────────────────────────────────
+echo -e "\n[3/6] Kritik akis testleri"
+if [ -d "tests/critical_flows" ]; then
+  python -m pytest tests/critical_flows -q --tb=short \
+    || { echo -e "${RED}HATA: Kritik akis testleri patladi.${NC}"; exit 2; }
+else
+  echo -e "  ${YELLOW}(tests/critical_flows yok — atlandi)${NC}"
+fi
 
-TOUCHED_RED=""
-for rf in $RED_ZONE_FILES; do
-  if echo "$STAGED_PY" | grep -Fxq "$rf" 2>/dev/null; then
-    TOUCHED_RED="$TOUCHED_RED $rf"
+# ── 4. Governance testleri ───────────────────────────────────────
+echo -e "\n[4/6] Governance testleri"
+if [ -d "tests/governance" ]; then
+  python -m pytest tests/governance -q --tb=short \
+    || { echo -e "${RED}HATA: Governance testleri patladi.${NC}"; exit 2; }
+else
+  echo -e "  ${YELLOW}(tests/governance yok — atlandi)${NC}"
+fi
+
+# ── 5. Korunan varlik dokunusu ve onay ifadesi ───────────────────
+echo -e "\n[5/6] Korunan varlik etki analizi"
+RED_ZONE="engine/baba.py engine/ogul.py engine/mt5_bridge.py engine/main.py engine/ustat.py engine/database.py engine/data_pipeline.py config/default.json start_ustat.py api/server.py USTAT_ANAYASA.md governance/protected_assets.yaml"
+STAGED_ALL=$(git diff --cached --name-only --diff-filter=ACM)
+TOUCHED=""
+for rf in $RED_ZONE; do
+  if echo "$STAGED_ALL" | grep -Fxq "$rf" 2>/dev/null; then
+    TOUCHED="$TOUCHED $rf"
   fi
 done
 
-if [ -n "$TOUCHED_RED" ]; then
-  echo -e "  ${YELLOW}UYARI: Kirmizi bolge dosyalari commit ediliyor:${NC}"
-  for rf in $TOUCHED_RED; do
-    echo "    - $rf"
+COMMIT_MSG_FILE=".git/COMMIT_EDITMSG"
+COMMIT_MSG=""
+[ -f "$COMMIT_MSG_FILE" ] && COMMIT_MSG=$(cat "$COMMIT_MSG_FILE")
+
+if [ -n "$TOUCHED" ]; then
+  echo -e "  ${YELLOW}Korunan varliklar commit ediliyor:${NC}"
+  for rf in $TOUCHED; do echo "    - $rf"; done
+
+  # Anayasa dosyasi veya manifest dokunuluyorsa C3
+  C3_FILES=""
+  for rf in $TOUCHED; do
+    case "$rf" in
+      USTAT_ANAYASA.md|governance/protected_assets.yaml)
+        C3_FILES="$C3_FILES $rf"
+        ;;
+    esac
   done
-  echo -e "  ${YELLOW}Anayasa gereklilikleri:${NC}"
-  echo "    [x] Cift dogrulama (plan + onay + uygulama + rapor + dogrulama)"
-  echo "    [x] Siyah Kapi fonksiyonunun MANTIGI degistirilmedi"
-  echo "    [x] Kritik akis testleri ve etki haritasi incelendi"
-  echo -e "  ${YELLOW}tools/impact_map.py ile etkiyi inceleyin:${NC}"
-  for rf in $TOUCHED_RED; do
-    echo "    python tools/impact_map.py $rf"
-  done
+
+  if [ -n "$C3_FILES" ]; then
+    echo -e "  ${YELLOW}C3 degisiklik tespit edildi:${NC}$C3_FILES"
+    # Asama 1: ANAYASA ONAYI veya Asama 2: ANAYASA TEYIDI gerekli
+    if echo "$COMMIT_MSG" | grep -Eq '^ANAYASA (ONAYI|TEYIDI):'; then
+      echo "  OK: Onay ifadesi commit mesajinda bulundu"
+      # Asama 2 tespit edildiyse 24h kontrolu
+      if echo "$COMMIT_MSG" | grep -q '^ANAYASA TEYIDI:'; then
+        SHA12=$(echo "$COMMIT_MSG" | grep -oE 'ANAYASA TEYIDI:[^\n]*' | awk '{print $NF}' | head -1)
+        if [ -n "$SHA12" ] && git rev-parse "$SHA12" >/dev/null 2>&1; then
+          PLAN_TIME=$(git log -1 --format=%ct "$SHA12")
+          NOW=$(date +%s)
+          DIFF=$((NOW - PLAN_TIME))
+          if [ $DIFF -lt 86400 ]; then
+            echo -e "${RED}HATA: Asama 1 commit'inden 24 saat gecmedi ($DIFF saniye).${NC}"
+            exit 2
+          fi
+          echo "  OK: 24 saat soguma gecmis ($DIFF saniye)"
+        else
+          echo -e "${RED}HATA: ANAYASA TEYIDI sha12 gecersiz${NC}"
+          exit 2
+        fi
+      fi
+    else
+      echo -e "${RED}HATA: C3 degisikligi icin commit mesajinda onay ifadesi gerekli:${NC}"
+      echo -e "${RED}  ANAYASA ONAYI: <clause_id> <YYYY-MM-DD> <gerekce>${NC}"
+      echo -e "${RED}  veya (Asama 2): ANAYASA TEYIDI: <clause_id> <asama1_sha12>${NC}"
+      exit 2
+    fi
+  fi
+
+  echo -e "  ${YELLOW}Etki raporu icin:${NC}"
+  for rf in $TOUCHED; do echo "    python tools/impact_report.py $rf"; done
 else
-  echo "  (kirmizi bolge dokunusu yok)"
+  echo "  (korunan varlik dokunusu yok)"
 fi
 
-echo -e "\n${GREEN}Pre-commit kontrol BASARILI — commit devam ediyor.${NC}"
+# ── 6. Ozet ──────────────────────────────────────────────────────
+echo -e "\n[6/6] Ozet"
+echo -e "${GREEN}Pre-commit kontrol BASARILI.${NC}"
+echo "  (ihlal tespit edilirse: docs/anayasa_degisiklikleri/ihlaller.md kayda gecir)"
 exit 0

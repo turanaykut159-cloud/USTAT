@@ -1,0 +1,450 @@
+# ÜSTAT Plus V6.0 — KORUNAN VARLIK SİCİLİ
+# Bu dosya anayasanın makine okunur karşılığıdır.
+# Anayasa (USTAT_ANAYASA.md) Bölüm E, F, J bu dosyayı referans alır.
+# Değişiklik C3 sınıfıdır — çift doğrulama ve 24 saat soğuma gerektirir.
+
+manifest_version: "2.0"
+constitution_version: "2.0"
+last_updated: "2026-04-14"
+
+# Anayasa metninin hash'i. check_constitution.py tarafından doğrulanır.
+# Anayasa metni değişirse bu hash güncellenmelidir (C3 değişikliktir).
+# Boş bırakılırsa ilk doğrulama sırasında otomatik hesaplanıp doldurulur.
+anayasa_sha256: "d365c011fed3751848faa0cdd8ab62faa84b3200952b6a2dfa3c0418f7a14101"
+
+# =====================================================
+# 1. KORUNAN DOSYALAR (Kırmızı Bölge)
+# =====================================================
+# Değişiklik: C2 | Silme: C3
+protected_files:
+  - path: "engine/baba.py"
+    reason: "Risk yönetimi, kill-switch, drawdown, rejim algılama"
+    change_class: "C2"
+    delete_class: "C3"
+
+  - path: "engine/ogul.py"
+    reason: "Emir state-machine, SL/TP, EOD kapanış, pozisyon yönetimi"
+    change_class: "C2"
+    delete_class: "C3"
+
+  - path: "engine/mt5_bridge.py"
+    reason: "MT5 emir gönderimi, SL/TP ekleme, pozisyon kapatma, circuit breaker"
+    change_class: "C2"
+    delete_class: "C3"
+
+  - path: "engine/main.py"
+    reason: "Ana döngü, modül çağrı sırası, heartbeat, hata yönetimi"
+    change_class: "C2"
+    delete_class: "C3"
+
+  - path: "engine/ustat.py"
+    reason: "Strateji yönetimi, portföy kararları"
+    change_class: "C2"
+    delete_class: "C3"
+
+  - path: "engine/database.py"
+    reason: "Trade kayıtları, risk state persistence, P&L takibi"
+    change_class: "C2"
+    delete_class: "C3"
+
+  - path: "engine/data_pipeline.py"
+    reason: "Piyasa verisi besleme, tüm modüllerin veri kaynağı"
+    change_class: "C2"
+    delete_class: "C3"
+
+  - path: "config/default.json"
+    reason: "Risk parametreleri, strateji sabitleri, tüm eşik değerleri"
+    change_class: "C2"
+    delete_class: "C3"
+
+  - path: "start_ustat.py"
+    reason: "Başlatma zinciri, watchdog, graceful shutdown"
+    change_class: "C2"
+    delete_class: "C3"
+
+  - path: "api/server.py"
+    reason: "API lifespan, Engine oluşturma sırası, route kayıt"
+    change_class: "C2"
+    delete_class: "C3"
+
+# =====================================================
+# 2. KORUNAN FONKSİYONLAR (Siyah Kapı)
+# =====================================================
+# Mantık değişikliği: C3 | Performans/güvenlik iyileştirmesi: C2 (mantık/çıktı değişmeden)
+protected_functions:
+  # BABA — Risk Koruması
+  - id: "BK-01"
+    file: "engine/baba.py"
+    function: "check_risk_limits"
+    role: "İşlem açılıp açılmayacağını belirleyen MERKEZİ KAPI"
+    linked_rules: ["CI-01"]
+  - id: "BK-02"
+    file: "engine/baba.py"
+    function: "_activate_kill_switch"
+    role: "Acil durdurma tetikleyicisi (L1/L2/L3)"
+    linked_rules: ["CI-02"]
+  - id: "BK-03"
+    file: "engine/baba.py"
+    function: "_close_all_positions"
+    role: "L3'te tüm pozisyonları kapatır (manuel dahil)"
+    linked_rules: ["CI-05"]
+  - id: "BK-04"
+    file: "engine/baba.py"
+    function: "_close_ogul_and_hybrid"
+    role: "L2'de SADECE OĞUL + Hybrid pozisyonlarını kapatır"
+    linked_rules: []
+  - id: "BK-05"
+    file: "engine/baba.py"
+    function: "check_drawdown_limits"
+    role: "Günlük/toplam drawdown kapıları"
+    linked_rules: ["CI-05"]
+  - id: "BK-06"
+    file: "engine/baba.py"
+    function: "_check_hard_drawdown"
+    role: "%15 felaket drawdown algılama"
+    linked_rules: ["CI-05"]
+  - id: "BK-07"
+    file: "engine/baba.py"
+    function: "_check_monthly_loss"
+    role: "Aylık kayıp limiti"
+    linked_rules: []
+  - id: "BK-08"
+    file: "engine/baba.py"
+    function: "detect_regime"
+    role: "TREND/RANGE/VOLATILE/OLAY sınıflandırması"
+    linked_rules: ["CI-06", "R-02"]
+  - id: "BK-09"
+    file: "engine/baba.py"
+    function: "calculate_position_size"
+    role: "Risk tabanlı lot boyutlandırma"
+    linked_rules: []
+  - id: "BK-10"
+    file: "engine/baba.py"
+    function: "run_cycle"
+    role: "BABA ana 10 saniye döngüsü"
+    linked_rules: ["CI-07"]
+  - id: "BK-11"
+    file: "engine/baba.py"
+    function: "_check_period_resets"
+    role: "Günlük/haftalık/aylık sıfırlama"
+    linked_rules: []
+
+  # OĞUL — Emir Güvenliği
+  - id: "BK-12"
+    file: "engine/ogul.py"
+    function: "_execute_signal"
+    role: "Emir öncesi risk kontrolleri + sinyal yürütme"
+    linked_rules: ["CI-01"]
+  - id: "BK-13"
+    file: "engine/ogul.py"
+    function: "_check_end_of_day"
+    role: "17:45 zorunlu kapanış"
+    linked_rules: ["CI-04"]
+  - id: "BK-14"
+    file: "engine/ogul.py"
+    function: "_verify_eod_closure"
+    role: "Gün sonu hayalet pozisyon temizliği"
+    linked_rules: ["CI-04"]
+  - id: "BK-15"
+    file: "engine/ogul.py"
+    function: "_manage_active_trades"
+    role: "Pozisyon yönetimi (orphan guard'lı)"
+    linked_rules: []
+  - id: "BK-16"
+    file: "engine/ogul.py"
+    function: "process_signals"
+    role: "Sinyal işleme (sabit çağrı sırası)"
+    linked_rules: ["CI-07", "R-05"]
+
+  # MT5 Bridge Koruması
+  - id: "BK-17"
+    file: "engine/mt5_bridge.py"
+    function: "send_order"
+    role: "2 aşamalı emir + SL/TP; başarısız → zorla kapatma"
+    linked_rules: ["CI-03", "R-09"]
+  - id: "BK-18"
+    file: "engine/mt5_bridge.py"
+    function: "close_position"
+    role: "Pozisyon kapatma (VİOP netting koruması)"
+    linked_rules: []
+  - id: "BK-19"
+    file: "engine/mt5_bridge.py"
+    function: "modify_position"
+    role: "SL/TP güncelleme (trailing stop)"
+    linked_rules: []
+  - id: "BK-20"
+    file: "engine/mt5_bridge.py"
+    function: "_safe_call"
+    role: "Timeout + devre kesici sarmalayıcı"
+    linked_rules: []
+  - id: "BK-21"
+    file: "engine/mt5_bridge.py"
+    function: "heartbeat"
+    role: "10sn MT5 bağlantı kontrolü"
+    linked_rules: []
+  - id: "BK-22"
+    file: "engine/mt5_bridge.py"
+    function: "connect"
+    role: "MT5 bağlantı (launch=False + process kontrol)"
+    linked_rules: ["CI-08", "CI-09", "R-08"]
+
+  # Main Loop
+  - id: "BK-23"
+    file: "engine/main.py"
+    function: "_run_single_cycle"
+    role: "BABA her zaman OĞUL'dan önce"
+    linked_rules: ["CI-07", "R-01"]
+  - id: "BK-24"
+    file: "engine/main.py"
+    function: "_heartbeat_mt5"
+    role: "MT5 kurtarma (3 deneme, sonra kapanır)"
+    linked_rules: []
+  - id: "BK-25"
+    file: "engine/main.py"
+    function: "_main_loop"
+    role: "10sn döngü + hata izolasyonu"
+    linked_rules: ["CI-10"]
+
+  # Startup/Shutdown
+  - id: "BK-26"
+    file: "start_ustat.py"
+    function: "run_webview_process"
+    role: "API + Electron başlatma + kapanış zinciri"
+    linked_rules: []
+  - id: "BK-27"
+    file: "start_ustat.py"
+    function: "_start_api"
+    role: "Uvicorn başlatma"
+    linked_rules: []
+  - id: "BK-28"
+    file: "start_ustat.py"
+    function: "_shutdown_api"
+    role: "Graceful shutdown (engine.stop zinciri)"
+    linked_rules: []
+  - id: "BK-29"
+    file: "api/server.py"
+    function: "lifespan"
+    role: "Engine nesne oluşturma sırası (constructor sırası)"
+    linked_rules: []
+  - id: "BK-30"
+    file: "start_ustat.py"
+    function: "main"
+    role: "ProcessGuard + Mutex + subprocess"
+    linked_rules: []
+  - id: "BK-31"
+    file: "desktop/main.js"
+    function: "createWindow"
+    role: "Electron pencere + API bekleme + crash handler"
+    linked_rules: []
+
+# =====================================================
+# 3. KORUNAN KURALLAR (Davranış Sözleşmeleri)
+# =====================================================
+# Kural değişimi: C3
+protected_rules:
+  - id: "R-01"
+    title: "Çağrı Sırası"
+    description: "heartbeat → data → BABA → risk_check → OĞUL → H-Engine → ÜSTAT. Değiştirilemez."
+    location: "engine/main.py::_run_single_cycle"
+    linked_inviolables: ["CI-07"]
+    required_tests:
+      - "tests/critical_flows/test_static_contracts.py::test_main_loop_order"
+
+  - id: "R-02"
+    title: "Piyasa Rejimleri"
+    description: "4 rejim (TREND/RANGE/VOLATILE/OLAY) ve risk çarpanları (1.0/0.7/0.25/0.0)"
+    location: "engine/baba.py::detect_regime"
+    linked_inviolables: ["CI-06"]
+    required_tests:
+      - "tests/critical_flows/test_static_contracts.py::test_regime_types"
+
+  - id: "R-03"
+    title: "Top 5 Seçim Algoritması"
+    description: "Ham skor → Winsorize + Min-Max → Ağırlıklı toplam → Ortalama filtre → Min 3 garanti → Vade/haber filtresi"
+    location: "engine/ogul.py::select_top5"
+    linked_inviolables: []
+    required_tests:
+      - "tests/critical_flows/test_static_contracts.py::test_top5_pipeline"
+
+  - id: "R-04"
+    title: "Sinyal Stratejileri"
+    description: "3 strateji (Trend Follow, Mean Reversion, Breakout) ve SL/TP formülleri"
+    location: "engine/utils/signal_engine.py"
+    linked_inviolables: []
+    required_tests:
+      - "tests/critical_flows/test_static_contracts.py::test_signal_strategies"
+
+  - id: "R-05"
+    title: "Trade State Machine"
+    description: "SIGNAL → PENDING → SENT → FILLED → CLOSED (TIMEOUT/PARTIAL/RETRY dalları)"
+    location: "engine/models/trade.py::TradeState"
+    linked_inviolables: []
+    required_tests:
+      - "tests/critical_flows/test_static_contracts.py::test_trade_state_machine"
+
+  - id: "R-06"
+    title: "EOD Zorunlu Kapanış"
+    description: "17:45 OĞUL + Hybrid pozisyonlar kapatılır; 17:50 hayalet pozisyon kontrolü; manuel + orphan hariç"
+    location: "engine/ogul.py::_check_end_of_day"
+    linked_inviolables: ["CI-04"]
+    required_tests:
+      - "tests/critical_flows/test_static_contracts.py::test_eod_closure"
+
+  - id: "R-07"
+    title: "Kill-Switch Monotonluğu"
+    description: "Seviye sadece yukarı gider (L1→L2→L3). Otomatik düşme yok; sadece kullanıcı düşürebilir"
+    location: "engine/baba.py::_activate_kill_switch"
+    linked_inviolables: ["CI-02"]
+    required_tests:
+      - "tests/critical_flows/test_static_contracts.py::test_kill_switch_monotonic"
+
+  - id: "R-08"
+    title: "MT5 Başlatma Sorumluluğu"
+    description: "MT5 terminal açma SADECE Electron (mt5Manager.js::launchMT5). Engine başlatamaz"
+    location: "desktop/mt5Manager.js + engine/mt5_bridge.py::connect"
+    linked_inviolables: ["CI-08"]
+    required_tests:
+      - "tests/critical_flows/test_static_contracts.py::test_mt5_no_auto_launch"
+
+  - id: "R-09"
+    title: "SL/TP Zorunluluğu"
+    description: "send_order 2 aşamalı: emir → SL/TP. SL/TP başarısız → pozisyon zorla kapatılır"
+    location: "engine/mt5_bridge.py::send_order"
+    linked_inviolables: ["CI-03"]
+    required_tests:
+      - "tests/critical_flows/test_static_contracts.py::test_sltp_mandatory"
+
+  - id: "R-10"
+    title: "Tek Çalışma Klasörü"
+    description: "Tüm geliştirme C:\\Users\\pc\\Desktop\\USTAT içinde yapılır. Dışına çıkılması kullanıcı onayı gerektirir"
+    location: "operasyon kuralı"
+    linked_inviolables: []
+    required_tests: []
+
+  - id: "R-11"
+    title: "Sihirli Sayı Yasağı"
+    description: "Tüm sabitler config/default.json üzerinden yüklenir; kod içinde hardcoded değer yasak"
+    location: "engine/config.py"
+    linked_inviolables: []
+    required_tests:
+      - "tests/critical_flows/test_static_contracts.py::test_no_magic_numbers"
+
+  - id: "R-12"
+    title: "Fail-Closed"
+    description: "Güvenlik modülü sessizce düşerse sistem kilitli duruma geçer; sessiz fail yasak"
+    location: "engine/main.py::_main_loop + engine/baba.py"
+    linked_inviolables: ["CI-10"]
+    required_tests:
+      - "tests/critical_flows/test_static_contracts.py::test_fail_closed"
+
+# =====================================================
+# 4. KORUNAN CONFIG ANAHTARLARI
+# =====================================================
+# Anahtar yapısı değişimi: C2 | Kilitli değer değişimi: C3
+# NOT: Değerler config/default.json'da oran (0..1) olarak saklanır.
+# Örn: 0.018 = %1.8. Değer kilidi config'teki gerçek formatla eşleşmelidir.
+protected_config_keys:
+  - key: "risk.max_daily_loss_pct"
+    value_locked: 0.018
+    class_if_changed: "C3"
+    linked_rules: ["CI-05"]
+
+  - key: "risk.max_total_drawdown_pct"
+    value_locked: 0.1
+    class_if_changed: "C3"
+    linked_rules: ["CI-05"]
+
+  - key: "risk.hard_drawdown_pct"
+    value_locked: 0.15
+    class_if_changed: "C3"
+    linked_rules: ["CI-05"]
+
+  - key: "risk.max_weekly_loss_pct"
+    value_locked: 0.04
+    class_if_changed: "C3"
+    linked_rules: []
+
+  - key: "risk.max_monthly_loss_pct"
+    value_locked: 0.07
+    class_if_changed: "C3"
+    linked_rules: []
+
+  - key: "risk.max_floating_loss_pct"
+    value_locked: 0.015
+    class_if_changed: "C3"
+    linked_rules: []
+
+  - key: "risk.risk_per_trade_pct"
+    value_locked: 0.01
+    class_if_changed: "C3"
+    linked_rules: []
+
+  - key: "risk.max_open_positions"
+    value_locked: 5
+    class_if_changed: "C3"
+    linked_rules: []
+
+  - key: "risk.max_daily_trades"
+    value_locked: 5
+    class_if_changed: "C3"
+    linked_rules: []
+
+  - key: "risk.consecutive_loss_limit"
+    value_locked: 3
+    class_if_changed: "C3"
+    linked_rules: []
+
+  - key: "risk.cooldown_hours"
+    value_locked: 4
+    class_if_changed: "C3"
+    linked_rules: []
+
+  - key: "risk.master_floating_loss_pct"
+    value_locked: 0.05
+    class_if_changed: "C3"
+    linked_rules: []
+
+# =====================================================
+# 5. ÇEKİRDEK İHLAL EDİLEMEZ EŞLEMESİ (Bölüm C)
+# =====================================================
+inviolables:
+  - id: "CI-01"
+    title: "Risk Kapısı"
+    required_tests:
+      - "tests/critical_flows/test_static_contracts.py::test_can_trade_gate"
+  - id: "CI-02"
+    title: "Kill-Switch Monotonluğu"
+    required_tests:
+      - "tests/critical_flows/test_static_contracts.py::test_kill_switch_monotonic"
+  - id: "CI-03"
+    title: "Korumasız Pozisyon Yasağı"
+    required_tests:
+      - "tests/critical_flows/test_static_contracts.py::test_sltp_mandatory"
+  - id: "CI-04"
+    title: "EOD Zorunlu Kapanış"
+    required_tests:
+      - "tests/critical_flows/test_static_contracts.py::test_eod_closure"
+  - id: "CI-05"
+    title: "Hard Drawdown"
+    required_tests:
+      - "tests/critical_flows/test_static_contracts.py::test_hard_drawdown_l3"
+  - id: "CI-06"
+    title: "OLAY Rejimi"
+    required_tests:
+      - "tests/critical_flows/test_static_contracts.py::test_event_regime_zero"
+  - id: "CI-07"
+    title: "Çağrı Sırası"
+    required_tests:
+      - "tests/critical_flows/test_static_contracts.py::test_main_loop_order"
+  - id: "CI-08"
+    title: "MT5 Başlatma Sorumluluğu"
+    required_tests:
+      - "tests/critical_flows/test_static_contracts.py::test_mt5_no_auto_launch"
+  - id: "CI-09"
+    title: "mt5.initialize Evrensel Koruma"
+    required_tests:
+      - "tests/critical_flows/test_static_contracts.py::test_mt5_initialize_guard"
+  - id: "CI-10"
+    title: "Fail-Closed"
+    required_tests:
+      - "tests/critical_flows/test_static_contracts.py::test_fail_closed"

@@ -1,0 +1,139 @@
+# USTAT ANAYASA v3.0 — KORUMA TETIKLERI (GUARD TRIGGERS)
+#
+# Spesifik kosullar bir degisikligin sinifini otomatik yukseltir veya
+# tamamen HALT uretir. check_triggers.py her degisiklik oncesi calisir,
+# hangi tetiklerin aktif oldugunu belirler.
+#
+# Tetik tipleri:
+#   class_escalate  - Sinifi yukselt (ornek: C1 -> C3)
+#   require_auditor - Auditor ajan raporu zorunlu
+#   require_diff    - Kullanici mevcut ve yeni degerleri yan yana gorsun
+#   require_test    - Ek test suite calistir
+#   halt            - Degisiklik yapilamaz, once auditor cagrilir
+
+manifest_version: "3.0"
+last_updated: "2026-04-14"
+
+triggers:
+  # =====================================================
+  # AXIOM TEMASI — hepsi HALT
+  # =====================================================
+  - id: TR-AX1
+    condition: "Cagri sirasi degisiyor (engine/main.py::_run_single_cycle icinde BABA/OGUL/H-Engine/USTAT sirasi)"
+    effect: halt
+    reason: "AX-1 ihlali"
+
+  - id: TR-AX2
+    condition: "OGUL _execute_signal baslangicindaki can_trade kontrolu kaldiriliyor/atlatiliyor"
+    effect: halt
+    reason: "AX-2 ihlali"
+
+  - id: TR-AX3
+    condition: "Kill-switch seviyesi otomatik dusurulmeye calisiliyor (_activate_kill_switch disinda)"
+    effect: halt
+    reason: "AX-3 ihlali"
+
+  - id: TR-AX4
+    condition: "send_order SL/TP basarisizlik sonrasi pozisyon kapatma kaldiriliyor"
+    effect: halt
+    reason: "AX-4 ihlali"
+
+  - id: TR-AX5
+    condition: "EOD kapanis zamani degistiriliyor veya _check_end_of_day devre disi birakiliyor"
+    effect: halt
+    reason: "AX-5 ihlali"
+
+  - id: TR-AX6
+    condition: "hard_drawdown_pct degeri degistirilmeye calisiliyor"
+    effect: halt
+    reason: "AX-6 ihlali — eşik anayasal"
+
+  - id: TR-AX7
+    condition: "mt5.initialize() cagrisi mt5_bridge.py::connect DISINDA ekleniyor"
+    effect: halt
+    reason: "AX-7 ihlali"
+
+  # =====================================================
+  # YUKSEK RISK — Class escalate
+  # =====================================================
+  - id: TR-CONFIG
+    condition: "config/default.json'da risk parametresi degisiyor"
+    effect: class_escalate
+    to_class: C3
+    require_diff: true
+    reason: "Risk parametresi degisiyor — diff goster, onay al"
+
+  - id: TR-SCHEMA
+    condition: "SQLite schema migration (CREATE/ALTER/DROP TABLE)"
+    effect: class_escalate
+    to_class: C3
+    require_backup: true
+    reason: "DB schema degisiyor — once db_backup"
+
+  - id: TR-API
+    condition: "api/schemas.py veya api/routes/*.py degisiyor"
+    effect: class_escalate
+    to_class: C2
+    require_test: true
+    reason: "API contract degisiyor — frontend impact"
+
+  - id: TR-RED-30
+    condition: "Kirmizi Bolge dosyasinda 30+ satir degisim"
+    effect: require_auditor
+    reason: "Buyuk Kirmizi Bolge degisikligi — auditor ajan raporu"
+
+  - id: TR-BLACKDOOR
+    condition: "Siyah Kapi fonksiyonu govdesi degisiyor (31 fonksiyon listesi)"
+    effect: class_escalate
+    to_class: C4
+    require_auditor: true
+    require_test: true
+    reason: "Siyah Kapi mantik degisikligi — kanit + auditor + test"
+
+  # =====================================================
+  # YAPISAL — Test/build zorunluluk
+  # =====================================================
+  - id: TR-UI
+    condition: "desktop/src/ icinde .jsx veya .js degisiyor"
+    effect: require_build
+    reason: "Frontend degisikligi — npm run build ZORUNLU"
+
+  - id: TR-CRITICAL-FLOW
+    condition: "Herhangi commit oncesi"
+    effect: require_test
+    test_target: "tests/critical_flows"
+    reason: "Anayasal kritik akis korumasi"
+
+  # =====================================================
+  # GUVENLIK — Sihirli sayi
+  # =====================================================
+  - id: TR-MAGIC
+    condition: "Python/JS dosyasinda hardcoded sayisal sabit ekleniyor (self.config.get disinda)"
+    effect: class_escalate
+    to_class: C2
+    reason: "Sihirli sayi yasak — config/default.json'dan cek"
+
+  # =====================================================
+  # DOSYA SISTEMI — Isim/konum
+  # =====================================================
+  - id: TR-MT5-INIT-SCAN
+    condition: "Yeni mt5.initialize cagrisi herhangi bir dosyada goruluyor"
+    effect: halt
+    reason: "AX-7 koruma tarayicisi"
+
+  - id: TR-CALL-ORDER
+    condition: "main.py::_run_single_cycle icindeki metod cagrilari yeniden siralaniyor"
+    effect: halt
+    reason: "AX-1 koruma tarayicisi"
+
+# =====================================================
+# Tetik Uygulama Sirasi
+# =====================================================
+evaluation_order:
+  - halt          # Once HALT tetiklerini kontrol et
+  - class_escalate # Sonra sinif yukseltme
+  - require_auditor # Auditor gereksinimi
+  - require_test  # Ek test
+  - require_diff  # Diff gosterimi
+  - require_build # Build gereksinimi
+  - require_backup # Backup gereksinimi

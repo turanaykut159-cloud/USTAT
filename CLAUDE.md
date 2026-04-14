@@ -1,11 +1,17 @@
 # ÜSTAT v5.9 — ANA REHBER
 
 **Versiyon:** 3.3 | **Tarih:** 10 Nisan 2026 | **Kaynak:** Kod tabanı doğrulaması
-**Anayasa Referansı:** USTAT_ANAYASA.md — **ÜSTAT Plus V6.0** (v2.0) — ayrı belge, kendi versiyonlaması var
+**Anayasa Referansı:** USTAT_ANAYASA.md — **ÜSTAT Plus V6.0** (v3.0) — ayrı belge, kendi versiyonlaması var
 **Anayasa Sicili:** `governance/protected_assets.yaml` (makine-okunur korunan varlık kaydı)
+**Anayasa Çekirdek (v3):** `governance/axioms.yaml`, `governance/authority_matrix.yaml`, `governance/triggers.yaml`
 **Anayasa Doğrulayıcı:** `tools/check_constitution.py` (manifest-kod senkron kontrolü)
+**Tetik Tarayıcı (v3):** `tools/check_triggers.py` (halt / class escalate)
+**Session Gate (v3):** `tools/session_gate.py` (oturum açılış kapısı)
+**Commit Seal (v3):** `tools/seal_change.py` (6 adımlı commit seremonisi)
+**Rollback Araçları (v3):** `tools/rollback/{commit,mission,workspace,db}.sh`
 **Etki Raporu Aracı:** `tools/impact_report.py` (C2/C3 değişiklikler öncesi zorunlu)
 **Kurulum:** `scripts/setup_repo.ps1` (pre-commit hook + PyYAML)
+**v2 → v3 Geçiş Haritası:** `docs/anayasa_v3_migration.md`
 
 > Bu dosya ÜSTAT projesinin TEK rehberidir. Tüm geliştiriciler (insan ve AI) bu kurallara MUTLAK uyum gösterir. Varsayım, olasılık, tahmin YASAKTIR — her karar kanıta dayanır.
 

@@ -1,0 +1,73 @@
+# USTAT ANAYASA v3.0 — YEDI DOKUNULMAZ CEKIRDEK (AXIOMS)
+#
+# Bu dosya anayasanin DEGISMEZ omurgasini tanimlar.
+# Axiom'lar kanit gerektirmez, tartisilmaz, degismezler.
+# Axiom ihlali = otomatik HALT + auditor cagrisi.
+#
+# Axiom'a dokunan her degisiklik C4 sinifindadir.
+# Yeni axiom eklemek icin: kullanici onayi + 24 saat sogutma + triple sign-off.
+
+manifest_version: "3.0"
+last_updated: "2026-04-14"
+
+axioms:
+  - id: AX-1
+    name: "Cagri Sirasi"
+    statement: "Ana dongu sirasi BABA -> OGUL -> H-Engine -> USTAT. Degistirilmez."
+    rationale: "Risk kontrolu her zaman sinyal uretiminden once calismak zorunda."
+    enforced_in: "engine/main.py::_run_single_cycle"
+    violation_response: "HALT + auditor"
+
+  - id: AX-2
+    name: "can_trade Kapisi"
+    statement: "OGUL, BABA'nin can_trade=False verdigi durumda yeni sinyal/emir uretemez."
+    rationale: "Risk kapisi atlanamaz; her emir bu kapidan gecer."
+    enforced_in: "engine/ogul.py::_execute_signal"
+    violation_response: "HALT + auditor"
+
+  - id: AX-3
+    name: "Kill-Switch Monotonlugu"
+    statement: "Kill-switch seviyesi sadece yukari gider (L1 -> L2 -> L3). Otomatik dusurme yasak."
+    rationale: "Guvenlik durumunun geri dondurulmesi yalnizca insan karariyla olur."
+    enforced_in: "engine/baba.py::_activate_kill_switch"
+    violation_response: "HALT + auditor"
+
+  - id: AX-4
+    name: "SL/TP Zorunlulugu"
+    statement: "send_order SL/TP eklemede basarisiz olursa pozisyon zorla kapatilir. Korumasiz pozisyon yasak."
+    rationale: "Finansal risk kontrolunun son halkasi."
+    enforced_in: "engine/mt5_bridge.py::send_order"
+    violation_response: "HALT + auditor + kullanici bildirimi"
+
+  - id: AX-5
+    name: "EOD Zorunlu Kapanis"
+    statement: "17:45'te tum pozisyonlar kapatilir. 17:50'de hayalet pozisyon kontrolu yapilir."
+    rationale: "Overnight risk yasak."
+    enforced_in: "engine/ogul.py::_check_end_of_day"
+    violation_response: "HALT + auditor + kritik bildirim"
+
+  - id: AX-6
+    name: "Hard Drawdown L3 Esigi"
+    statement: "Toplam drawdown %15'e ulasirsa L3 kill-switch otomatik aktive edilir."
+    rationale: "Felaket esigi. Esik degeri degistirilemez."
+    enforced_in: "engine/baba.py::_check_hard_drawdown"
+    violation_response: "HALT + auditor + acil bildirim"
+
+  - id: AX-7
+    name: "mt5.initialize Kaynak Birligi"
+    statement: "mt5.initialize() cagrilari SADECE mt5_bridge.py::connect icinde yapilir."
+    rationale: "MT5 terminal baslatma sorumlulugu Electron'da; engine baslatamaz."
+    enforced_in: "engine/mt5_bridge.py::connect"
+    violation_response: "HALT + auditor"
+
+# =====================================================
+# AXIOM DISI KURALLAR
+# =====================================================
+# Diger tum korumalar (10 Kirmizi Bolge dosyasi, 7 Sari Bolge dosyasi,
+# 31 Siyah Kapi fonksiyonu, 16 kural) "rule" kategorisindedir.
+# Rule'lar delillendirilerek evrilebilir — authority_matrix.yaml ve triggers.yaml
+# dosyalarinda guncel halleri tutulur.
+#
+# Axiom ile rule farki:
+# - Axiom: Kanit gerektirmez. Degistirmek icin triple sign-off.
+# - Rule:  Degistirmek icin kok-neden kaniti ve test yeterli.

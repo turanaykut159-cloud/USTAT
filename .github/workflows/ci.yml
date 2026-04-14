@@ -1,6 +1,7 @@
-# v5.8/CEO-FAZ3: CI/CD Pipeline
-# Pytest (backend) + Vite build (frontend)
-name: ÜSTAT CI
+# ÜSTAT Plus V6.0 — CI/CD Pipeline (fail-closed)
+# Anayasa Bolum F.3: tests/critical_flows + tests/governance zorunlu yesil.
+# continue-on-error: true YASAK. Basarisiz test merge'i bloke eder.
+name: ÜSTAT Plus V6.0 CI
 
 on:
   push:
@@ -13,9 +14,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ── Anayasa Dogrulama (manifest-kod senkron) ─────────────────
+  constitution:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python 3.12 kur
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Bagimliliklar
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyyaml
+
+      - name: Anayasa dogrulama (check_constitution.py)
+        run: python tools/check_constitution.py
+
   # ── Backend: Python lint + test ────────────────────────────────
   backend:
     runs-on: ubuntu-latest
+    needs: constitution
     strategy:
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
@@ -29,11 +51,11 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
-      - name: Bağımlılıkları yükle
+      - name: Bagimliliklari yukle
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt || true
-          pip install pytest pytest-asyncio
+          pip install pytest pytest-asyncio pytest-timeout pyyaml
 
       - name: Syntax check (kritik dosyalar)
         run: |
@@ -53,29 +75,26 @@ jobs:
           for f in files:
               try:
                   py_compile.compile(f, doraise=True)
-                  print(f'  ✓ {f}')
+                  print(f'  OK {f}')
               except py_compile.PyCompileError as e:
-                  print(f'  ✗ {f}: {e}')
+                  print(f'  FAIL {f}: {e}')
                   failed.append(f)
           if failed:
-              print(f'\n{len(failed)} dosya BAŞARISIZ')
+              print(f'{len(failed)} dosya BASARISIZ')
               sys.exit(1)
-          print(f'\n{len(files)} dosya OK')
+          print(f'{len(files)} dosya OK')
           "
 
-      - name: Pytest çalıştır
-        run: |
-          pytest "USTAT DEPO/tests_aktif/" \
-            -v \
-            --tb=short \
-            -m "not slow" \
-            --timeout=60 \
-            || true
-        continue-on-error: true
+      - name: Kritik akis testleri (tests/critical_flows)
+        run: pytest tests/critical_flows -v --tb=short --timeout=60
+
+      - name: Governance testleri (tests/governance)
+        run: pytest tests/governance -v --tb=short --timeout=60
 
   # ── Frontend: Node.js + Vite build ────────────────────────────
   frontend:
     runs-on: ubuntu-latest
+    needs: constitution
 
     steps:
       - uses: actions/checkout@v4
@@ -87,7 +106,7 @@ jobs:
           cache: npm
           cache-dependency-path: desktop/package-lock.json
 
-      - name: Bağımlılıkları yükle
+      - name: Bagimliliklari yukle
         working-directory: desktop
         run: npm ci
 

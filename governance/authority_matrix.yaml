@@ -1,0 +1,160 @@
+# USTAT ANAYASA v3.0 — YETKI MATRISI (AUTHORITY MATRIX)
+#
+# Claude'un her [Zone x Class x Action] hucresindeki varsayilan yetkisi.
+# check_triggers.py ve seal_change.py bu matrisi okur.
+#
+# Zone:
+#   green  - Yesil Bolge (genel kod)
+#   yellow - Sari Bolge (h_engine, config.py, logger, electron main, mt5Manager, killswitch API, positions API)
+#   red    - Kirmizi Bolge (10 korunan dosya — protected_assets.yaml)
+#
+# Class:
+#   C0 - Dokuman, yorum, typo
+#   C1 - Yesil Bolge kod degisikligi
+#   C2 - Sari Bolge veya config parametre
+#   C3 - Kirmizi Bolge
+#   C4 - Siyah Kapi fonksiyon veya axiom yakini
+#
+# Action:
+#   read    - Dosyayi oku
+#   edit    - Mevcut dosyayi duzenle
+#   write   - Yeni dosya olustur
+#   delete  - Dosya sil
+#   refactor - Birden fazla dosyayi etkileyen yapi degisikligi
+
+manifest_version: "3.0"
+last_updated: "2026-04-14"
+
+# =====================================================
+# Yetki Tablosu
+# =====================================================
+# Format:
+#   authority: [tam, misyon, plan, dur, yasak]
+#     tam     - Claude otonom yapar, onay yok, auto-commit
+#     misyon  - Misyon baslangicinda bir kez onay alinir, sonra otonom
+#     plan    - Her degisiklik oncesi plan+diff goster, onay al, sonra yap
+#     dur     - Dur-Goster-Onay-Uygula-Rapor (v2 C3 prosedur)
+#     yasak   - Tamamen yasak, auditor/axiom kontrolu olmadan yapilamaz
+
+cells:
+  # --- Herhangi bolge ---
+  - zone: any
+    class: C0
+    actions: [read, edit, write]
+    authority: tam
+    notes: "Dokuman/yorum/typo — script auto-commit (seal_change.py --class C0)"
+
+  - zone: any
+    class: C0
+    actions: [delete]
+    authority: plan
+    notes: "Dosya silme her zaman plan+onay gerektirir"
+
+  # --- Yesil Bolge ---
+  - zone: green
+    class: C1
+    actions: [read, edit, write]
+    authority: misyon
+    notes: "Misyon onayi ile otonom. seal_change.py ceremonial otomasyonu zorunlu."
+
+  - zone: green
+    class: [C2, C3, C4]
+    actions: any
+    authority: plan
+    notes: "Yesil bolge dosyasinin sinifi yukselmis — etraflica plan ver"
+
+  - zone: green
+    class: C1
+    actions: [delete, refactor]
+    authority: plan
+
+  # --- Sari Bolge ---
+  - zone: yellow
+    class: C1
+    actions: [read]
+    authority: tam
+
+  - zone: yellow
+    class: [C1, C2]
+    actions: [edit]
+    authority: plan
+    notes: "Sari bolge her edit icin plan+diff+onay"
+
+  - zone: yellow
+    class: C2
+    actions: [write, refactor]
+    authority: dur
+
+  - zone: yellow
+    class: [C3, C4]
+    actions: any
+    authority: dur
+    notes: "Sari bolgede C3+ ise Kirmizi davranir"
+
+  - zone: yellow
+    class: any
+    actions: [delete]
+    authority: yasak
+
+  # --- Kirmizi Bolge ---
+  - zone: red
+    class: any
+    actions: [read]
+    authority: tam
+
+  - zone: red
+    class: [C1, C2]
+    actions: [edit]
+    authority: dur
+    notes: "Kirmizi bolgede C1/C2 sinifi zaten nadir — yine de dur-goster-onay"
+
+  - zone: red
+    class: C3
+    actions: [edit, write]
+    authority: dur
+    notes: "Cift dogrulama: plan -> onay -> uygula -> rapor -> dogrulama"
+
+  - zone: red
+    class: C4
+    actions: any
+    authority: dur
+    notes: "C3 prosedur + auditor ajan raporu + critical_flows test zorunlu"
+
+  - zone: red
+    class: any
+    actions: [delete, refactor]
+    authority: yasak
+    notes: "Kirmizi bolge dosya silme/refactor yasak — auditor+kullanici+24h sogutma"
+
+# =====================================================
+# Misyon Onayi Kapsam Sablonu
+# =====================================================
+# Bir misyon asagidaki yapida onaylanir:
+#
+# mission:
+#   id: M-YYYY-MM-DD-short-name
+#   scope:
+#     - zone: green
+#       files: [list of file paths]
+#       classes: [C0, C1]
+#       actions: [edit, write]
+#   out_of_scope_action: halt
+#   expected_commits: N (estimate)
+#   approval_expires: "when mission closed or 8 hours pass"
+
+# =====================================================
+# Zone Tespiti
+# =====================================================
+# Bir dosyanin zone'u:
+#   1. protected_assets.yaml'da ise -> red
+#   2. yellow_zone listesinde ise -> yellow
+#   3. Digeri -> green
+
+yellow_zone:
+  - engine/h_engine.py
+  - engine/config.py
+  - engine/logger.py
+  - api/routes/killswitch.py
+  - api/routes/positions.py
+  - desktop/main.js
+  - desktop/mt5Manager.js
