@@ -1,7 +1,11 @@
 # ÜSTAT v5.9 — ANA REHBER
 
 **Versiyon:** 3.3 | **Tarih:** 10 Nisan 2026 | **Kaynak:** Kod tabanı doğrulaması
-**Anayasa Referansı:** USTAT_ANAYASA.md (v2.0) — ayrı belge, kendi versiyonlaması var
+**Anayasa Referansı:** USTAT_ANAYASA.md — **ÜSTAT Plus V6.0** (v2.0) — ayrı belge, kendi versiyonlaması var
+**Anayasa Sicili:** `governance/protected_assets.yaml` (makine-okunur korunan varlık kaydı)
+**Anayasa Doğrulayıcı:** `tools/check_constitution.py` (manifest-kod senkron kontrolü)
+**Etki Raporu Aracı:** `tools/impact_report.py` (C2/C3 değişiklikler öncesi zorunlu)
+**Kurulum:** `scripts/setup_repo.ps1` (pre-commit hook + PyYAML)
 
 > Bu dosya ÜSTAT projesinin TEK rehberidir. Tüm geliştiriciler (insan ve AI) bu kurallara MUTLAK uyum gösterir. Varsayım, olasılık, tahmin YASAKTIR — her karar kanıta dayanır.
 
@@ -856,3 +860,216 @@ python ustat_agent.py --status
 - `git add dosya1 dosya2` — dosya dosya ekle, `git add .` YASAK
 
 ### 12.2 Commit Mesaj Forma
+
+Öneki + kısa özet + (gerekirse) detay:
+- `feat:` yeni özellik
+- `fix:` hata düzeltme
+- `refactor:` davranış değişmeden yapı iyileştirme
+- `docs:` sadece dokümantasyon
+- `build:` build/deps
+- `test:` test ekleme/düzenleme
+- `chore:` bakım
+
+Örnek: `fix(baba): hard drawdown tetiklenmiyordu (#142)`
+
+---
+
+## BÖLÜM 13: TOKEN DİSİPLİNİ VE PERFORMANS (TokenMax v3.0)
+
+**Amaç:** Claude/Cowork session'larında token israfını minimuma, iş kalitesini maksimuma çıkarmak. Max plan kotası, context rot ve cache expiry'den kaynaklanan verim kaybını engellemek.
+
+**Kaynak ölçümler:** Cache-aware rate limits (Şubat 2026 Anthropic güncellemesi), `.claudeignore` etkisi (%40-70 per-request), trigger-based CLAUDE.md (%54 initial context), skill on-demand loading.
+
+### 13.1 Üç Katmanlı Context Yükleme
+
+| Katman | Dosya | Ne Zaman |
+|---|---|---|
+| **L1 — CORE** | `CLAUDE_CORE.md` | Her session'da otomatik |
+| **L2 — FULL** | `CLAUDE.md` (bu dosya) | L1 yetersiz kaldığında (C2/C3/C4 veya detay gerekli) |
+| **L3 — ANAYASA** | `USTAT_ANAYASA.md` | Kırmızı Bölge / Siyah Kapı dokunuşu öncesi |
+
+**Kural:** L2/L3'ü gerekmedikçe yükleme. Soru L1'de cevaplanabiliyorsa orada kal.
+
+### 13.2 `.claudeignore` Kuralı
+
+Proje kökündeki `.claudeignore` dosyası Claude tarafından otomatik okunur. Bu dosyanın içeriği **her session** başında filtre olarak devreye girer. İçeriği değişirse tüm ekip haberdar edilir.
+
+**Kapsamı:** veritabanı binary'leri, `desktop/dist/`, `__pycache__/`, `logs/`, `.agent/results/`, `USTAT DEPO/`, IDE geçicileri.
+
+### 13.3 Dosya Okuma Disiplini (Claude için)
+
+1. **Grep > Read.** Fonksiyon aramak için önce `Grep`, sonra hedefli `Read offset+limit`.
+2. **Edit > Write.** Mevcut dosyada değişiklik için `Edit` (diff gönderir). `Write` sadece yeni dosya veya tam yeniden yazım.
+3. **Aynı session'da dosya tekrar okuma YASAK.** İlk okumayı hatırla, üzerine çalış.
+4. **Tüm dosyayı okumak zorunlu ise** gerekçe söyle (örn: "Siyah Kapı fonksiyonu tüm imzasını görmem lazım").
+5. **Log analizinde ajan kullan:** `tail_log`, `search_all_logs`, `log_digest` — full log dump'ı context'e çekme.
+
+### 13.4 Model Seçim Matrisi
+
+| İş Tipi | Model | Gerekçe |
+|---|---|---|
+| Log oku, küçük fix, rapor oku, basit refactor | **Haiku 4.5** | %80 ucuz, quota yakmaz |
+| Orta karmaşıklık, C1/C2, build sonrası kontrol, Sarı Bölge | **Sonnet 4.6** | Varsayılan |
+| C3/C4, Kırmızı Bölge, Siyah Kapı debug, karmaşık refactor | **Opus 4.6** | Sadece gerçekten gerekirse |
+
+**Kural:** Opus kullanımında "reasoning effort = medium" (high → 3-5x token). Yüksek efor sadece imkansız debug için.
+
+### 13.5 Zorunlu Task Prompt Şablonu
+
+```
+[ZONE: Green|Yellow|Red] [CLASS: C0-C4]
+GOAL: <tek cümle>
+FILES: <yol listesi — 3'ten fazlaysa önce plan al>
+CONSTRAINTS: Anayasa ihlal YOK
+OUTPUT: diff + etki + risk (max 300 token)
+```
+
+Şablon dışı prompt'lar kabul edilebilir ama token tüketimi otomatik artar. Açık uçlu sorularda önce ne istediğini daralt.
+
+### 13.6 Session & Cache Kuralları
+
+1. **Her farklı iş → yeni session veya `/clear`.** Aynı session'da konu atlama = context rot.
+2. **Task bitince proaktif `/compact`.** Zorunlu compact'i bekleme.
+3. **5 dakika idle → cache expire.** Uzun araya gidecekseniz session'ı kapatın. Cache expired bir session'a dönmek = tüm context yeniden process (10-20x token).
+4. **Cache breakpoint stratejisi:** `CLAUDE_CORE.md` + (gerekirse) `USTAT_ANAYASA.md` birlikte ilk cache bloğu. Sık değişmeyen içerik önce.
+
+### 13.7 MCP / Tool Disiplini
+
+- Her aktif MCP ~1-5k token sabit yük.
+- ÜSTAT workspace'inde gereksiz MCP'leri **kapalı tut**: Chrome MCP (trading işinde lazım değil), onboarding, plugin registry.
+- `ENABLE_TOOL_SEARCH` / deferred tool loading Cowork'ta zaten aktif — schema'lar on-demand yüklenir.
+- Yeni tool eklemeden önce token maliyet/fayda değerlendirmesi yap.
+
+### 13.8 Agent Delegasyonu
+
+Açık uçlu araştırma (3+ dosya tarama, "projede X nerede kullanılıyor") → `Agent` tool'a devredilir. Ayrı context, sadece özet ana session'a döner. Ana session şişmez.
+
+**Ne zaman delege et:**
+- "Tüm kodda X pattern'ini bul"
+- "Tarih filtreli log özeti"
+- "Bağımlılık zinciri çıkar"
+- Birden fazla dosya açmayı gerektiren araştırma
+
+### 13.9 Şeffaflık ve Uyarı Eşikleri
+
+Claude, bir task için tahmini >15k token okuma/yazma yapacaksa **önce kullanıcıya söyler**: "Bu iş yaklaşık Xk token yiyecek — Haiku'ya mı alalım / plan+exec ayıralım mı?"
+
+Sessiz kota yakma YASAK.
+
+### 13.10 Beklenen Kazanım ve Doğrulama
+
+Hedef: Max 20x kotası 3 gün yerine 7-10 güne yayılsın. İlk değer: %46/3 gün → hedef: %25-30/7 gün.
+
+**Ölçüm:**
+- Her session sonunda Claude Usage sayfası screenshot'ı `docs/token_audit/YYYY-MM-DD.png`
+- Haftalık token audit: `docs/token_audit/weekly_YYYY-WW.md`
+- Anomali (beklenenden %50 fazla) → kök neden analizi (hangi dosya, hangi tool, hangi model?)
+
+### 13.11 İhlal Durumunda
+
+- Token disiplini ihlali Savaş Zamanı yasağı değildir, ama israf olarak raporlanır.
+- Tekrarlayan ihlal → prompt şablonu zorunluluğu + session başına `.claudeignore` doğrulama.
+
+### 13.12 Claude Subagent Orkestrasyonu
+
+USTAT için `C:\Users\pc\.claude\agents/` altında 6 özel subagent tanımlı. Her biri kendi şeridinde uzman, kendi token disiplinine sahip, ana session'ı şişirmeden iş yapar.
+
+**Temel prensip:** *Ajan kullanımı = token tasarrufu.* Ajan ayrı context'te koşar, ana session'a sadece **özet rapor** döner. 15k+ token'lık araştırma/uygulama işi doğrudan ana session'da yapılırsa `CLAUDE.md` + `ANAYASA` + dosya okumaları üst üste yığılır. Aynı iş ajana devredildiğinde ana session ~500 token özet alır.
+
+#### 13.12.1 Ajan Envanteri
+
+| # | Ajan | Model | Alan | Rol |
+|---|---|---|---|---|
+| 1 | `ustat-engine-guardian` | **Opus** | `engine/*.py` | Kırmızı Bölge + Siyah Kapı implementasyonu |
+| 2 | `ustat-api-backend` | Sonnet | `api/*.py` | FastAPI routes, schemas, lifespan |
+| 3 | `ustat-desktop-frontend` | Sonnet | `desktop/` | Electron + React + Vite (build ZORUNLU) |
+| 4 | `ustat-auditor` | **Opus** | READ-ONLY | Kök neden, etki analizi, plan — kod yazmaz |
+| 5 | `ustat-ops-watchdog` | Sonnet | `start_ustat.py`, `.agent/`, logs | Startup, watchdog, ajan köprüsü |
+| 6 | `ustat-test-engineer` | Sonnet | `tests/` | pytest, critical_flows, statik sözleşme |
+
+**Opus sadece 2 ajanda** (engine-guardian + auditor) — maliyet bilinçli tasarım.
+
+#### 13.12.2 Orkestrasyon Modelleri
+
+| Model | Akış | Kullan | Tahmini Token |
+|---|---|---|---|
+| **A — Denetim→Uygulama→Test** | auditor → [onay] → engine-guardian → test-engineer → ops-watchdog | C3/C4, Kırmızı Bölge, Siyah Kapı | 20-30k |
+| **B — Direkt Uzman** | <uzman> → test-engineer | C1/C2, tek dosya fix | 5-10k |
+| **C — Sadece Araştırma** | auditor (tek başına) | Kök neden, dead code, etki haritası | 8-15k |
+| **D — Paralel Koşu** | api-backend ‖ desktop-frontend (aynı mesajda) | Full-stack bağımsız feature | %50 süre tasarrufu |
+| **E — Savaş Zamanı** | ops-watchdog → [ben] → ops-watchdog | Piyasa açıkken kritik arıza | 2-5k (hız > titizlik) |
+
+#### 13.12.3 Karar Ağacı
+
+```
+Soru geldi
+├── Sadece bilgi/araştırma (kod değişmeyecek) → auditor
+├── Kırmızı Bölge + Siyah Kapı             → Model A (auditor+guardian+test)
+├── Sarı/Yeşil Bölge engine                 → Model B (guardian+test)
+├── API endpoint                            → api-backend (+ desktop-frontend impact varsa)
+├── Frontend bileşen                        → desktop-frontend (build kontrol ZORUNLU)
+├── Test ekleme/çalıştırma                  → test-engineer
+├── Uygulama başlat/durdur/log/DB           → ops-watchdog
+├── Mimari plan gerekli                     → auditor (Model C)
+├── Claude/MCP/SDK sorusu                   → claude-code-guide (built-in)
+└── Basit, net, tek satır                   → Ben direkt, ajan yok
+```
+
+#### 13.12.4 Ajan Çağırmama Kuralları (Maliyet Tuzağı)
+
+Ajan her zaman token kazandırmaz. Aşağıdaki durumlarda **ajan çağırmak israftır**:
+
+- Tek satır edit (değişken yeniden adlandırma, yorum düzeltmesi) → `Edit` tool yeter
+- Hedef dosya + fonksiyon net biliniyor + <30 satır değişim → ana session
+- Tek `grep` cevaplayabiliyor ("X sabiti nerede?") → `Grep` tool yeter
+- Log'da tek hata satırı çekiliyor → `ustat_agent.py tail_log` yeter
+- Bilgi sorusu, değişiklik yok ("BABA kaç motorlu çalışıyor?") → cevap zaten CORE'da
+
+**Kural:** İş <3k token yiyecekse ajana atma — yönlendirme maliyeti kazancı yer.
+
+#### 13.12.5 Ajan Maksimum Performans Kuralları
+
+Her ajan dosyasında zaten "Token Disiplini" bölümü var. Ana session'dan ajana **doğru brief** vermek, ajanın maksimum performansla minimum token yemesini sağlar. Brief şablonu:
+
+```
+GOAL: <tek cümle, ne bekliyorum>
+SCOPE: <dokunulacak dosya/alan — sınırı ben çiziyorum>
+CONTEXT: <ajanın CLAUDE.md'den çekmesine gerek kalmayacak kritik bilgi — ör: "bu C3, Kırmızı Bölge, auditor raporu şunu dedi: X">
+OUTPUT: <ajan çıktı formatındaki hangi alanlar kritik>
+CONSTRAINTS: <özel yasaklar — ör: "h_engine.py'ye dokunma, sadece ogul.py">
+```
+
+**Kötü brief:** *"baba.py'deki bug'ı düzelt"* → Ajan tüm baba.py'yi okur, CLAUDE.md'yi okur, ANAYASA'yı okur, impact_map çalıştırır, tahmin yürütür. **~15k token**.
+
+**İyi brief:** *"baba.py:347 `_check_hard_drawdown` L3 tetiklemiyor (auditor raporu: threshold karşılaştırması `>=` yerine `>` olmuş). Fix: tek karakter. Test: tests/critical_flows/test_hard_drawdown.py zaten var, yeşil dönmeli. C4 Siyah Kapı — çift doğrulama yaptım, kullanıcı onayı: evet."* → Ajan 200 satır okur, 1 karakter değiştirir, pytest çalıştırır. **~2k token**.
+
+Fark: **7.5x tasarruf**. Ajan aynı ajan, iş aynı iş — brief kalitesi belirliyor.
+
+#### 13.12.6 Ajan ile `ustat_agent.py` Farkı
+
+Karıştırma:
+
+| Araç | Tipi | Ne yapar |
+|---|---|---|
+| `ustat_agent.py` | OS-level autonomous (Python servis) | Windows'ta process/log/DB/shell komutları (37 komut) |
+| 6 Claude subagent | LLM-level delegation (`.claude/agents/*.md`) | Kod düşünme + kod yazma + test + plan |
+
+**Çoğu Model A akışı her ikisini de kullanır:** `ustat-ops-watchdog` (Claude subagent) içinden `python .agent/claude_bridge.py restart_app` (OS ajan komutu) çağırır. İki katmanlı.
+
+#### 13.12.7 Ajan Kullanım Metrikleri (İsteğe Bağlı İleri)
+
+Haftalık token audit'a (§13.10) ajan dağılımı da eklenir:
+
+```
+Session: 2026-04-14_tokenmax
+Ana session tokens: 12.4k
+Delegasyon:
+  - ustat-auditor: 1 çağrı, ~8k (Opus)
+  - ustat-engine-guardian: 1 çağrı, ~5k (Opus)
+  - ustat-test-engineer: 1 çağrı, ~2k (Sonnet)
+Toplam: 27.4k
+Ajan kullanılmasaydı tahmini: 45-55k (ana session'da)
+Tasarruf: ~%40
+```
+
+---

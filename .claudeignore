@@ -1,0 +1,86 @@
+# ÜSTAT v5.9 — Claude Context Ignore
+# Amaç: Claude/Cowork session'larında gereksiz dosya okunmasını engellemek
+# Etki: Per-request context %40-70 azalır
+
+# === Veritabanları (binary, büyük) ===
+database/*.db
+database/*.db-*
+*.sqlite
+*.sqlite-journal
+*.db-journal
+*.db-wal
+*.db-shm
+
+# === Derlenmiş frontend (kaynak .jsx okunur, dist okunmaz) ===
+desktop/dist/
+desktop/node_modules/
+desktop/build/
+desktop/.vite/
+
+# === Python artifaktları ===
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+venv/
+.venv/
+env/
+
+# === Loglar (ajan komutlarıyla hedefli okunur) ===
+logs/
+*.log
+*.log.*
+api.log
+startup.log
+electron.log
+ustat_*.log
+
+# === Ajan sonuçları / runtime dosyaları ===
+.agent/results/
+.agent/commands/*.processing
+.agent/commands/*.json
+*.heartbeat
+*.pid
+*.lock
+engine.heartbeat
+api.pid
+watchdog.pid
+
+# === Git internals ===
+.git/
+.githooks/objects/
+
+# === Arşiv ve eski versiyonlar ===
+docs/arsiv/
+USTAT DEPO/
+docs/*_session_raporu_*.md
+
+# === MQL5 derlenmiş dosyalar ===
+mql5/*.ex5
+mql5/Include/
+
+# === Test fixture ve output'ları ===
+tests/fixtures/
+tests/__pycache__/
+tests/output/
+tests/snapshots/
+
+# === IDE / editör ===
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# === Backup/temp ===
+*.bak
+*.tmp
+*.old
+*~
+backup/
+temp/

@@ -55,7 +55,17 @@
 
 ---
 
+## [6.0.0] — 2026-04-14
+
+### Added
+- #228 — TokenMax v3.0 token disiplini + Claude subagent orkestrasyonu: CLAUDE.md Bölüm 13 (3 katmanlı context, model matrisi, dosya okuma disiplini, cache kuralları, 6 ajan envanteri, 5 orkestrasyon modeli, karar ağacı, maliyet tuzağı kuralları, brief şablonu). CLAUDE_CORE.md [yeni] — L1 hızlı referans (~2k token). .claudeignore [yeni] — per-request context %40-70 azaltma. 3 dosya (CLAUDE.md, CLAUDE_CORE.md [yeni], .claudeignore [yeni]). Detay: `docs/2026-04-14_session_raporu_tokenmax_v3_ajan_orkestrasyonu.md`.
+
+---
+
 ## [6.0.0] — 2026-04-13
+
+### Changed
+- #227 — Kök dizin temizliği: CLAUDE.md Bölüm 1.4 resmi yapısı dışındaki 9 tek seferlik denetim/analiz dosyası (AUDIT_*, FIX_RECOMMENDATIONS.md, ORDER_INVENTORY_QUICK_REFERENCE.txt, PRIMNET_VERIFICATION_SUMMARY.txt, verify_primnet_calculations.py + _FINDINGS.md, _files.tmp) `archive/2026-04-13_kok_temizlik/` altına taşındı. 0 kod/config değişikliği, 0 silme, çalışan uygulamaya etki yok. Detay: `docs/2026-04-13_session_raporu_kok_dizin_temizligi.md`.
 
 ### Security
 - #226 — TopBar ALGO durumu üçlü mantık (Bulgu 5): Health endpoint hata verince eski kod ALGO'yu sessizce "AÇIK" sayıyordu (fail-open). Artık `tradeAllowed` true/false/null üç durum tutar; null → gri "ALGO DURUMU BİLİNMİYOR" rozeti, false → kırmızı "ALGO KAPALI" rozeti. 1 dosya (TopBar.jsx). (312cd6f)
