@@ -2720,19 +2720,28 @@ class HEngine:
             if comment_prefix in str(o.get("comment", ""))
         ]
         if not matches:
-            # Tanı: eşleşme yoksa gerçek comment değerlerini logla
-            actual_comments = [
-                f"ticket={o.get('ticket', 0)} "
-                f"type={o.get('type', '?')} "
-                f"vol={o.get('volume', 0)} "
-                f"comment='{o.get('comment', '')}'"
-                for o in pending
-            ]
-            logger.debug(
-                f"_find_orders_by_comment: aranan='{comment_prefix}' "
-                f"{symbol} eşleşme yok. "
-                f"Mevcut bekleyen emirler: {actual_comments}"
-            )
+            # Tanı logu: aynı (symbol, prefix) için dakikada bir kez.
+            # Pozisyon kapandıktan sonra birkaç döngü boyunca spam üretmesini engeller.
+            import time as _time
+            if not hasattr(self, "_orphan_log_throttle"):
+                self._orphan_log_throttle = {}
+            key = (symbol, comment_prefix)
+            now = _time.time()
+            last = self._orphan_log_throttle.get(key, 0.0)
+            if now - last >= 60.0:
+                self._orphan_log_throttle[key] = now
+                actual_comments = [
+                    f"ticket={o.get('ticket', 0)} "
+                    f"type={o.get('type', '?')} "
+                    f"vol={o.get('volume', 0)} "
+                    f"comment='{o.get('comment', '')}'"
+                    for o in pending
+                ]
+                logger.debug(
+                    f"_find_orders_by_comment: aranan='{comment_prefix}' "
+                    f"{symbol} eşleşme yok. "
+                    f"Mevcut bekleyen emirler: {actual_comments}"
+                )
         return matches
 
     def _cancel_orphan_pendings_by_direction(
