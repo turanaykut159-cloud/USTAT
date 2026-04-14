@@ -54,3 +54,39 @@ cd desktop ; npm run build
 
 1. Canlı izleme: Trailing aktif PRİMNET pozisyonlarında `BROKER SYNC ✓` rozetinin tutarlı görünmesi; herhangi bir `SL_DESYNC` DB eventi gözlemlenirse `mt5_price/memory_sl/delta` detayı incelenmeli.
 2. Altyapı misyonu (ayrı): governance/protected_assets.yaml hash güncellemesi, check_triggers/check_constitution UTF-8 codec düzeltmesi, seal_change.py npm PATH eklenmesi.
+
+---
+
+## EK — 2026-04-14 Aynı Gün İçinde Açık Kalan Konular Tamamlandı
+
+**Commit:** `aa90da2` — `chore(governance): CI-11 + CRLF/codec fix + sl_sync interval config`
+
+### Yapılan İşler
+
+| # | Dosya | Değişiklik |
+|---|---|---|
+| 1 | `tools/check_constitution.py` | `_sha256_file` artık CRLF/LF agnostik (text okur, `\r\n→\n` normalize, sonra hashler). `main()` başında `sys.stdout.reconfigure(encoding="utf-8")` ile cp1254 console hatası bertaraf. |
+| 2 | `tools/check_triggers.py` | `main()` başında UTF-8 stdout reconfigure. `subprocess.run` çağrılarına `encoding="utf-8", errors="replace"` eklendi (Türkçe/binary diff hunk Windows cp1254 ile patlamasın). |
+| 3 | `USTAT_ANAYASA.md` | **Yeni anayasal kural CI-11**: Broker SL Sync Periyodik Doğrulama. `trailing_active=True` her hibrit pozisyon için `sl_sync_check_interval_sec` (vars. 60sn) aralıklı `_verify_trailing_sync` zorunlu. Desync → `sl_sync_warning=True` + `SL_DESYNC` DB eventi + cancel+replace. Kâr kilidi sessiz kaybolamaz. |
+| 4 | `governance/protected_assets.yaml` | `anayasa_sha256` CI-11 sonrası güncellendi: `5befa31a5e178ba4...` |
+| 5 | `config/default.json` | `hybrid.primnet.sl_sync_check_interval_sec: 60` eklendi. |
+| 6 | `engine/h_engine.py` | `__init__` içinde `self._sl_sync_check_interval_sec` config'den okuyor. `_sync_check_due` artık hardcoded 60 yerine bu değeri kullanıyor. |
+
+### Doğrulama
+
+- `python tools/check_constitution.py` → **Tum kontroller gecti** (Windows üzerinde, codec ve hash sorunsuz)
+- `python tools/check_triggers.py engine\h_engine.py config\default.json` → **0 kritik tetik, codec hatası yok**
+- `python -m pytest tests/critical_flows -q` → **72 passed**
+- `npm run build` → 0 hata, 911.79 kB / gzip 260.92 kB
+
+### Mimari Notlar
+
+- **CRLF/LF kök neden:** Windows checkout `core.autocrlf=true` ile CRLF üretiyor, Linux LF. Aynı içerik iki ortamda farklı binary hash veriyordu → manifest drift. Çözüm: text okuyup normalize edip hashlemek (binary dosyalar için bu fonksiyon zaten çağrılmıyor).
+- **cp1254 kök neden:** Windows console default codec `cp1254`, Türkçe uzun karakterleri yazamıyor → `UnicodeEncodeError`. `sys.stdout.reconfigure(encoding="utf-8", errors="replace")` ile sabit çözüm.
+- **Config-driven interval:** Hardcoded sabitler Anayasa ihlali (Bölüm 3.2). Yeni 60sn değeri başından beri config'de olmalıydı, EK ile düzeltildi.
+
+### Hâlâ Açık
+
+- `seal_change.py` 6 adımlı seremoni: altyapı (codec + hash) artık temiz; bir sonraki C2+ değişiklikte tekrar denenecek.
+- `governance/axioms.yaml` ve `governance/protected_assets.yaml::inviolables` listesine CI-11 girdisi (opsiyonel — anayasa metni kanonik kaynak).
+
