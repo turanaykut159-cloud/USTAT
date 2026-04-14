@@ -526,6 +526,16 @@ export default function PrimnetDetail({ position, primnetConfig, onClose }) {
           <span className="pn-foot-item">
             Devir: <b>{pos.transferred_at ? new Date(pos.transferred_at).toLocaleString('tr-TR') : '—'}</b>
           </span>
+          {/* v6.1 — Broker SL sync rozeti (M-2026-04-14-broker-sl-sync) */}
+          {pos.trailing_active && (
+            <span className="pn-foot-item" title={pos.last_sl_check_at ? `Son sync kontrolü: ${new Date(pos.last_sl_check_at).toLocaleTimeString('tr-TR')}` : 'Henüz sync kontrolü yapılmadı'}>
+              {pos.sl_sync_warning ? (
+                <b className="pn-loss">BROKER DESYNC ⚠</b>
+              ) : (
+                <b className="pn-profit">BROKER SYNC ✓</b>
+              )}
+            </span>
+          )}
         </div>
       </div>
     </div>

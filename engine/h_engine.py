@@ -94,6 +94,9 @@ class HybridPosition:
     reference_price: float = 0.0  # PRİMNET: Uzlaşma fiyatı (devir günü)
     trailing_order_ticket: int = 0  # PRİMNET Stop Limit: trailing bekleyen emir ticket'ı
     target_order_ticket: int = 0    # PRİMNET Stop Limit: hedef bekleyen emir ticket'ı
+    # v6.1 — Broker SL sync izleme (M-2026-04-14-broker-sl-sync)
+    sl_sync_warning: bool = False   # MT5 trailing emri ile bellek SL desync tespit edildiyse True
+    last_sl_check_at: str = ""      # En son _verify_trailing_sync çağrısı (ISO timestamp)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -870,6 +873,29 @@ class HEngine:
             # ── Trailing stop kontrolü ────────────────────────────
             self._check_trailing(hp, current_price, profit, swap)
 
+            # ── v6.1: Periyodik broker SL sync denetimi ──────────────
+            # M-2026-04-14-broker-sl-sync — trailing_active pozisyonlar
+            # için 60 sn'de bir MT5 trailing emrini bellek SL ile karşılaştır.
+            # _check_trailing zaten LOCK durumunda çağırır; periyodik çağrı
+            # LOCK olmasa bile sync'i garantiler.
+            if (self._use_stop_limit and hp.trailing_active
+                    and hp.state == "ACTIVE"):
+                if self._sync_check_due(hp):
+                    self._verify_trailing_sync(hp, current_price, profit, swap)
+
+    def _sync_check_due(self, hp: HybridPosition) -> bool:
+        """Broker SL sync denetimi 60 sn'de bir tetiklenir.
+
+        İlk çağrıda (last_sl_check_at boş) True döner. Sonra 60 sn pencere.
+        """
+        if not hp.last_sl_check_at:
+            return True
+        try:
+            last = datetime.fromisoformat(hp.last_sl_check_at)
+            return (datetime.now() - last).total_seconds() >= 60.0
+        except Exception:
+            return True
+
     # ═════════════════════════════════════════════════════════════════
     #  SOFTWARE SL/TP — Fiyat bazlı kapatma (native SLTP kapalıyken)
     # ═════════════════════════════════════════════════════════════════
@@ -1640,12 +1666,17 @@ class HEngine:
         if not self._use_stop_limit:
             return
 
+        # v6.1 — Her sync denetimini timestamp'le (frontend için son kontrol göstergesi)
+        hp.last_sl_check_at = datetime.now().isoformat(timespec="seconds")
+
         # MT5'teki bekleyen emirleri al
         pending = self.mt5.get_pending_orders(hp.symbol)
         if not pending:
             # Bekleyen emir yok — trailing ticket'ı sıfırla
             if hp.trailing_order_ticket > 0:
                 hp.trailing_order_ticket = 0
+            # Trailing aktif değilse veya henüz emir konmadıysa desync sayılmaz
+            hp.sl_sync_warning = False
             return
 
         trail_comment = f"TRL_{hp.ticket}"
@@ -1729,14 +1760,33 @@ class HEngine:
         # Desync var mı? (tick tolerance ile karşılaştır)
         tick = self._viop_tick_size(hp.current_sl)
         if abs(mt5_price - hp.current_sl) < tick * 1.5:
-            return  # Senkron, müdahale gerekmiyor
+            # Senkron — uyarı bayrağını temizle
+            hp.sl_sync_warning = False
+            return
 
         # ── DESYNC TESPİT — cancel + replace ───────────────────────
+        hp.sl_sync_warning = True
         logger.warning(
             f"Trailing emir desync: ticket={hp.trailing_order_ticket} "
             f"{hp.symbol} MT5={mt5_price:.4f} vs bellek={hp.current_sl:.4f} "
             f"— yeniden yerleştiriliyor"
         )
+        # v6.1 — Broker SL desync DB eventi (audit + frontend events feed)
+        try:
+            self.db.insert_hybrid_event(
+                ticket=hp.ticket,
+                symbol=hp.symbol,
+                event="SL_DESYNC",
+                details={
+                    "mt5_price": round(mt5_price, 4),
+                    "memory_sl": round(hp.current_sl, 4),
+                    "delta": round(mt5_price - hp.current_sl, 4),
+                    "tick": tick,
+                    "old_ticket": hp.trailing_order_ticket,
+                },
+            )
+        except Exception as exc:
+            logger.error(f"SL_DESYNC event yazılamadı: {exc}")
 
         self.mt5.cancel_pending_order(hp.trailing_order_ticket)
         hp.trailing_order_ticket = 0
@@ -1745,6 +1795,8 @@ class HEngine:
         self._trailing_via_stop_limit(
             hp, hp.current_sl, current_price, profit, swap,
         )
+        # Cancel+replace tamamlandı — bir sonraki periodic check sync'i doğrulayacak
+        # (anlık olarak desync devam ediyor sayılır)
 
     # ═════════════════════════════════════════════════════════════════
     #  MT5 SL DOĞRULAMA — v5.4.1

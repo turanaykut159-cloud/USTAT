@@ -608,6 +608,9 @@ class HybridPositionItem(BaseModel):
     transferred_at: str = ""
     state: str = "ACTIVE"
     reference_price: float = 0.0
+    # v6.1 — Broker SL sync izleme (M-2026-04-14-broker-sl-sync)
+    sl_sync_warning: bool = False
+    last_sl_check_at: str = ""
 
 
 class PrimnetConfig(BaseModel):

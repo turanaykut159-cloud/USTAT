@@ -57,6 +57,9 @@
 
 ## [Unreleased] - 2026-04-14
 
+### Added
+- feat(broker-sl-sync): #235 — Proaktif broker SL sync koruma katmanı (M-2026-04-14-broker-sl-sync). `HEngine.run_cycle` artık her `trailing_active=True` hibrit pozisyon için 60 sn'de bir `_verify_trailing_sync` çağırıyor (önceden sadece LOCK durumunda tetikleniyordu). MT5 trailing emri ile bellek SL arasında sessiz desync tespit edildiğinde (ör. broker reject sonrası yeniden konamamış emir): (a) `hp.sl_sync_warning=True` set edilir, (b) DB'ye `SL_DESYNC` audit eventi yazılır (mt5_price/memory_sl/delta detayı ile), (c) cancel+replace ile broker SL hizalanır. Frontend `PrimnetDetail` footer'ında "BROKER SYNC ✓" / "BROKER DESYNC ⚠" rozeti eklendi (tooltip son sync timestamp'i gösterir). Yeni alanlar: `HybridPosition.sl_sync_warning`, `last_sl_check_at`; `HybridPositionItem` schema'ya pass-through. 5 dosya (engine/h_engine.py, api/schemas.py, api/routes/hybrid_trade.py, desktop/src/components/PrimnetDetail.jsx, tests/critical_flows/test_static_contracts.py [yeni statik kontrat]).
+
 ### Fixed
 - fix(primnet-ui): T3+T5+T9+T10.3-T10.6 — 7 UI bulgusu (M-2026-04-14-primnet-7fix) (#234) (M-2026-04-14-primnet-7fix)
 

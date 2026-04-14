@@ -3452,3 +3452,53 @@ def test_ustat_to_baba_risk_miss_chain_intact():
         "Ustat.run_cycle artik _check_error_attribution cagirmiyor — "
         "BULGU #8 zincirinin trigger'i kaybolmus."
     )
+
+
+# ── Flow #235: Broker SL sync periyodik denetim (M-2026-04-14-broker-sl-sync) ──
+def test_broker_sl_sync_periodic_check_contract():
+    """v6.1 — HEngine.run_cycle her trailing_active hibrit pozisyon icin
+    60 sn'de bir _verify_trailing_sync cagirmali; desync tespitinde
+    hp.sl_sync_warning=True set edip 'SL_DESYNC' DB eventi yazmali.
+
+    Bu kontrat MT5 trailing emri ile bellek SL arasinda sessiz desync
+    olusmasini engeller — kar kilidi guvenligi proaktif korumadir.
+    """
+    from engine.h_engine import HEngine, HybridPosition
+
+    # 1. HybridPosition dataclass'inda yeni alanlar var mi?
+    hp_fields = HybridPosition.__dataclass_fields__
+    assert "sl_sync_warning" in hp_fields, (
+        "HybridPosition.sl_sync_warning alani yok — broker desync "
+        "izleme bayragi kaybolmus."
+    )
+    assert "last_sl_check_at" in hp_fields, (
+        "HybridPosition.last_sl_check_at alani yok — sync timestamp "
+        "izleme kaybolmus."
+    )
+
+    # 2. run_cycle icinde periyodik sync cagrisi var mi?
+    rc_src = inspect.getsource(HEngine.run_cycle)
+    assert "_verify_trailing_sync" in rc_src, (
+        "HEngine.run_cycle icinde _verify_trailing_sync periyodik "
+        "cagrisi yok — broker SL sync sadece LOCK durumunda kontrol "
+        "ediliyor (proaktif degil)."
+    )
+    assert "_sync_check_due" in rc_src or "60" in rc_src, (
+        "Periyodik throttle (60 sn) bulunamadi — sync her cycle (10sn) "
+        "calistirilirsa MT5 cagri yuku artar."
+    )
+
+    # 3. _verify_trailing_sync desync tespitinde sl_sync_warning set ediyor mu?
+    vt_src = inspect.getsource(HEngine._verify_trailing_sync)
+    assert "sl_sync_warning" in vt_src, (
+        "_verify_trailing_sync sl_sync_warning bayragini gunceller "
+        "olmali — frontend rozeti icin durum kanali yok."
+    )
+    assert 'SL_DESYNC' in vt_src, (
+        "_verify_trailing_sync 'SL_DESYNC' DB eventi yazmali — "
+        "audit kanali yok."
+    )
+    assert "last_sl_check_at" in vt_src, (
+        "_verify_trailing_sync last_sl_check_at timestamp'i "
+        "guncellemeli."
+    )

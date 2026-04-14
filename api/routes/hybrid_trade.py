@@ -104,6 +104,8 @@ async def get_hybrid_status():
             transferred_at=hp.transferred_at,
             state=hp.state,
             reference_price=hp.reference_price,
+            sl_sync_warning=getattr(hp, "sl_sync_warning", False),
+            last_sl_check_at=getattr(hp, "last_sl_check_at", ""),
         ))
 
     # PRİMNET config
