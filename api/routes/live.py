@@ -308,6 +308,9 @@ async def _send_all_updates(ws: WebSocket):
             "can_trade": can_trade,
             "engine_running": True,
             "risk_multiplier": risk_multiplier,
+            # OĞUL AÇIK/KAPALI durumunu WS push'a ekle — TopBar (REST 2sn) ile
+            # AutoTrading (WS 2sn) arasındaki senkron kopukluğunu kapatır.
+            "ogul_enabled": bool(getattr(ogul, "ogul_enabled", False)) if ogul else False,
         })
 
     # ── 5. Hibrit pozisyon güncellemesi ─────────────────────────

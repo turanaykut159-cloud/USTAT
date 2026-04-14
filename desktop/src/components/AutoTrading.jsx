@@ -209,6 +209,8 @@ export default function AutoTrading() {
               regime_confidence: msg.regime_confidence ?? prev.regime_confidence,
               kill_switch_level: msg.kill_switch_level ?? prev.kill_switch_level,
               risk_multiplier: msg.risk_multiplier ?? prev.risk_multiplier,
+              // TopBar REST (2sn) ile senkron — WS push OĞUL toggle durumunu anlık yansıtır.
+              ogul_enabled: msg.ogul_enabled ?? prev.ogul_enabled,
             }));
           }
           if (msg.type === 'position') {
