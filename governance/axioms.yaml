@@ -33,11 +33,22 @@ axioms:
     violation_response: "HALT + auditor"
 
   - id: AX-4
-    name: "SL/TP Zorunlulugu"
-    statement: "send_order SL/TP eklemede basarisiz olursa pozisyon zorla kapatilir. Korumasiz pozisyon yasak."
-    rationale: "Finansal risk kontrolunun son halkasi."
-    enforced_in: "engine/mt5_bridge.py::send_order"
-    violation_response: "HALT + auditor + kullanici bildirimi"
+    name: "SL/TP Zorunlulugu (motor-spesifik)"
+    statement: |
+      SL/TP zorunlulugu 4 motor icin uygulanir:
+      (a) OGUL otomatik sinyal: SL/TP 2-asamali; SL fail -> pozisyon ZORLA kapatilir.
+      (b) OgulSLTP fallback: STOP LIMIT (SL) + LIMIT (TP) yerlestirilir.
+      (c) Manuel trade: SL/TP fail pozisyonu KAPATMAZ (operator bilinci) ancak
+          baba.report_unprotected_position ile sistem kaydina gecirilir.
+      (d) Hibrit yon donusumu: MT5 force_close; fail ise BABA raporlanir.
+    rationale: "Finansal risk kontrolunun son halkasi; 4 motor asimetrik uygulama."
+    enforced_in:
+      - "engine/ogul.py::_execute_signal"
+      - "engine/ogul_sltp.py::set_initial_sl"
+      - "engine/ogul_sltp.py::set_initial_tp"
+      - "engine/manuel_motor.py::open_manual_trade"
+      - "engine/h_engine.py::_handle_direction_change"
+    violation_response: "LOG + baba.report_unprotected_position + UI kritik alert"
 
   - id: AX-5
     name: "EOD Zorunlu Kapanis"

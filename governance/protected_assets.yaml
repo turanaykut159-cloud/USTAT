@@ -10,7 +10,7 @@ last_updated: "2026-04-18"
 # Anayasa metninin hash'i. check_constitution.py tarafından doğrulanır.
 # Anayasa metni değişirse bu hash güncellenmelidir (C3 değişikliktir).
 # Boş bırakılırsa ilk doğrulama sırasında otomatik hesaplanıp doldurulur.
-anayasa_sha256: "5befa31a5e178ba434df7664a7e6787866cc13568acf3636e01eb1063abefdff"
+anayasa_sha256: "709048e9764c9521f41e615ff76656afe1867dc832a1b205f471e4a93a47f62c"
 
 # =====================================================
 # 1. KORUNAN DOSYALAR (Kırmızı Bölge)

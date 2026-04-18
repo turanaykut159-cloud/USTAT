@@ -64,7 +64,7 @@ Aşağıdaki maddeler uygulamanın bozulmadan evrilmesinin şartlarıdır. Her m
 |----|----------|-------|----------------|
 | **CI-01** | AX-2 | Risk kapısı atlanamaz: `can_trade=False` iken OĞUL emir göndermez | `baba.check_risk_limits` + OĞUL `_execute_signal` |
 | **CI-02** | AX-3 | Kill-switch monotonluğu: seviye sadece yukarı gider (L1→L2→L3). Otomatik düşme yok. | `baba._activate_kill_switch` |
-| **CI-03** | AX-4 | Korumasız pozisyon yasak: `send_order` SL/TP başarısız → pozisyon ZORLA kapatılır | `mt5_bridge.send_order` |
+| **CI-03** | AX-4 | **SL/TP Zorunluluğu (motor-spesifik, #247 OP-D):** Otomatik sinyal (OGUL) → `_execute_signal` SL/TP 2-aşamalı; SL fail → pozisyon zorla kapatılır. OGUL STOP LIMIT fallback (`ogul_sltp.set_initial_sl` + `set_initial_tp`). Manuel trade → SL/TP fail pozisyonu KAPATMAZ (operatör bilinci) ancak `baba.report_unprotected_position` ile BABA'ya raporlanır (sistem kaydı). Hibrit yön dönüşü (`_handle_direction_change`) → MT5 `force_close`; fail ise BABA raporu + kritik UI alert. | `ogul._execute_signal`, `ogul_sltp.set_initial_sl`+`set_initial_tp`, `manuel_motor.open_manual_trade`, `h_engine._handle_direction_change` |
 | **CI-04** | AX-5 | EOD 17:45 zorunlu kapanış: OĞUL + Hybrid tüm pozisyonlar kapatılır (manuel + orphan hariç) | `ogul._check_end_of_day`, `_verify_eod_closure` |
 | **CI-05** | AX-6 | Hard drawdown ≥%15 → L3 kill-switch → tüm pozisyonlar kapatılır | `baba._check_hard_drawdown` |
 | **CI-06** | — | OLAY rejiminde `risk_multiplier = 0.0`; yeni işlem açılmaz | `baba.detect_regime` |

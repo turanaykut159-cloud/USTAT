@@ -166,6 +166,57 @@ class OgulSLTP:
         return False
 
     # ═════════════════════════════════════════════════════════════════
+    #  İLK TP YERLEŞTİRME (#247 OP-D S1-2)
+    # ═════════════════════════════════════════════════════════════════
+
+    def set_initial_tp(self, trade: Any, tp: float) -> bool:
+        """Pozisyon açıldıktan sonra ilk TP Limit emrini yerleştir.
+
+        OGUL sinyali `signal.tp` sağlarsa çağrılır. Buy pozisyonu için Sell Limit,
+        Sell pozisyonu için Buy Limit emri gönderilir (VİOP netting'de ters yönlü
+        Limit pozisyonu azaltır/kapatır).
+
+        AX-4 enforced_in: engine/ogul_sltp.py::set_initial_sl + set_initial_tp.
+        TP trailing mekanizması SEPARATEDİR (ogul.update_profit_protection
+        async) — bu metot sadece ilk statik TP'yi yerleştirir. Reject halinde
+        trailing fallback'a bırakılır.
+
+        Args:
+            trade: Trade nesnesi (ticket, symbol, direction, volume gerekli).
+            tp: Take-profit fiyatı.
+
+        Returns:
+            True → emir başarıyla yerleştirildi, False → başarısız (trailing
+            mekanizması devreye girer).
+        """
+        if tp <= 0:
+            return False
+
+        symbol = trade.symbol
+        # Pozisyon BUY ise TP'ye SELL LIMIT (üstte), pozisyon SELL ise BUY LIMIT (altta)
+        order_direction = "SELL" if trade.direction == "BUY" else "BUY"
+
+        result = self._mt5.send_limit(
+            symbol, order_direction, trade.volume, tp,
+            comment=f"OGUL_TP_{trade.ticket}",
+        )
+
+        if result is not None:
+            trade.tp_order_ticket = result.get("order_ticket", 0)
+            logger.info(
+                f"OĞUL TP Limit yerleştirildi [{symbol}]: "
+                f"order={trade.tp_order_ticket} {order_direction} "
+                f"price={tp:.4f}"
+            )
+            return True
+
+        logger.warning(
+            f"OĞUL TP Limit gönderilemedi [{symbol}]: "
+            f"{order_direction} price={tp:.4f} — trailing mekanizması fallback"
+        )
+        return False
+
+    # ═════════════════════════════════════════════════════════════════
     #  TRAİLİNG SL GÜNCELLEME
     # ═════════════════════════════════════════════════════════════════
 

@@ -499,12 +499,30 @@ class ManuelMotor:
                     logger.error(f"Manuel SL/TP modify hatası [{symbol}]: {exc}")
 
             if not sl_tp_applied:
-                logger.warning(
-                    f"Manuel SL/TP MT5'e yazılamadı [{symbol}] — "
-                    f"pozisyon açık ama yazılım SL/TP ile korunuyor"
+                # #247 OP-D S1-3: Manuel istisna + BABA raporu.
+                # AX-4 "korumasız pozisyon yasak" genel kuralı; manuel trade'de
+                # operatör kullanıcı bilinçli SL/TP açmış → pozisyonu KAPATMIYORUZ.
+                # Ancak sistem kaydı şart: baba.report_unprotected_position çağrılır
+                # → BABA ERROR_ATTRIBUTION + UI uyarı + RISK_MISS zinciri tetiklenir.
+                logger.critical(
+                    f"[AX-4 MANUEL İSTİSNA] Manuel SL/TP MT5'e yazılamadı [{symbol}] "
+                    f"ticket={position_ticket} — pozisyon AÇIK (manuel bilinç), "
+                    f"BABA'ya korumasız olarak raporlanıyor"
                 )
-                # SL/TP yazılamasa bile pozisyonu KAPATMA — kullanıcı bilinçli açtı
-                # Risk göstergesi olarak bellekte tutulmaya devam eder
+                baba = getattr(self, "baba", None)
+                if baba and hasattr(baba, "report_unprotected_position"):
+                    try:
+                        baba.report_unprotected_position(symbol, position_ticket)
+                    except Exception as bexc:
+                        logger.error(
+                            f"baba.report_unprotected_position hatası [{symbol}]: {bexc}"
+                        )
+                else:
+                    logger.warning(
+                        "baba referansı yok veya report_unprotected_position eksik — "
+                        "manuel korumasız pozisyon raporlanamadı"
+                    )
+                # Yazılım SL/TP bellekte korur; kullanıcı bilinç + sistem kaydı
 
         # 7. Başarılı → state güncelle
         trade.state = TradeState.SENT

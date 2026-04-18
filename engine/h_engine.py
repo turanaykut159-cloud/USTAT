@@ -808,49 +808,14 @@ class HEngine:
             profit = mt5_pos.get("profit", 0.0)
             swap = mt5_pos.get("swap", 0.0)
 
-            # ── v5.9.1 Fix #145: Yön değişimi algılama ─────────────
+            # ── v5.9.1 Fix #145 + #247 OP-D S1-4: Yön değişimi ────
             # VİOP netting'de karşı yönde büyük emir girerse pozisyon
-            # yön değiştirebilir (ör. SELL 16 → BUY 4). h_engine ters
-            # yöndeki pozisyonu yönetemez — güvenli kapanış gerekir.
+            # yön değiştirebilir (ör. SELL 16 → BUY 4). Yeni yöndeki
+            # pozisyon SL-siz kalır → AX-4 "korumasız pozisyon yasak" ihlali.
+            # v6.1 (#247 OP-D): artık force_close tetiklenir.
             mt5_direction = mt5_pos.get("type")  # "BUY" veya "SELL"
             if mt5_direction and mt5_direction != hp.direction:
-                logger.critical(
-                    f"YÖN DEĞİŞİMİ TESPİT: ticket={ticket} {hp.symbol} "
-                    f"beklenen={hp.direction} MT5={mt5_direction} — "
-                    f"bekleyen emirler iptal, hibrit yönetim sonlandırılıyor"
-                )
-                # Tüm PRIMNET bekleyen emirlerini iptal et
-                self._cancel_stop_limit_orders(hp)
-                # Pozisyonu KAPATMA — yeni yöndeki pozisyon kullanıcının
-                # manuel müdahalesi gerektirir. Sadece h_engine takibini kapat.
-                pnl = mt5_pos.get("profit", 0.0) + mt5_pos.get("swap", 0.0)
-                swap = mt5_pos.get("swap", 0.0)
-                self._finalize_close(hp, "DIRECTION_FLIP", pnl, swap)
-                # UI'a bildirim gönder
-                try:
-                    from engine.event_bus import emit as _emit
-                    _emit("notification", {
-                        "type": "hybrid_direction_flip",
-                        "title": "Hibrit Yön Değişimi",
-                        "message": (
-                            f"{hp.symbol}: Pozisyon yönü {hp.direction}→{mt5_direction} "
-                            f"değişti. Hibrit yönetim sonlandırıldı. "
-                            f"Pozisyon açık — manuel müdahale gerekli."
-                        ),
-                        "severity": "critical",
-                        "timestamp": now.isoformat(timespec="seconds"),
-                    })
-                except Exception:
-                    pass
-                self.db.insert_notification(
-                    notif_type="hybrid_direction_flip",
-                    title="Hibrit Yön Değişimi",
-                    message=(
-                        f"{hp.symbol}: {hp.direction}→{mt5_direction} yön değişimi. "
-                        f"Bekleyen emirler iptal edildi. Manuel müdahale gerekli."
-                    ),
-                    severity="critical",
-                )
+                self._handle_direction_change(hp, mt5_pos, mt5_direction, now)
                 continue
 
             # ── Netting hacim senkronizasyonu ─────────────────────
@@ -2868,6 +2833,112 @@ class HEngine:
                     f"order={o_ticket} {hp.symbol} type={o_type}"
                 )
         return cancelled
+
+    def _handle_direction_change(
+        self,
+        hp: HybridPosition,
+        mt5_pos: dict[str, Any],
+        mt5_direction: str,
+        now: datetime,
+    ) -> None:
+        """Yön değişimi (VİOP netting) → güvenli kapanış (AX-4 #247 OP-D S1-4).
+
+        VİOP netting modunda karşı yönde büyük emir girerse pozisyon yön
+        değiştirebilir (ör. SELL 16 → BUY 4). Yeni yöndeki pozisyon **SL-siz**
+        kalır → AX-4 "korumasız pozisyon yasak" ihlali.
+
+        Bu metot:
+          1. Bekleyen STOP/LIMIT emirlerini iptal eder (_cancel_stop_limit_orders).
+          2. MT5'teki açık pozisyonu `force_close` ile kapatır.
+          3. Force close fail ise: BABA `report_unprotected_position` çağrılır,
+             UI kritik alert gönderilir, pozisyon manuel müdahale için bırakılır.
+          4. h_engine takibi sonlandırılır (`_finalize_close`).
+
+        AX-4 enforced_in: engine/h_engine.py::_handle_direction_change.
+
+        Args:
+            hp: Hibrit pozisyon (takip kaydı).
+            mt5_pos: MT5'ten gelen canlı pozisyon dict'i.
+            mt5_direction: MT5'teki mevcut yön ("BUY" veya "SELL").
+            now: Cycle zaman damgası.
+        """
+        ticket = hp.ticket
+        logger.critical(
+            f"YÖN DEĞİŞİMİ TESPİT: ticket={ticket} {hp.symbol} "
+            f"beklenen={hp.direction} MT5={mt5_direction} — "
+            f"bekleyen emirler iptal, force_close deneniyor"
+        )
+
+        # 1. Tüm PRIMNET bekleyen emirlerini iptal et
+        self._cancel_stop_limit_orders(hp)
+
+        # 2. MT5 force_close — AX-4 korumasız pozisyon yasaği
+        mt5_volume = mt5_pos.get("volume", hp.volume)
+        close_ok = False
+        try:
+            close_result = self.mt5.close_position(ticket, volume=mt5_volume)
+            if close_result and close_result.get("success"):
+                close_ok = True
+                logger.warning(
+                    f"YÖN DEĞİŞİMİ FORCE_CLOSE OK: ticket={ticket} "
+                    f"{hp.symbol} ({mt5_volume} lot kapandı)"
+                )
+        except Exception as exc:
+            logger.error(f"Yön değişimi force_close istisna: {exc}")
+
+        # 3. Force close fail ise BABA'ya raporla, pozisyon korumasız kaldı
+        if not close_ok:
+            logger.critical(
+                f"YÖN DEĞİŞİMİ FORCE_CLOSE FAIL: ticket={ticket} "
+                f"{hp.symbol} — KORUMASIZ POZİSYON, manuel müdahale ŞART"
+            )
+            baba = getattr(self, "baba", None)
+            if baba is None:
+                # Fallback: engine üzerinden baba erişimi
+                engine_ref = getattr(self, "engine", None)
+                if engine_ref is not None:
+                    baba = getattr(engine_ref, "baba", None)
+            if baba and hasattr(baba, "report_unprotected_position"):
+                try:
+                    baba.report_unprotected_position(hp.symbol, ticket)
+                except Exception as bexc:
+                    logger.error(f"baba.report_unprotected_position hatası: {bexc}")
+
+        # 4. h_engine takibini sonlandır (force close OK veya fail her halükârda)
+        pnl = mt5_pos.get("profit", 0.0) + mt5_pos.get("swap", 0.0)
+        swap = mt5_pos.get("swap", 0.0)
+        close_reason = "DIRECTION_FLIP_FORCED" if close_ok else "DIRECTION_FLIP_UNPROTECTED"
+        self._finalize_close(hp, close_reason, pnl, swap)
+
+        # 5. UI'a bildirim (kritik)
+        notif_msg = (
+            f"{hp.symbol}: Pozisyon yönü {hp.direction}→{mt5_direction} "
+            + (
+                f"değişti. FORCE_CLOSE başarılı, pozisyon kapandı."
+                if close_ok
+                else f"değişti. FORCE_CLOSE BAŞARISIZ — KORUMASIZ, manuel müdahale ŞART."
+            )
+        )
+        try:
+            from engine.event_bus import emit as _emit
+            _emit("notification", {
+                "type": "hybrid_direction_flip",
+                "title": "Hibrit Yön Değişimi",
+                "message": notif_msg,
+                "severity": "critical",
+                "timestamp": now.isoformat(timespec="seconds"),
+            })
+        except Exception:
+            pass
+        try:
+            self.db.insert_notification(
+                notif_type="hybrid_direction_flip",
+                title="Hibrit Yön Değişimi",
+                message=notif_msg,
+                severity="critical",
+            )
+        except Exception as dexc:
+            logger.warning(f"notification DB kaydı başarısız: {dexc}")
 
     def _cancel_stop_limit_orders(self, hp: HybridPosition) -> None:
         """Pozisyona ait bekleyen emirleri (STOP/LIMIT) iptal et.
