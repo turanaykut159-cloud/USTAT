@@ -57,6 +57,9 @@
 
 ## [6.1.0] — 2026-04-18
 
+### Fixed
+- #244 — OP-E ÜSTAT-BABA persist bug'ları (S2-A + S2-D). **(a)** `engine/ustat.py::_get_strategy_parameters` (~satır 2099-2125): `trade_categories.get("strategy_dist")` olmayan key'i arıyordu → `strategy_win_rates` ve `strategy_trade_counts` her zaman boş dönüyordu → ÜSTAT strateji yönlendirmesi win-rate kör kullanıyordu. Fix: `trade_categories["categories"]` listesinden strateji başına kazanan/kaybeden sayısı hesaplanıyor, gerçek win_rate dolduruluyor. **(b)** `engine/baba.py::_receive_ustat` feedback Aksiyon 2 (~satır 2258-2273): `_ustat_floating_tightened` bayrağı `setattr(self, ...)` ile instance'a yazılıyordu → restart sonrası kaybolup tightening yeniden tetiklenebilirdi (idempotency kaybı). Fix: `_risk_state` dict'ine taşındı + `_persist_risk_state()` çağrısı. Artık restart-dayanıklı, bir kez tightening garantisi. 2 dosya, C3 (Kırmızı Bölge × 2, atomik commit).
+
 ### Security
 - #243 — KARAR #17: trend_follow stratejisi kalıcı bloke edildi. `config/default.json::strategies.trend_follow.adx_threshold`: 25.0 → 9999.0. Kanıt: P-15 (18 Nis raporu) 10/10 kayıp (WR %0). Eski strategy motoru `_check_trend_follow` sinyal üretemez hale getirildi. `_disabled_reason` alanı eklendi. UYARI: SE3 (signal_engine.py) hâlâ trend_follow tagged sinyaller üretebilir — tam blok için hafta içi `ogul.py::_execute_signal` guard eklenecek. Config-only, C2. 1 dosya.
 
