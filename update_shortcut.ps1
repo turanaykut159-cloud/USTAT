@@ -2,6 +2,17 @@
 # Calistirmak icin: PowerShell -ExecutionPolicy Bypass -File "C:\Users\pc\USTAT\update_shortcut.ps1"
 
 $desktop = [Environment]::GetFolderPath("Desktop")
+# #274 SYSTEM user fallback — ajan tarafından çağrıldığında GetFolderPath boş döner
+if ([string]::IsNullOrEmpty($desktop)) {
+    if (Test-Path "C:\Users\pc\Desktop") {
+        $desktop = "C:\Users\pc\Desktop"
+    } elseif ($env:USERPROFILE -and (Test-Path (Join-Path $env:USERPROFILE "Desktop"))) {
+        $desktop = Join-Path $env:USERPROFILE "Desktop"
+    } else {
+        Write-Host "HATA: Desktop klasörü bulunamadı (SYSTEM user? USERPROFILE eksik?)" -ForegroundColor Red
+        exit 1
+    }
+}
 $newName = "USTAT Plus V6.2 VIOP Algorithmic Trading"
 $projectDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
