@@ -583,8 +583,8 @@ class Engine:
                 # v5.4.1: Son başarılı cycle zamanını kaydet
                 self._last_successful_cycle_time = _time.time()
 
-                # v5.4.1: Periyodik DB yedekleme (her 360 cycle ≈ 1 saat)
-                DB_BACKUP_INTERVAL = 360
+                # v5.4.1 + #271 R-11: Periyodik DB yedekleme — config-driven
+                DB_BACKUP_INTERVAL = int(self.config.get("intervals.db_backup_sec", 360))
                 cycles_since_backup = self._cycle_count - self._last_backup_cycle
                 if cycles_since_backup >= DB_BACKUP_INTERVAL:
                     try:
@@ -783,8 +783,8 @@ class Engine:
             except Exception as exc:
                 logger.error(f"Sembol re-resolve hatası: {exc}")
 
-        # ── 1c. Saatlik trade_mode tarama (v5.9.2 — vade geçişi) ──
-        _TRADE_MODE_CHECK_INTERVAL = 3600  # 1 saat
+        # ── 1c. Saatlik trade_mode tarama (v5.9.2 + #271 R-11 config) ──
+        _TRADE_MODE_CHECK_INTERVAL = int(self.config.get("intervals.trade_mode_check_sec", 3600))
         _now_ts = _time.time()
         if _now_ts - self._last_trade_mode_check >= _TRADE_MODE_CHECK_INTERVAL:
             self._last_trade_mode_check = _now_ts

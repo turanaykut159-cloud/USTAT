@@ -29,7 +29,8 @@ from engine.logger import get_logger
 logger = get_logger(__name__)
 
 # ── Varsayılan sabitler ─────────────────────────────────────────────
-_MAX_MODIFY_RETRIES = 3    # modify başarısız → cancel + yeniden gönder
+# #271 R-11: config fallback, OgulSLTP instance init'te override edilir
+_MAX_MODIFY_RETRIES = 3    # modify başarısız → cancel + yeniden gönder (fallback)
 
 
 class OgulSLTP:

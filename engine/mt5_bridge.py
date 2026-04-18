@@ -1319,8 +1319,8 @@ class MT5Bridge:
                     order_ticket_raw = order_result.get("order", 0)
                     position_ticket = 0
 
-                    # Yöntem 1: history_deals_get ile doğru position_id al
-                    DEAL_LOOKUP_RETRIES = 10  # Toplam ~2.8s (exponential backoff)
+                    # Yöntem 1: history_deals_get ile doğru position_id al (#271 R-11)
+                    DEAL_LOOKUP_RETRIES = int(self.config.get("mt5_retries.deal_lookup_retries", 10))
                     for deal_attempt in range(1, DEAL_LOOKUP_RETRIES + 1):
                         _time.sleep(min(0.1 * deal_attempt, 0.5))
                         deals = self._safe_call(
@@ -1337,9 +1337,9 @@ class MT5Bridge:
                                 )
                                 break
 
-                    # Yöntem 2: Sembolden positions_get ile ara (fallback)
+                    # Yöntem 2: Sembolden positions_get ile ara (#271 R-11)
                     if position_ticket == 0:
-                        TICKET_MAX_RETRIES = 20  # Toplam ~4.2s (exponential backoff)
+                        TICKET_MAX_RETRIES = int(self.config.get("mt5_retries.ticket_max_retries", 20))
                         for attempt in range(1, TICKET_MAX_RETRIES + 1):
                             _time.sleep(min(0.1 * attempt, 0.5))  # 0.1, 0.2, ..., 0.5s
                             by_symbol = self._safe_call(mt5.positions_get, symbol=mt5_name)
@@ -1417,7 +1417,7 @@ class MT5Bridge:
                     # 5 deneme ile SL/TP ekleme — artan bekleme süresi
                     # (exchange modda deal tamamlanmadan modify başarısız olabiliyor)
                     sltp_applied = False
-                    SLTP_MAX_RETRIES = 5
+                    SLTP_MAX_RETRIES = int(self.config.get("mt5_retries.sltp_max_retries", 5))
                     for sltp_attempt in range(1, SLTP_MAX_RETRIES + 1):
                         sltp_result = self._safe_call(mt5.order_send, sltp_request, timeout=10.0)
                         if sltp_result is not None and sltp_result.retcode == mt5.TRADE_RETCODE_DONE:
@@ -1878,7 +1878,8 @@ class MT5Bridge:
                     f"pos.symbol={pos.symbol} SL={new_sl:.4f} TP={new_tp:.4f}"
                 )
 
-                MODIFY_MAX_RETRIES = 5
+                # #271 R-11: modify_position retry config'den (fallback=5)
+                MODIFY_MAX_RETRIES = int(self.config.get("mt5_retries.modify_max_retries", 5))
                 for attempt in range(1, MODIFY_MAX_RETRIES + 1):
                     result = self._safe_call(mt5.order_send, request, timeout=10.0)
 
@@ -2742,7 +2743,8 @@ class MT5Bridge:
                     f"price={new_price:.4f}{sl_info}"
                 )
 
-                MODIFY_MAX_RETRIES = 3
+                # #271 R-11: pending modify retry config'den (fallback=3)
+                MODIFY_MAX_RETRIES = int(self.config.get("mt5_retries.modify_max_retries", 3))
                 for attempt in range(1, MODIFY_MAX_RETRIES + 1):
                     result = self._safe_call(mt5.order_send, request, timeout=10.0)
 
@@ -3074,7 +3076,8 @@ class MT5Bridge:
                     f"stop={stop_price:.4f} limit={limit_price:.4f}"
                 )
 
-                MODIFY_MAX_RETRIES = 3
+                # #271 R-11: pending modify retry config'den (fallback=3)
+                MODIFY_MAX_RETRIES = int(self.config.get("mt5_retries.modify_max_retries", 3))
                 for attempt in range(1, MODIFY_MAX_RETRIES + 1):
                     result = self._safe_call(mt5.order_send, request, timeout=10.0)
 

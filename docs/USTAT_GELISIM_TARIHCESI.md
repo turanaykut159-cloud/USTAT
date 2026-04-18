@@ -55,6 +55,16 @@
 
 ---
 
+## [6.2.0] — 2026-04-18
+
+### Changed
+- #273 — **Versiyon bump v6.1.0 → v6.2.0** (CLAUDE.md §7 ADIM 3-4). ~2.500 satır değişim + 5 axiom touch + 25 commit gerekçe: versiyon artış oranı ≥%10. Güncellenen: `engine/__init__.py`, `config/default.json`, `api/server.py::API_VERSION`, `desktop/package.json` (+description), `desktop/main.js::APP_TITLE + splash V6.1→V6.2`, `desktop/src/components/LockScreen.jsx + Settings.jsx::VERSION_FALLBACK`, `create_shortcut.ps1 + update_shortcut.ps1` (V6.1 patternine eski-versiyon temizliği listesine eklendi).
+
+### Added
+- #272 — **OP-N runtime davranış 7 test** (`tests/critical_flows/test_op_n_runtime.py`): AX-3 _reset_daily KS korur, AX-4 manuel report çağrısı, AX-4 hibrit force_close + BABA fallback, partial close handler, R-11 MT5 retries config-driven, R-11 main intervals config-driven, config mt5_retries+intervals blokları. 7/7 PASS.
+- #271 — **R-11 TAM: MT5 bridge retries + main intervals config-driven**. `config/default.json::mt5_retries` bloğu (deal_lookup=10, ticket_max=20, sltp_max=5, modify_max=3), `intervals` bloğu (db_backup=360, trade_mode=3600). Hardcoded değerler kod'da config.get fallback'li. `engine/mt5_bridge.py` 4 retry noktası + `engine/main.py::_run_single_cycle` 2 interval. `engine/ogul_sltp.py::_MAX_MODIFY_RETRIES` fallback yorumu.
+- **docs/API_AUTH_IDEMPOTENCY.md** — Kullanıcı rehberi: token set (config + env), 5 endpoint idempotency, istemci örnekleri, cURL test, best practices.
+
 ## [6.1.0] — 2026-04-18
 
 ### Added

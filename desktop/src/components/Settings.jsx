@@ -32,8 +32,8 @@ import { getOperatorName, setOperatorName, DEFAULT_OPERATOR } from '../utils/ope
 
 // A5/H1: VERSION hardcode'u kaldirildi — tek kaynak engine/__init__.py::VERSION.
 // Artik status?.version uzerinden /api/status endpoint'inden okunur.
-// Fallback '6.1.0' ilk render ve hata durumu icin.
-const VERSION_FALLBACK = '6.1.0';
+// Fallback '6.2.0' ilk render ve hata durumu icin.
+const VERSION_FALLBACK = '6.2.0';
 const BUILD_DATE = '2026-04-18';
 
 const DEFAULT_PREFS = {

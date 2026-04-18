@@ -62,7 +62,7 @@ from api.routes import (
 logger = logging.getLogger("ustat.api")
 
 # Tek kaynak: OpenAPI ve root endpoint aynı versiyonu kullanır
-API_VERSION = "6.1.0"
+API_VERSION = "6.2.0"
 
 
 # ── Lifespan: Engine başlat / durdur ─────────────────────────────

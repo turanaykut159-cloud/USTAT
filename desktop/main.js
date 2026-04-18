@@ -37,7 +37,7 @@ process.on('unhandledRejection', (reason) => {
 });
 
 // ── Sabitler ─────────────────────────────────────────────────────
-const APP_TITLE = 'ÜSTAT Plus V6.1 VİOP Algorithmic Trading';
+const APP_TITLE = 'ÜSTAT Plus V6.2 VİOP Algorithmic Trading';
 const MIN_WIDTH = 1400;
 const MIN_HEIGHT = 900;
 const BG_COLOR = '#0d1117';
@@ -50,7 +50,7 @@ const SPLASH_HTML = `<!DOCTYPE html>
 <head><meta charset="utf-8"><title>${APP_TITLE}</title></head>
 <body style="display:flex;align-items:center;justify-content:center;height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#e6edf3;margin:0">
 <div style="text-align:center">
-<h1 style="font-size:48px;margin:0;font-weight:300;letter-spacing:2px">\u00dcSTAT Plus <span style="color:#484f58;font-size:24px">V6.1</span></h1>
+<h1 style="font-size:48px;margin:0;font-weight:300;letter-spacing:2px">\u00dcSTAT Plus <span style="color:#484f58;font-size:24px">V6.2</span></h1>
 <p style="color:#484f58;margin:20px 0 30px;font-size:14px">V\u0130OP Algorithmic Trading</p>
 <div style="width:36px;height:36px;border:3px solid #21262d;border-top-color:#58a6ff;border-radius:50%;animation:s 1s linear infinite;margin:0 auto"></div>
 <p style="color:#30363d;font-size:13px;margin-top:24px">Y\u00fckleniyor...</p>

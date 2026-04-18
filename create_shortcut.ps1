@@ -1,13 +1,13 @@
-# USTAT Plus V6.1 — Masaustu Kisa Yol Olusturucu
+# USTAT Plus V6.2 — Masaustu Kisa Yol Olusturucu
 # Calistirma: PowerShell -ExecutionPolicy Bypass -File create_shortcut.ps1
 
 $WshShell = New-Object -ComObject WScript.Shell
-$ShortcutPath = [System.IO.Path]::Combine($WshShell.SpecialFolders("Desktop"), "USTAT Plus V6.1.lnk")
+$ShortcutPath = [System.IO.Path]::Combine($WshShell.SpecialFolders("Desktop"), "USTAT Plus V6.2.lnk")
 $Shortcut = $WshShell.CreateShortcut($ShortcutPath)
 $Shortcut.TargetPath = "wscript.exe"
 $Shortcut.Arguments = "`"C:\Users\pc\Desktop\USTAT\start_ustat.vbs`""
 $Shortcut.WorkingDirectory = "C:\Users\pc\Desktop\USTAT"
-$Shortcut.Description = "USTAT Plus V6.1 VIOP Algorithmic Trading"
+$Shortcut.Description = "USTAT Plus V6.2 VIOP Algorithmic Trading"
 
 # Icon ayarla (varsa)
 $IconPath = "C:\Users\pc\Desktop\USTAT\desktop\assets\icon.ico"
