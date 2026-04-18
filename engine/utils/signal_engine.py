@@ -1205,14 +1205,13 @@ def _source_adaptive_momentum(
 #  J) HABER BAZLI SİNYAL — v6.1'de KALDIRILDI (nötr stub)
 # ═════════════════════════════════════════════════════════════════════
 
-def _source_news_event(
-    symbol: str = "",
-    news_bridge=None,
-) -> SourceResult:
-    """Stub — haber entegrasyonu v6.1'de tamamen kaldırıldı.
+def _source_news_event(symbol: str = "") -> SourceResult:
+    """Stub — haber entegrasyonu v6.1'de tamamen kaldırıldı (#266 OP-O).
 
-    Skorlama boyutu (10 kaynak) korunur; J kaynağı her zaman NEUTRAL döner.
-    Böylece min_agree eşikleri ve skorlama mantığı değişmeden kalır.
+    v6.1.1'de news_bridge parametresi de temizlendi (caller'lar zaten
+    geçmiyordu). Skorlama boyutu (10 slot) korunur; J kaynağı her zaman
+    NEUTRAL döner. Böylece min_agree eşikleri ve skorlama mantığı değişmeden
+    kalır — future rebirth alternative source için slot mevcut.
     """
     return SourceResult("news_event", 0.0, "NEUTRAL", 0.0, {"reason": "removed_v6.1"})
 
@@ -1230,7 +1229,6 @@ def generate_signal(
     current_price: float = 0.0,
     regime_type: str = "",
     symbol: str = "",
-    news_bridge=None,
 ) -> SignalVerdict:
     """Ana sinyal üretim motoru — 10 slot / 9 aktif kaynak karar (SE3, #263 OP-M v6.1).
 
@@ -1246,7 +1244,6 @@ def generate_signal(
         current_price: Güncel tick fiyatı (0 ise close[-1] kullanılır).
         regime_type: BABA rejim tipi ("TREND", "RANGE", "VOLATILE", "OLAY").
         symbol: VİOP kontrat kodu.
-        news_bridge: Deprecated — v6.1'de kaldırıldı, parametre backward-compat için tutuluyor, None olmalı.
 
     Returns:
         SignalVerdict nesnesi.
@@ -1342,7 +1339,7 @@ def generate_signal(
     sources.append(src_i)
 
     # J) Haber Bazlı Sinyal — v6.1'de kaldırıldı, stub nötr döner (skorlama boyutu korunur)
-    src_j = _source_news_event(symbol, news_bridge)
+    src_j = _source_news_event(symbol)
     sources.append(src_j)
 
     verdict.sources = sources

@@ -25,8 +25,24 @@ logger = get_logger(__name__)
 _lock = threading.Lock()
 _locked_symbols: dict[str, dict] = {}  # symbol → {"owner": str, "acquired_at": float}
 
-# Kilit timeout: 120 saniye (2 dakika) — bu süre içinde release edilmezse stale kabul edilir
+# Kilit timeout — #265 R-11 KARAR #11: config'den override desteği
+# Default 120sn (2 dakika); sanity_thresholds.netting_lock_timeout_sec ile overrideable
 LOCK_TIMEOUT_SEC: float = 120.0
+
+
+def set_lock_timeout(seconds: float) -> None:
+    """Runtime'da lock timeout değeri güncelle (config-driven).
+
+    Boot sırasında engine config'i yüklendikten sonra çağrılır:
+        cfg.get("sanity_thresholds.netting_lock_timeout_sec", 120.0)
+
+    Args:
+        seconds: Yeni timeout (en az 30 sn, en fazla 600 sn).
+    """
+    global LOCK_TIMEOUT_SEC
+    clamped = max(30.0, min(600.0, float(seconds)))
+    LOCK_TIMEOUT_SEC = clamped
+    logger.info(f"Netting lock timeout güncellendi: {clamped}sn")
 
 
 def _cleanup_stale() -> None:

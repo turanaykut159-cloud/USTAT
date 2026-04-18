@@ -895,11 +895,13 @@ class DataPipeline:
             if account.equity > 0:
                 margin_usage = round(account.margin / account.equity * 100, 2)
 
-            # #257 OP-K2: margin_usage sanity check.
+            # #257 OP-K2 + #265 R-11: margin_usage sanity check (config-driven).
             # %200 üstü leverage gerçekçi değil — broker account disabled veya
             # equity anomalisi göstergesi. 16 Nis 2026 %4997 bulgusu referans.
-            # CRITICAL event + alert.
-            MARGIN_SANITY_LIMIT = 200.0  # %200 = 2× leverage, üstü anomali
+            MARGIN_SANITY_LIMIT = float(
+                self._config.get("sanity_thresholds.margin_usage_limit_pct", 200.0)
+                if self._config else 200.0
+            )
             if margin_usage > MARGIN_SANITY_LIMIT:
                 logger.critical(
                     f"[OP-K2 MARGIN ANOMALI] margin_usage=%{margin_usage:.1f} "
@@ -1052,13 +1054,17 @@ class DataPipeline:
 
         dd = (peak - current_equity) / peak
 
-        # #258 OP-K1: peak_equity sanity check.
+        # #258 OP-K1 + #265 R-11: peak_equity sanity check (config-driven).
         # 16 Nis 2026 bulgusu: peak 42K stale, equity 27K düştü, DD %35 şişti.
-        # Broker balance değişimi (manuel para çekimi, account reset) peak'ı
-        # otomatik senkronize etmez → yanlış DD alarmı. %30 üstü dd'de peak'ın
-        # balance'tan anormal sapması varsa CRITICAL uyarı.
-        PEAK_ANOMALY_DD = 0.30  # %30 üstü DD
-        PEAK_BALANCE_RATIO = 1.30  # peak balance'ın 1.3 katından fazlaysa anomali
+        cfg = getattr(self, "_config", None)
+        PEAK_ANOMALY_DD = (
+            float(cfg.get("sanity_thresholds.peak_anomaly_dd_pct", 30.0)) / 100.0
+            if cfg else 0.30
+        )
+        PEAK_BALANCE_RATIO = float(
+            cfg.get("sanity_thresholds.peak_balance_ratio", 1.30)
+            if cfg else 1.30
+        )
         if dd >= PEAK_ANOMALY_DD:
             try:
                 account = getattr(self, "latest_account", None)

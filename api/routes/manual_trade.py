@@ -10,7 +10,13 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from api.deps import get_manuel_motor, require_localhost_and_token
+from api.deps import (
+    check_idempotency,
+    get_idempotent_response,
+    get_manuel_motor,
+    require_localhost_and_token,
+    store_idempotent_response,
+)
 from api.schemas import (
     ManualRiskScoresResponse,
     ManualTradeCheckRequest,
@@ -42,8 +48,16 @@ async def check_manual_trade(req: ManualTradeCheckRequest):
     response_model=ManualTradeExecuteResponse,
     dependencies=[Depends(require_localhost_and_token)],
 )
-async def execute_manual_trade(req: ManualTradeExecuteRequest):
-    """Manuel emir gönder."""
+async def execute_manual_trade(
+    req: ManualTradeExecuteRequest,
+    idem_key: str | None = Depends(check_idempotency),
+):
+    """Manuel emir gönder. Idempotency-Key header ile aynı istek tekrar gelirse cached response döner (60sn TTL)."""
+    if idem_key:
+        cached = get_idempotent_response(idem_key)
+        if cached:
+            return ManualTradeExecuteResponse(**cached)
+
     mm = get_manuel_motor()
     if not mm:
         return ManualTradeExecuteResponse(message="Engine çalışmıyor")
@@ -58,6 +72,9 @@ async def execute_manual_trade(req: ManualTradeExecuteRequest):
     result = mm.open_manual_trade(
         req.symbol, direction, req.lot, sl=req.sl, tp=req.tp,
     )
+    # #267 OP-K: Idempotency cache (başarılı sonuç 60sn saklanır)
+    if idem_key and isinstance(result, dict):
+        store_idempotent_response(idem_key, result)
     return ManualTradeExecuteResponse(**result)
 
 

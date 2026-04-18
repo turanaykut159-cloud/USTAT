@@ -157,3 +157,57 @@ def require_localhost_and_token(
             status_code=401,
             detail="Gecersiz veya eksik X-USTAT-TOKEN header",
         )
+
+
+# ════════════════════════════════════════════════════════════════════
+#  #267 OP-K idempotency-Key header desteği (KARAR #14 uzantısı)
+# ════════════════════════════════════════════════════════════════════
+
+# Idempotency cache: {key: (response_dict, timestamp)} — 60sn TTL
+_idempotency_cache: dict[str, tuple[dict, float]] = {}
+_IDEMPOTENCY_TTL_SEC: float = 60.0
+
+
+def check_idempotency(
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+) -> str | None:
+    """Idempotency-Key header ile aynı istek tekrar gönderilirse cached döner.
+
+    Kullanım pattern (route içinde):
+        key = check_idempotency(request_header)
+        if key:
+            cached = get_idempotent_response(key)
+            if cached:
+                return cached
+        # ... iş yap ...
+        store_idempotent_response(key, result) if key
+
+    Returns:
+        Normalize edilmiş key (string) veya None (header yoksa).
+    """
+    if not idempotency_key:
+        return None
+    return idempotency_key.strip()[:128]  # Max 128 char, trimmed
+
+
+def get_idempotent_response(key: str | None) -> dict | None:
+    """Cache'de aynı key varsa (ve TTL geçmemişse) response döndür."""
+    if not key or key not in _idempotency_cache:
+        return None
+    response, ts = _idempotency_cache[key]
+    if (time.time() - ts) > _IDEMPOTENCY_TTL_SEC:
+        _idempotency_cache.pop(key, None)
+        return None
+    return response
+
+
+def store_idempotent_response(key: str | None, response: dict) -> None:
+    """Response'u cache'e al (başarı sonrası çağrılır)."""
+    if not key or not isinstance(response, dict):
+        return
+    # Cache temizlik (eski girişleri at)
+    now = time.time()
+    expired = [k for k, (_, t) in _idempotency_cache.items() if (now - t) > _IDEMPOTENCY_TTL_SEC]
+    for k in expired:
+        _idempotency_cache.pop(k, None)
+    _idempotency_cache[key] = (response, now)

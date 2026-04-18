@@ -57,6 +57,16 @@
 
 ## [6.1.0] — 2026-04-18
 
+### Added
+- #268 — **OP-N davranış testleri (MT5 mock stubs)** (#56). `tests/critical_flows/test_op_n_behavior.py`: 6 runtime davranış testi (netting reentrant, stale cleanup, config boot autorepair tail-null, scattered null fallback, idempotency cache roundtrip, sanity thresholds config). loguru/MT5 stub ile import güvenli. 6/6 PASS Windows Python 3.14. Davranış testi katmanı böylece statik sözleşmeye ek olarak gerçek fonksiyon çağrısı doğrulaması sağlar.
+- #267 — **OP-K idempotency-Key header altyapısı** (KARAR #14 uzantı). `api/deps.py::check_idempotency`, `get_idempotent_response`, `store_idempotent_response` — 60sn TTL, 128 char key max, memory cache. Örnek entegrasyon: `POST /manual-trade/execute` Idempotency-Key ile aynı istek tekrarı cached response döner. Diğer 3 kritik endpoint pattern aynı şekilde hafta içi genişletilebilir.
+
+### Removed
+- #266 — **OP-O kısmi: news_bridge stub parametre temizliği**. `engine/utils/signal_engine.py::_source_news_event` ve `generate_signal` `news_bridge=None` parametresi kaldırıldı (caller'lar zaten geçmiyordu — ogul.py:1027, 1119). `src_j = _source_news_event(symbol, news_bridge)` → `_source_news_event(symbol)`. Docstring temizlendi. Skorlama boyutu 10 slot korundu (J hâlâ stub NEUTRAL). Ölü kod temizliği tam OP-O kapsamı (10 sa) değil, pragmatic subset — news kalıntıları.
+
+### Changed
+- #265 — **KARAR #11 R-11: Kritik sihirli sayılar config'e taşındı**. `config/default.json::sanity_thresholds` yeni blok: `margin_usage_limit_pct=200.0`, `peak_anomaly_dd_pct=30.0`, `peak_balance_ratio=1.30`, `netting_lock_timeout_sec=120.0`. `data_pipeline._calculate_drawdown` + `update_risk_snapshot` sanity sınırlarını config'den okuyor (fallback default korundu). `netting_lock.set_lock_timeout()` yeni runtime override fonksiyonu. Fallback default korundu → geriye uyumlu.
+
 ### Security
 - #264 — **16 yeni statik sözleşme testi** (OP-H + OP-K + OP-L + OP-M + OP-K3). `tests/critical_flows/test_op_h_op_i_op_k_op_l_op_m_contracts.py`: 16/16 PASS Windows Python 3.14. AX-3 monotonluk koruma, 4 endpoint auth guard, config trading_hours okuma (ogul+h_engine+manuel), SE3 docstring, OP-K3 restricted mode, peak/margin anomali event'leri.
 - #263 — **OP-M SE3 news'siz revize dokümantasyon** (docstring). `signal_engine.py::generate_signal` docstring güncellendi: "10 slot / 9 aktif kaynak" matris A-J açıkça belgelendi (J: news_event v6.1 stub NEUTRAL). Kod davranışı değişmedi (news kaldırma 53d6584 commit ile zaten yapılmıştı), kullanıcı/geliştirici görünürlüğü iyileşti.

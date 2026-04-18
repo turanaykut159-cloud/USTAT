@@ -111,6 +111,13 @@
     "close_buffer_minutes": 30,
     "strength_reduction": 0.5
   },
+  "sanity_thresholds": {
+    "_comment": "#265 R-11 KARAR #11: Kritik tetikler tek kaynak. Sihirli sayılar kod'dan config'e.",
+    "margin_usage_limit_pct": 200.0,
+    "peak_anomaly_dd_pct": 30.0,
+    "peak_balance_ratio": 1.30,
+    "netting_lock_timeout_sec": 120.0
+  },
   "trading_hours": {
     "_comment": "#262 OP-L KARAR #8: Tek kaynak trading saatleri. Formatı: HH:MM. Farklı motorlar farklı buffer'lar kullanır (OGUL 09:45/17:45 sinyal, Hibrit/Manuel 09:40/17:50 geniş pencere).",
     "ogul_open": "09:45",
