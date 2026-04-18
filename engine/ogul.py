@@ -1102,7 +1102,7 @@ class Ogul:
 
         # ═══════════════════════════════════════════════════════════════
         #  Signal Engine v3.0 (SE3) — Yapı-Öncelikli Ana Motor
-        #  M5 verisiyle beslenir, symbol + news_bridge ile tam kaynak
+        #  M5 verisiyle beslenir, symbol bazlı 10 kaynaklı skorlama
         # ═══════════════════════════════════════════════════════════════
         try:
             if len(m5_close) == 0:

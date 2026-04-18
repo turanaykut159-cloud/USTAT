@@ -172,20 +172,6 @@ class Engine:
         # Baba'ya error_tracker referansı ver (kill-switch → hata havuzu entegrasyonu)
         self.baba._error_tracker = self.error_tracker
 
-        # ── v5.7.1: Haber Köprüsü (NewsBridge) ────────────────────
-        from engine.news_bridge import NewsBridge, PreMarketBriefing
-        self.news_bridge = NewsBridge(config=self.config)
-        # Cross-motor referansları
-        self.baba.set_news_bridge(self.news_bridge)
-        self.ogul._news_bridge = self.news_bridge
-        logger.info("NewsBridge başlatıldı ve BABA/OĞUL'a bağlandı.")
-
-        # ── v5.7.2: Pre-Market Briefing ───────────────────────────
-        self.premarket_briefing = PreMarketBriefing(
-            self.news_bridge, config=self.config
-        )
-        logger.info("PreMarketBriefing başlatıldı.")
-
         # ── MT5 Journal (v6.0) ────────────────────────────────────
         self.mt5_journal = MT5Journal(db=self.db)
         logger.info("MT5Journal başlatıldı.")
@@ -819,32 +805,6 @@ class Engine:
         # ── 2.5 Pozisyon Kapanma Tespiti ─────────────────────────
         self._check_position_closures()
         t3 = _pc()
-
-        # ── 2.7 Haber Güncelleme (v5.7.1 — NewsBridge) ──────────
-        try:
-            news_count = self.news_bridge.run_cycle()
-            if news_count > 0:
-                logger.info(f"NewsBridge: {news_count} yeni haber işlendi.")
-        except Exception as exc:
-            logger.error(f"NewsBridge cycle hatası: {exc}")
-
-        # ── 2.8 Pre-Market Briefing (v5.7.2) ────────────────────
-        try:
-            briefing = self.premarket_briefing.check()
-            if briefing and briefing.get("overnight_count", 0) > 0:
-                level = briefing.get("risk_level", "NORMAL")
-                logger.info(
-                    f"[PreMarket] Briefing hazır: {briefing['overnight_count']} haber, "
-                    f"risk={briefing['risk_score']:.0f}, seviye={level}"
-                )
-                # TEHLİKE seviyesinde BABA'ya lot çarpanı öner
-                if level == "TEHLIKE":
-                    logger.warning(
-                        f"[PreMarket] TEHLİKE — BABA lot çarpanı azaltması öneriliyor. "
-                        f"Detay: {briefing.get('baba_recommendation', '')}"
-                    )
-        except Exception as exc:
-            logger.error(f"PreMarketBriefing cycle hatası: {exc}")
 
         # ── 3. BABA Cycle (HER ZAMAN ÖNCE!) ──────────────────────
         regime = self._run_baba_cycle()

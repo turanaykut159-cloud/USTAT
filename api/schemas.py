@@ -38,7 +38,7 @@ class StatusResponse(BaseModel):
 
 class WarningItem(BaseModel):
     """Erken uyarı kalemi."""
-    type: str           # SPREAD_SPIKE, PRICE_SHOCK, VOLUME_SPIKE, USDTRY_SHOCK, NEWS_ALERT
+    type: str           # SPREAD_SPIKE, PRICE_SHOCK, VOLUME_SPIKE, USDTRY_SHOCK
     symbol: str
     severity: str       # WARNING / CRITICAL
     value: float
@@ -909,60 +909,6 @@ class StatsBaselineResponse(BaseModel):
     risk_baseline: str = ""
     stats_source: str = "default"  # config | default
     risk_source: str = "default"   # config | default | unavailable
-
-
-# ═══════════════════════════════════════════════════════════════════
-#  HABER ENTEGRASYONU (v5.7.1)
-# ═══════════════════════════════════════════════════════════════════
-
-class NewsEventItem(BaseModel):
-    """Tek haber olayı."""
-    headline: str = ""
-    source: str = ""               # MT5, Benzinga, RuleBased
-    timestamp: float = 0.0
-    time_str: str = ""             # HH:MM:SS formatında
-    category: str = "GENEL"        # JEOPOLITIK, EKONOMIK, SEKTOREL, SIRKET, GENEL
-    sentiment_score: float = 0.0   # -1.0 .. +1.0
-    confidence: float = 0.0        # 0.0 .. 1.0
-    symbols: list[str] = []        # Etkilenen VİOP kontratları
-    is_global: bool = False        # Tüm piyasayı etkileyen haber
-    severity: str = "NONE"         # NONE, LOW, MEDIUM, HIGH, CRITICAL
-    age_seconds: float = 0.0
-    lot_multiplier: float = 1.0
-
-
-class NewsStatusResponse(BaseModel):
-    """GET /api/news/status — Haber motoru durum bilgisi."""
-    enabled: bool = False
-    provider_count: int = 0
-    active_news_count: int = 0
-    total_processed: int = 0
-    total_positive: int = 0
-    total_negative: int = 0
-    worst_sentiment: float | None = None
-    worst_headline: str | None = None
-    worst_severity: str | None = None
-    best_sentiment: float | None = None
-    best_headline: str | None = None
-
-
-class NewsActiveResponse(BaseModel):
-    """GET /api/news/active — Aktif haberler listesi."""
-    count: int = 0
-    events: list[NewsEventItem] = []
-    best_sentiment: float | None = None
-    worst_sentiment: float | None = None
-    worst_severity: str | None = None
-
-
-class LiveNews(BaseModel):
-    """WebSocket haber güncellemesi."""
-    type: str = "news"
-    active_count: int = 0
-    worst_sentiment: float | None = None
-    worst_severity: str | None = None
-    best_sentiment: float | None = None
-    events: list[dict] = []
 
 
 # ═══════════════════════════════════════════════════════════════════

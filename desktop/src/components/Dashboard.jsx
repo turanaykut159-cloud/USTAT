@@ -31,7 +31,7 @@ import {
   getTradeStats, getPerformance, getTrades, getStatus,
   getAccount, getPositions, closePosition, connectLiveWS,
   getHybridStatus, checkHybridTransfer, transferToHybrid,
-  getNewsActive, getNotifications, markNotificationRead, markAllNotificationsRead,
+  getNotifications, markNotificationRead, markAllNotificationsRead,
   getRisk,
 } from '../services/api';
 // Widget Denetimi H13: Dashboard hero stat card "Başarı Oranı" win rate
@@ -42,8 +42,6 @@ import { formatMoney, formatPrice, pnlClass, elapsed, winRateColor } from '../ut
 import ConfirmModal from './ConfirmModal';
 import PrimnetDetail from './PrimnetDetail';
 import SortableCard from './SortableCard';
-import NewsPanel from './NewsPanel';
-import './NewsPanel.css';
 
 // ── Yardımcılar ──────────────────────────────────────────────────
 
@@ -130,9 +128,6 @@ export default function Dashboard() {
   const [equityStale, setEquityStale] = useState(false);
   const wsRef = useRef(null);
 
-  // v5.7.1: Haber verileri (WebSocket'ten güncellenir)
-  const [newsData, setNewsData] = useState(null);
-
   // Hata gösterimi (window.alert yerine)
   const [apiError, setApiError] = useState(null);
   const [errorModal, setErrorModal] = useState(null); // { title, message }
@@ -187,7 +182,7 @@ export default function Dashboard() {
   const [, setTick] = useState(new Date());
 
   // ── Sürükle-bırak kart sıralaması (@dnd-kit) ────────────────
-  const DEFAULT_CARD_ORDER = ['stat_daily', 'stat_winrate', 'stat_pnl', 'stat_pf', 'account', 'positions', 'trades', 'news'];
+  const DEFAULT_CARD_ORDER = ['stat_daily', 'stat_winrate', 'stat_pnl', 'stat_pf', 'account', 'positions', 'trades'];
   const DASH_STORAGE_KEY = 'ustat_dashboard_card_order';
 
   const [cardOrder, setCardOrder] = useState(() => {
@@ -233,7 +228,6 @@ export default function Dashboard() {
     account: 'Hesap Durumu',
     positions: 'Açık Pozisyonlar',
     trades: 'Son İşlemler',
-    news: 'Haber Akışı',
   };
 
   // ── Trade/Stats veri çekme (WS event-driven) ────────────────────
@@ -273,24 +267,6 @@ export default function Dashboard() {
       setHybridPositions(hybrid.positions || []);
       if (hybrid.primnet) setPrimnetConfig(hybrid.primnet);
       setApiError(null); // Başarılı fetch → hata banner'ını temizle
-
-      // ── v5.7.2: News REST polling (WS Chrome'da çalışmıyorsa fallback) ──
-      try {
-        const newsResp = await getNewsActive();
-        if (newsResp && newsResp.events) {
-          setNewsData({
-            type: 'news',
-            active_count: newsResp.count || newsResp.events.length,
-            events: newsResp.events,
-            worst_sentiment: newsResp.events.length > 0
-              ? Math.min(...newsResp.events.map(e => e.sentiment_score))
-              : null,
-            best_sentiment: newsResp.events.length > 0
-              ? Math.max(...newsResp.events.map(e => e.sentiment_score))
-              : null,
-          });
-        }
-      } catch (_) { /* news polling opsiyonel */ }
 
       // ── Cache güncelle — sonraki mount'larda anında gösterilir ──
       _dashCache = {
@@ -382,9 +358,6 @@ export default function Dashboard() {
           if (msg.type === 'hybrid') {
             const tickets = new Set((msg.positions || []).map((hp) => hp.ticket));
             setHybridTickets(tickets);
-          }
-          if (msg.type === 'news') {
-            setNewsData(msg);
           }
           if (msg.type === 'trade_closed' || msg.type === 'position_closed') {
             fetchTradeData();
@@ -918,14 +891,6 @@ export default function Dashboard() {
           )}
         </div>
       </div>
-            </SortableCard>
-          );
-
-        /* ═══ HABER PANELİ (v5.7.1) ══════════════════════════════════ */
-        case 'news':
-          return (
-            <SortableCard key="news" id="news" label={CARD_LABELS.news} className="dash-full-item">
-              <NewsPanel newsData={newsData} />
             </SortableCard>
           );
 

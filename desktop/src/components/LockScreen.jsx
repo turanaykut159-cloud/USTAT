@@ -27,8 +27,8 @@ import {
 // A5/H1: Versiyon tek kaynak engine/__init__.py::VERSION, /api/status uzerinden okunur.
 import { getStatus } from '../services/api';
 
-// A5/H1: Fallback versiyon — backend erisilemezse dahi LockScreen "V6.0" gosterir.
-const VERSION_FALLBACK = '6.0.0';
+// A5/H1: Fallback versiyon — backend erisilemezse dahi LockScreen "V6.1" gosterir.
+const VERSION_FALLBACK = '6.1.0';
 
 // ── Polling sabitleri ────────────────────────────────────────────
 const POLL_INTERVAL = 3000;   // 3 saniyede bir kontrol

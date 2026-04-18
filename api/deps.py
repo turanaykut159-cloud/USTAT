@@ -91,11 +91,6 @@ def get_uptime() -> int:
     return int(time.time() - _start_time)
 
 
-def get_news_bridge():
-    """NewsBridge (haber köprüsü) instance'ına eriş."""
-    return _engine.news_bridge if _engine and hasattr(_engine, 'news_bridge') else None
-
-
 def get_mt5_journal():
     """MT5Journal instance'ına eriş."""
     return _engine.mt5_journal if _engine and hasattr(_engine, 'mt5_journal') else None

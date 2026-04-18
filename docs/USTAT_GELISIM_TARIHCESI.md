@@ -55,7 +55,17 @@
 
 ---
 
-## [Unreleased] - 2026-04-14
+## [6.1.0] — 2026-04-18
+
+### Removed
+- #237 — Haber entegrasyonu komple kaldırıldı. Neden: US Fed Sanayi Üretimi (Yıllık) verisi üzerinde CRITICAL yanlış-pozitif tetiği #8050585554 F_KONTR SHORT pozisyonunu zorla kapattı (kârlı bitti ama yön-körü davranış ortaya çıktı). Kaldırılan: `engine/news_bridge.py` (1551 satır), `api/routes/news.py` (193 satır), `desktop/src/components/NewsPanel.jsx+css` (~260 satır), `tests/test_news_100_combinations.py`. Temizlenen entegrasyon noktaları: BABA `_check_olay` + `_check_early_warnings` (baba.py satır 420, 422-425, 984-992, 1027-1039); main.py NewsBridge+PreMarketBriefing init (175-187) ve cycle (823-847); OĞUL signal_engine J kaynağı stub'a çevrildi (skorlama boyutu 10 korundu); api/server.py router+import, api/schemas.py 4 News* modeli + LiveNews, api/deps.py get_news_bridge, api/routes/live.py WebSocket haber yayını; Dashboard.jsx newsData state + WS dinleyici + REST polling + CARD_LABELS + render case; services/api.js 2 fonksiyon; RiskManagement.jsx news_alert label; config/default.json "news" bloğu (17 anahtar). OLAY rejimi dokunulmadı — USDTRY şok + expiry tetikleyicileri korundu. 13 entegrasyon noktası, 7 dosya silme, 11 dosya edit.
+
+### Changed
+- #238 — Versiyon v6.0.0 → v6.1.0: engine/__init__.py (VERSION), config/default.json (version), desktop/package.json (version+description+productName), api/server.py (API_VERSION + title + root endpoint), desktop/main.js (APP_TITLE + splash HTML), desktop/src/components/LockScreen.jsx (VERSION_FALLBACK), desktop/src/components/Settings.jsx (VERSION_FALLBACK + BUILD_DATE).
+
+---
+
+## [Unreleased-6.0.x] - 2026-04-14
 
 ### Added
 - feat(broker-sl-sync): #235 — Proaktif broker SL sync koruma katmanı (M-2026-04-14-broker-sl-sync). `HEngine.run_cycle` artık her `trailing_active=True` hibrit pozisyon için 60 sn'de bir `_verify_trailing_sync` çağırıyor (önceden sadece LOCK durumunda tetikleniyordu). MT5 trailing emri ile bellek SL arasında sessiz desync tespit edildiğinde (ör. broker reject sonrası yeniden konamamış emir): (a) `hp.sl_sync_warning=True` set edilir, (b) DB'ye `SL_DESYNC` audit eventi yazılır (mt5_price/memory_sl/delta detayı ile), (c) cancel+replace ile broker SL hizalanır. Frontend `PrimnetDetail` footer'ında "BROKER SYNC ✓" / "BROKER DESYNC ⚠" rozeti eklendi (tooltip son sync timestamp'i gösterir). Yeni alanlar: `HybridPosition.sl_sync_warning`, `last_sl_check_at`; `HybridPositionItem` schema'ya pass-through. 5 dosya (engine/h_engine.py, api/schemas.py, api/routes/hybrid_trade.py, desktop/src/components/PrimnetDetail.jsx, tests/critical_flows/test_static_contracts.py [yeni statik kontrat]).

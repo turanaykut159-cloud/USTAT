@@ -1202,53 +1202,19 @@ def _source_adaptive_momentum(
 
 
 # ═════════════════════════════════════════════════════════════════════
-#  J) HABER BAZLI SİNYAL (v5.7.1)
+#  J) HABER BAZLI SİNYAL — v6.1'de KALDIRILDI (nötr stub)
 # ═════════════════════════════════════════════════════════════════════
 
 def _source_news_event(
     symbol: str = "",
     news_bridge=None,
 ) -> SourceResult:
-    """Haber bazlı sinyal kaynağı — NewsBridge entegrasyonu.
+    """Stub — haber entegrasyonu v6.1'de tamamen kaldırıldı.
 
-    NewsBridge'den sembol için aktif haber sinyali alır.
-    Pozitif sentiment → BUY, Negatif → SELL.
-    Alpha decay otomatik uygulanır.
-
-    Args:
-        symbol: VİOP kontrat kodu.
-        news_bridge: NewsBridge instance.
-
-    Returns:
-        SourceResult: name="news_event", score=0-20, direction, confidence
+    Skorlama boyutu (10 kaynak) korunur; J kaynağı her zaman NEUTRAL döner.
+    Böylece min_agree eşikleri ve skorlama mantığı değişmeden kalır.
     """
-    if not symbol or news_bridge is None:
-        return SourceResult("news_event", 0.0, "NEUTRAL", 0.0, {"reason": "no_bridge"})
-
-    try:
-        signal = news_bridge.get_signal_for_symbol(symbol)
-
-        if signal.score < 2.0:
-            return SourceResult("news_event", 0.0, "NEUTRAL", 0.0, {"reason": "no_signal"})
-
-        details = {
-            "headline": signal.source_event.headline[:60] if signal.source_event else "",
-            "sentiment": signal.source_event.sentiment_score if signal.source_event else 0,
-            "age_seconds": signal.source_event.age_seconds if signal.source_event else 0,
-            "category": signal.source_event.category if signal.source_event else "",
-            "decay_applied": signal.decay_applied,
-        }
-
-        return SourceResult(
-            name="news_event",
-            score=signal.score,
-            direction=signal.direction,
-            confidence=signal.confidence,
-            details=details,
-        )
-
-    except Exception as e:
-        return SourceResult("news_event", 0.0, "NEUTRAL", 0.0, {"error": str(e)})
+    return SourceResult("news_event", 0.0, "NEUTRAL", 0.0, {"reason": "removed_v6.1"})
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -1266,14 +1232,14 @@ def generate_signal(
     symbol: str = "",
     news_bridge=None,
 ) -> SignalVerdict:
-    """Ana sinyal üretim motoru — 10 bağımsız kaynaktan karar (SE3 + News).
+    """Ana sinyal üretim motoru — 10 bağımsız kaynaktan karar (SE3).
 
     Args:
         open_, high, low, close, volume: M15 OHLCV verileri.
         current_price: Güncel tick fiyatı (0 ise close[-1] kullanılır).
         regime_type: BABA rejim tipi ("TREND", "RANGE", "VOLATILE", "OLAY").
-        symbol: VİOP kontrat kodu (v5.7.1 haber entegrasyonu için).
-        news_bridge: NewsBridge instance (v5.7.1 haber entegrasyonu için).
+        symbol: VİOP kontrat kodu.
+        news_bridge: Deprecated — v6.1'de kaldırıldı, parametre backward-compat için tutuluyor, None olmalı.
 
     Returns:
         SignalVerdict nesnesi.
@@ -1368,7 +1334,7 @@ def generate_signal(
     src_i = _source_adaptive_momentum(close, high, low, atr_val)
     sources.append(src_i)
 
-    # J) Haber Bazlı Sinyal (v5.7.1 — NewsBridge entegrasyonu)
+    # J) Haber Bazlı Sinyal — v6.1'de kaldırıldı, stub nötr döner (skorlama boyutu korunur)
     src_j = _source_news_event(symbol, news_bridge)
     sources.append(src_j)
 

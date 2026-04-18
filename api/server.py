@@ -1,4 +1,4 @@
-"""ÜSTAT Plus V6.0 API — FastAPI Sunucu.
+"""ÜSTAT Plus V6.1 API — FastAPI Sunucu.
 
 Desktop uygulamasına REST API + WebSocket köprüsü sağlar.
 
@@ -46,7 +46,6 @@ from api.routes import (
     mt5_journal,
     mt5_verify,
     nabiz,
-    news,
     notifications,
     ogul_activity,
     ogul_toggle,
@@ -63,7 +62,7 @@ from api.routes import (
 logger = logging.getLogger("ustat.api")
 
 # Tek kaynak: OpenAPI ve root endpoint aynı versiyonu kullanır
-API_VERSION = "6.0.0"
+API_VERSION = "6.1.0"
 
 
 # ── Lifespan: Engine başlat / durdur ─────────────────────────────
@@ -189,7 +188,7 @@ async def lifespan(app: FastAPI):
 # ── FastAPI Uygulama ──────────────────────────────────────────────
 
 app = FastAPI(
-    title="ÜSTAT Plus V6.0 API",
+    title="ÜSTAT Plus V6.1 API",
     version=API_VERSION,
     description="VİOP Algorithmic Trading — REST & WebSocket API",
     lifespan=lifespan,
@@ -233,7 +232,6 @@ app.include_router(live.router, tags=["websocket"])
 app.include_router(settings.router, prefix="/api", tags=["settings"])
 app.include_router(mt5_verify.router, prefix="/api", tags=["mt5"])
 app.include_router(error_dashboard.router, prefix="/api", tags=["errors"])
-app.include_router(news.router, prefix="/api", tags=["news"])
 app.include_router(mt5_journal.router, prefix="/api", tags=["mt5-journal"])
 app.include_router(nabiz.router, prefix="/api", tags=["nabiz"])
 
@@ -267,7 +265,7 @@ else:
     async def root():
         """API kök endpoint (dist/ yoksa fallback)."""
         return {
-            "name": "ÜSTAT Plus V6.0 API",
+            "name": "ÜSTAT Plus V6.1 API",
             "version": API_VERSION,
             "docs": "/docs",
         }

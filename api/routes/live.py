@@ -354,24 +354,6 @@ async def _send_all_updates(ws: WebSocket):
             "daily_limit": h_engine._config_daily_limit,
         })
 
-    # ── 6. Haber güncellemesi (v5.7.1 — NewsBridge) ─────────────
-    engine = get_engine()
-    if engine and hasattr(engine, 'news_bridge') and engine.news_bridge.enabled:
-        nb = engine.news_bridge
-        active_events = nb.get_active_events()
-        worst = nb.get_worst_event()
-        best = nb.get_best_event()
-        messages.append({
-            "type": "news",
-            "active_count": len(active_events),
-            "worst_sentiment": round(worst.sentiment_score, 3) if worst else None,
-            "worst_severity": worst.severity if worst else None,
-            "worst_headline": worst.headline[:80] if worst else None,
-            "best_sentiment": round(best.sentiment_score, 3) if best else None,
-            "best_headline": best.headline[:80] if best else None,
-            "events": [e.to_dict() for e in active_events[:10]],  # Max 10 haber
-        })
-
     # ── Hepsini tek JSON olarak gönder ────────────────────────────
     if messages:
         payload = json.dumps(messages, default=str)

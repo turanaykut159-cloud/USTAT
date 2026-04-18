@@ -69,7 +69,6 @@ const KS_REASON_MAP = {
   hard_drawdown: 'Hard drawdown (%15) tetiklendi',
   floating_loss: 'Floating kayıp limiti aşıldı',
   manual: 'Manuel olarak etkinleştirildi',
-  news_alert: 'Olumsuz haber algılandı',
   margin_call: 'Marjin yetersiz',
   restored_from_db: 'Veritabanından geri yüklendi (önceki oturumdan)',
   daily_loss_3pct: 'Günlük -%3 kayıp tetiklendi',
