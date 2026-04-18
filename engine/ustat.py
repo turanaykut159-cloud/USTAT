@@ -2097,15 +2097,29 @@ class Ustat:
         params["strategy_bonus"] = 10  # Eski bonus (geriye uyumluluk)
 
         # ── Strateji win-rate bilgisi (Aşama 2: ağırlıklı tercih) ──
-        # trade_categories'den her stratejinin win-rate'ini çıkar
+        # S2-A fix (#244, OP-E): trade_categories yapısı:
+        #   { "categories": [entry...], "summary": {"by_strategy": {name:count}}, ... }
+        # Eski kod "strategy_dist" key'ini arıyordu — yok. Ayrıca `strat_data`
+        # dict bekliyordu (win_rate ile) ama by_strategy sadece int count döndürür.
+        # Doğru yaklaşım: `categories` listesinden strateji başına kazanan/kaybeden
+        # trade'leri say, win-rate hesapla.
         strategy_win_rates: dict[str, float] = {}
         strategy_trade_counts: dict[str, int] = {}
         if self.trade_categories:
-            strat_dist = self.trade_categories.get("strategy_dist", {})
-            for strat_name, strat_data in strat_dist.items():
-                if isinstance(strat_data, dict):
-                    strategy_win_rates[strat_name] = strat_data.get("win_rate", 50.0)
-                    strategy_trade_counts[strat_name] = strat_data.get("count", 0)
+            categorized = self.trade_categories.get("categories", [])
+            strat_totals: dict[str, int] = {}
+            strat_wins: dict[str, int] = {}
+            for entry in categorized:
+                strat = entry.get("strategy", "diğer") or "diğer"
+                pnl = entry.get("pnl", 0.0) or 0.0
+                strat_totals[strat] = strat_totals.get(strat, 0) + 1
+                if pnl > 0:
+                    strat_wins[strat] = strat_wins.get(strat, 0) + 1
+            for strat, total in strat_totals.items():
+                wins = strat_wins.get(strat, 0)
+                wr = (wins / total * 100.0) if total > 0 else 50.0
+                strategy_win_rates[strat] = wr
+                strategy_trade_counts[strat] = total
         params["strategy_win_rates"] = strategy_win_rates
         params["strategy_trade_counts"] = strategy_trade_counts
         return params

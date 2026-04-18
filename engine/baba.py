@@ -367,6 +367,7 @@ class Baba:
             "cooldown_until": None,
             "last_cooldown_end": None,
             "daily_reset_equity": None,     # Fix: günlük sıfırlama anındaki equity
+            "ustat_floating_tightened": False,  # S2-D fix (#244, OP-E): ÜSTAT RISK_MISS feedback tightening persist
         }
 
         # ── Risk state geri yükleme (restart dayanıklılığı) ─────────
@@ -2256,20 +2257,23 @@ class Baba:
             )
 
         # Aksiyon 2: Toplam 5+ miss → floating_loss eşiğini geçici sıkılaştır
+        # S2-D fix (#244, OP-E): bayrak artık _risk_state'e persist ediliyor
+        # (önceden setattr(self, ...) ile instance'a yazılıyordu → restart sonrası
+        # kaybolup tightening yeniden tetiklenebiliyordu; idempotency kaybı).
         if len(recent_misses) >= 5:
-            feedback_key = "_ustat_floating_tightened"
-            if not getattr(self, feedback_key, False):
+            if not self._risk_state.get("ustat_floating_tightened", False):
                 rp = getattr(self, "_risk_params_ref", None)
                 if rp is not None:
                     old_val = rp.max_floating_loss
                     new_val = round(max(0.008, old_val * 0.90), 4)
                     if new_val != old_val:
                         rp.max_floating_loss = new_val
-                        setattr(self, feedback_key, True)
+                        self._risk_state["ustat_floating_tightened"] = True
+                        self._persist_risk_state()
                         logger.warning(
                             f"[BABA] ÜSTAT aksiyonu: floating_loss eşiği sıkılaştırıldı "
                             f"%{old_val*100:.1f} → %{new_val*100:.1f} "
-                            f"({len(recent_misses)} miss/24h)"
+                            f"({len(recent_misses)} miss/24h) [persist edildi]"
                         )
 
     # ═════════════════════════════════════════════════════════════════
