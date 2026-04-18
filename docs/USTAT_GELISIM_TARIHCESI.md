@@ -57,6 +57,9 @@
 
 ## [6.1.0] — 2026-04-18
 
+### Security
+- #245 — OP-Q NULL-tail prevention: `.githooks/pre-commit` dosyasına [6/7] "NULL byte taramasi" bloğu eklendi. Staged blob'larda NULL byte tespit edilirse commit REDDEDILIR, temizlik aracı önerilir (`python .agent/null_tail_cleanup.py`). Binary dosyalar (`*.db, *.pyc, *.png, *.ico, *.xlsx, *.pdf, *.zip, *.tar, *.gz`) istisna listesi. Kök: 18 Nis 2026 sistemik NULL-tail FS bozulmasının (12 dosya, 10.492 byte garbage) tekrarını engelleme. Commit-time prevention; engine boot autorepair ayrı iş (hafta içi). 1 dosya (.githooks/pre-commit). `bash -n` syntax OK. Pre-commit checklist 6 → 7 blok.
+
 ### Fixed
 - #244 — OP-E ÜSTAT-BABA persist bug'ları (S2-A + S2-D). **(a)** `engine/ustat.py::_get_strategy_parameters` (~satır 2099-2125): `trade_categories.get("strategy_dist")` olmayan key'i arıyordu → `strategy_win_rates` ve `strategy_trade_counts` her zaman boş dönüyordu → ÜSTAT strateji yönlendirmesi win-rate kör kullanıyordu. Fix: `trade_categories["categories"]` listesinden strateji başına kazanan/kaybeden sayısı hesaplanıyor, gerçek win_rate dolduruluyor. **(b)** `engine/baba.py::_receive_ustat` feedback Aksiyon 2 (~satır 2258-2273): `_ustat_floating_tightened` bayrağı `setattr(self, ...)` ile instance'a yazılıyordu → restart sonrası kaybolup tightening yeniden tetiklenebilirdi (idempotency kaybı). Fix: `_risk_state` dict'ine taşındı + `_persist_risk_state()` çağrısı. Artık restart-dayanıklı, bir kez tightening garantisi. 2 dosya, C3 (Kırmızı Bölge × 2, atomik commit).
 

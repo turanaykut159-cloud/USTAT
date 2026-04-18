@@ -9,6 +9,7 @@
 #   4. Governance testleri (tests/governance)
 #   5. Korunan varlik (sicil) etki analizi + onay ifadesi kontrolu
 #   6. C3 cift dogrulama (24 saat soguma + sha eslemesi)
+#   7. NULL-byte taramasi (#245 OP-Q — 18 Nis sistemik NULL-tail bozulmasi sonrasi koruma)
 #
 # Atlamak icin: git commit --no-verify
 #   (Bu i3 seviyesi ihlaldir; docs/anayasa_degisiklikleri/ihlaller.md icinde kayda gecmelidir)
@@ -26,7 +27,7 @@ NC='\033[0m'
 echo -e "${YELLOW}USTAT Plus V6.0 pre-commit kontrol baslatiliyor...${NC}"
 
 # ── 1. AST kontrolu ──────────────────────────────────────────────
-echo -e "\n[1/6] AST dogrulama"
+echo -e "\n[1/7] AST dogrulama"
 STAGED_PY=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.py$' || true)
 if [ -n "$STAGED_PY" ]; then
   for f in $STAGED_PY; do
@@ -39,7 +40,7 @@ else
 fi
 
 # ── 2. Anayasa dogrulama (manifest-kod senkron) ──────────────────
-echo -e "\n[2/6] Anayasa dogrulama (tools/check_constitution.py)"
+echo -e "\n[2/7] Anayasa dogrulama (tools/check_constitution.py)"
 if [ -f "tools/check_constitution.py" ]; then
   python tools/check_constitution.py --quiet
   CODE=$?
@@ -57,7 +58,7 @@ else
 fi
 
 # ── 3. Kritik akis testleri ──────────────────────────────────────
-echo -e "\n[3/6] Kritik akis testleri"
+echo -e "\n[3/7] Kritik akis testleri"
 if [ -d "tests/critical_flows" ]; then
   python -m pytest tests/critical_flows -q --tb=short \
     || { echo -e "${RED}HATA: Kritik akis testleri patladi.${NC}"; exit 2; }
@@ -66,7 +67,7 @@ else
 fi
 
 # ── 4. Governance testleri ───────────────────────────────────────
-echo -e "\n[4/6] Governance testleri"
+echo -e "\n[4/7] Governance testleri"
 if [ -d "tests/governance" ]; then
   python -m pytest tests/governance -q --tb=short \
     || { echo -e "${RED}HATA: Governance testleri patladi.${NC}"; exit 2; }
@@ -75,7 +76,7 @@ else
 fi
 
 # ── 5. Korunan varlik dokunusu ve onay ifadesi ───────────────────
-echo -e "\n[5/6] Korunan varlik etki analizi"
+echo -e "\n[5/7] Korunan varlik etki analizi"
 RED_ZONE="engine/baba.py engine/ogul.py engine/mt5_bridge.py engine/main.py engine/ustat.py engine/database.py engine/data_pipeline.py config/default.json start_ustat.py api/server.py USTAT_ANAYASA.md governance/protected_assets.yaml"
 STAGED_ALL=$(git diff --cached --name-only --diff-filter=ACM)
 TOUCHED=""
@@ -139,8 +140,43 @@ else
   echo "  (korunan varlik dokunusu yok)"
 fi
 
-# ── 6. Ozet ──────────────────────────────────────────────────────
-echo -e "\n[6/6] Ozet"
+# ── 6. NULL byte taramasi (#245 OP-Q) ─────────────────────────────
+# 18 Nis 2026 sistemik NULL-tail FS bozulmasi (12 dosya) sonrasi koruma.
+# Staged blob'larda NULL byte varsa commit REDDEDILIR. Temizlik araci:
+#   python .agent/null_tail_cleanup.py
+echo -e "\n[6/7] NULL byte taramasi"
+STAGED_FILES_NB=$(git diff --cached --name-only --diff-filter=ACM)
+NULL_COUNT_TOTAL=0
+NULL_FILES=""
+for f in $STAGED_FILES_NB; do
+  # Binary dosyalari atla (*.db, *.pyc, *.png, etc.)
+  case "$f" in
+    *.db|*.pyc|*.png|*.jpg|*.jpeg|*.gif|*.ico|*.xlsx|*.pdf|*.zip|*.tar|*.gz)
+      continue ;;
+  esac
+  # Staged blob'da null var mi?
+  NC_COUNT=$(git show ":$f" 2>/dev/null | python -c "import sys; sys.stdout.write(str(sys.stdin.buffer.read().count(b'\\x00')))" 2>/dev/null || echo 0)
+  if [ "$NC_COUNT" != "0" ] && [ -n "$NC_COUNT" ]; then
+    NULL_FILES="$NULL_FILES\n  $f ($NC_COUNT NULL byte)"
+    NULL_COUNT_TOTAL=$((NULL_COUNT_TOTAL + NC_COUNT))
+  fi
+done
+
+if [ "$NULL_COUNT_TOTAL" -gt 0 ]; then
+  echo -e "${RED}HATA: Staged dosyalarda NULL byte tespit edildi (toplam $NULL_COUNT_TOTAL byte):${NC}"
+  echo -e "${RED}$NULL_FILES${NC}"
+  echo -e "${RED}Kok neden: 18 Nis 2026 sistemik NULL-tail FS bozulmasi benzeri.${NC}"
+  echo -e "${YELLOW}Temizlik icin:${NC}"
+  echo -e "  python .agent/null_tail_cleanup.py --dry-run  # Once goruntule"
+  echo -e "  python .agent/null_tail_cleanup.py            # Uygula"
+  echo -e "  git add <temizlenen_dosya>                    # Yeniden stage"
+  echo -e "${YELLOW}Atlamak icin (NOT ONERILEN): git commit --no-verify${NC}"
+  exit 2
+fi
+echo "  OK ($(echo $STAGED_FILES_NB | wc -w) dosya taraldi, 0 NULL byte)"
+
+# ── 8. Ozet ──────────────────────────────────────────────────────
+echo -e "\n[7/7] Ozet"
 echo -e "${GREEN}Pre-commit kontrol BASARILI.${NC}"
 echo "  (ihlal tespit edilirse: docs/anayasa_degisiklikleri/ihlaller.md kayda gecir)"
 exit 0
