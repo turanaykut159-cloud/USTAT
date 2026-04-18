@@ -12,10 +12,18 @@ last_updated: "2026-04-14"
 
 axioms:
   - id: AX-1
-    name: "Cagri Sirasi"
-    statement: "Ana dongu sirasi BABA -> OGUL -> H-Engine -> USTAT. Degistirilmez."
-    rationale: "Risk kontrolu her zaman sinyal uretiminden once calismak zorunda."
-    enforced_in: "engine/main.py::_run_single_cycle"
+    name: "Cagri Sirasi (ana dongu + istisnalar)"
+    statement: |
+      Ana dongu 4 motor SABIT sirasi: BABA -> OGUL -> H-Engine -> USTAT.
+      Bu sira DEGISTIRILEMEZ (risk kontrolu sinyal uretiminden once).
+      ISTISNA: ManuelMotor 5. motordur, ancak ON-DEMAND calisir (kullanici UI
+      veya API endpoint tetigi ile) ve ana donguye girmez. ManuelMotor
+      check_risk_limits kapisini BABA'dan gecmek zorundadir (AX-2) ve
+      acilan pozisyonlar EOD istisnasina tabidir (AX-5).
+    rationale: "Otomatik dongu sirasi atlanamaz; manuel motor ayri akisli ancak BABA kapisi altinda."
+    enforced_in:
+      - "engine/main.py::_run_single_cycle"
+      - "engine/manuel_motor.py::open_manual_trade"
     violation_response: "HALT + auditor"
 
   - id: AX-2
@@ -51,11 +59,21 @@ axioms:
     violation_response: "LOG + baba.report_unprotected_position + UI kritik alert"
 
   - id: AX-5
-    name: "EOD Zorunlu Kapanis"
-    statement: "17:45'te tum pozisyonlar kapatilir. 17:50'de hayalet pozisyon kontrolu yapilir."
-    rationale: "Overnight risk yasak."
-    enforced_in: "engine/ogul.py::_check_end_of_day"
-    violation_response: "HALT + auditor + kritik bildirim"
+    name: "EOD Zorunlu Kapanis (otomatik + istisnalar)"
+    statement: |
+      17:45'te OGUL otomatik pozisyonlari ve Hibrit pozisyonlar (non-overnight)
+      kapatilir. 17:50'de hayalet pozisyon kontrolu yapilir.
+      ISTISNALAR (kullanici bilinci + sistem kaydi):
+      (a) Manuel pozisyonlar: operator kararinda kalir, bildirim + DB kaydi.
+      (b) Hibrit overnight: kullanici H-Engine tarafinda explicit "yarina birak"
+          secerse kapanmaz; aksi halde OGUL ile ayni saatli kapanir.
+      (c) Orphan pozisyonlar: BABA raporlanir, manuel mudahale beklenir.
+    rationale: "Overnight risk varsayilan olarak yasak; istisna operator bilinci ve sistem kaydi ile."
+    enforced_in:
+      - "engine/ogul.py::_check_end_of_day"
+      - "engine/ogul.py::_verify_eod_closure"
+      - "engine/h_engine.py::run_cycle"
+    violation_response: "LOG + DB notification + UI warning + baba.report"
 
   - id: AX-6
     name: "Hard Drawdown L3 Esigi"

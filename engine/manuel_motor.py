@@ -530,6 +530,9 @@ class ManuelMotor:
         trade.sent_at = now
 
         # 7. DB kayıt
+        # #250 OP-J: initial_volume alanı manuel trade için de set edilir.
+        # mt5_sync partial close tespiti için (eski lot != yeni lot farkı).
+        trade.initial_volume = lot
         db_id = self.db.insert_trade({
             "strategy": "manual",
             "symbol": symbol,
@@ -537,6 +540,7 @@ class ManuelMotor:
             "entry_time": now.isoformat(),
             "entry_price": price,
             "lot": lot,
+            "initial_volume": lot,
             "regime": regime_str,
             "source": "app",
         })
@@ -1062,6 +1066,7 @@ class ManuelMotor:
             # DB'ye kayıt oluştur
             from datetime import datetime as _dt
             now = _dt.now()
+            # #250 OP-J: initial_volume mt5_direct adopt için de set (partial close taban)
             db_id = self.db.insert_trade({
                 "strategy": "manual",
                 "symbol": symbol,
@@ -1069,6 +1074,7 @@ class ManuelMotor:
                 "entry_time": now.isoformat(),
                 "entry_price": entry_price,
                 "lot": volume,
+                "initial_volume": volume,
                 "regime": "",
                 "mt5_position_id": ticket,
                 "source": "mt5_direct",

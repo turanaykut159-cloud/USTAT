@@ -545,6 +545,22 @@ class Baba:
             else:
                 logger.info("[BABA] Risk state geri yüklendi (değişiklik yok)")
 
+            # #248 OP-E güçlendirme: ustat_floating_tightened True ise eşiği de restore et.
+            # Önceki OP-E (f68c011) sadece bayrağı persist ediyordu ama rp.max_floating_loss
+            # config'den her boot'ta orijinal değerine dönüyordu → tightening kaybolmuş oluyordu.
+            # Şimdi bayrak True ise eşik de boot sonrası 0.90 ile sıkılaştırılır (idempotent).
+            if self._risk_state.get("ustat_floating_tightened"):
+                rp = getattr(self, "_risk_params_ref", None)
+                if rp is not None:
+                    old_val = rp.max_floating_loss
+                    new_val = round(max(0.008, old_val * 0.90), 4)
+                    if new_val != old_val:
+                        rp.max_floating_loss = new_val
+                        logger.warning(
+                            f"[BABA] ÜSTAT tightening restore: floating_loss eşiği "
+                            f"%{old_val*100:.1f} → %{new_val*100:.1f} (restart idempotency)"
+                        )
+
         except Exception as exc:
             logger.warning(
                 f"[BABA] Risk state geri yükleme hatası: {exc} — varsayılan kullanılacak"

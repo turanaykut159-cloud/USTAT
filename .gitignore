@@ -71,6 +71,15 @@ desktop/release/
 *.old
 *.orig
 
+# FS bozulma yedekleri (#239-#246, 18 Nis 2026 NULL-tail)
+*.corrupt-*
+archive/corrupt_files_*/
+
+# Tool/operation artifacts (impact_report, one-shot fix scripts)
+reports/
+.agent/op_*_fix.py
+.agent/null_tail_cleanup.py
+
 # Root package-lock (desktop'Ä±nki hariÃ§)
 /package-lock.json
 
@@ -135,5 +144,5 @@ screenshots/
 /PRIMNET_TAM_METIN.docx
 /USTAT_Plus_V6_Tam_Sistem_Kitabi.docx
 
-# Runtime PID dosyasý (çalýþma zamaný)
+# Runtime PID dosyasï¿½ (ï¿½alï¿½ï¿½ma zamanï¿½)
 .ustat_pids.json

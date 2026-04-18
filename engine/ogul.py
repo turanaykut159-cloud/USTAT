@@ -1658,6 +1658,30 @@ class Ogul:
         direction = "BUY" if signal.signal_type == SignalType.BUY else "SELL"
         now = datetime.now()
 
+        # ── KARAR #17 tam blok (#249): trend_follow strategy hard-block ─
+        # P-15 bulgusu: 10/10 kayıp (WR %0). Config adx_threshold 9999 ile eski
+        # strategy motoru bypass edildi ama SE3 (signal_engine) hâlâ
+        # strategy_type="trend_follow" tagged sinyaller üretebilir. Bu guard
+        # SE3 dahil TÜM kaynaklardan gelen trend_follow sinyallerini reddeder.
+        # Kaldırma koşulu: 30-gün yeni veriyle WR ≥ 40% kanıtlanır + kullanıcı onayı.
+        strategy_name = getattr(signal.strategy, "value", str(signal.strategy))
+        if strategy_name == "trend_follow":
+            logger.info(
+                f"[TREND_FOLLOW HARD_BLOCK #249] Sinyal reddedildi "
+                f"[{symbol}] {direction} güç={signal.strength:.2f} "
+                f"(P-15 kanıt: 10/10 kayıp, WR %0 — KARAR #17)"
+            )
+            self.db.insert_event(
+                event_type="SIGNAL_REJECT",
+                message=(
+                    f"trend_follow hard-block: {direction} {symbol} "
+                    f"(KARAR #17, #249)"
+                ),
+                severity="INFO",
+                action="strategy_disabled",
+            )
+            return
+
         # ── PAPER TRADING MODU ──────────────────────────────────────
         if self.config.get("engine.paper_mode", False):
             logger.info(
