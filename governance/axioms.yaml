@@ -34,10 +34,23 @@ axioms:
     violation_response: "HALT + auditor"
 
   - id: AX-3
-    name: "Kill-Switch Monotonlugu"
-    statement: "Kill-switch seviyesi sadece yukari gider (L1 -> L2 -> L3). Otomatik dusurme yasak."
-    rationale: "Guvenlik durumunun geri dondurulmesi yalnizca insan karariyla olur."
-    enforced_in: "engine/baba.py::_activate_kill_switch"
+    name: "Kill-Switch Monotonlugu (+ rejim istisnasi)"
+    statement: |
+      Kill-switch seviyesi sadece YUKARI eskale eder (NONE -> L1 -> L2 -> L3).
+      Operator/tetik mekanizmalari ile devreye giren L1/L2/L3 seviyeleri
+      OTOMATIK OLARAK DUSURULEMEZ. Dusurme sadece operator manuel ACK ile
+      gerceklesir (UI Kill-Switch sayfasi -> _user_ack_kill_switch).
+      Gunluk/haftalik/aylik sifirlama yapildiginda sayaclar (consecutive_losses,
+      daily_trade_count, cooldown) sifirlanir ancak kill-switch seviyesi KORUNUR.
+      ISTISNA: OLAY rejimi kaynakli L2 (reason="olay_regime") rejim yasam
+      dongusune baglidir — regime_type OLAY iken otomatik aktif, OLAY kalkinca
+      otomatik clear. Bu rejim-driven state makinesi, operator kill-switch'i
+      degildir; yine de operator manuel olarak da ACK edebilir.
+    rationale: "Guvenlik durumunun geri dondurulmesi yalnizca insan karari veya rejim lifecycle'i ile olur; rutin gunluk sifirlama otomatik dusurme SAYILMAZ."
+    enforced_in:
+      - "engine/baba.py::_activate_kill_switch"
+      - "engine/baba.py::_clear_kill_switch"
+      - "engine/baba.py::_reset_daily"
     violation_response: "HALT + auditor"
 
   - id: AX-4

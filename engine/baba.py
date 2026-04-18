@@ -1387,20 +1387,30 @@ class Baba:
         self._risk_state["daily_manual_trade_count"] = 0   # v14: reset
         self._risk_state["daily_reset_equity"] = None   # önceki günü temizle
 
-        # Günlük kayıp veya üst üste kayıp nedenli L2 varsa kaldır
-        # (yeni gün = temiz başlangıç — eski günün kaybı bugünü bloklamamalı)
-        if (
-            self._kill_switch_level == KILL_SWITCH_L2
-            and self._kill_switch_details.get("reason")
-            in ("daily_loss", "consecutive_loss")
-        ):
-            self._clear_kill_switch("Günlük sıfırlama — L2 kaldırıldı")
-
-        # v5.9.1: Haber kaynaklı L1 kontrat engeli de yeni günde temizlenir
-        # (önceki günün haberi bugünkü ticareti engellemememeli)
-        if self._kill_switch_level == KILL_SWITCH_L1 and self._killed_symbols:
-            self._clear_kill_switch(
-                "Günlük sıfırlama — L1 kontrat engelleri kaldırıldı"
+        # #256 OP-H AX-3 KILL-SWITCH MONOTONLUK KURALI:
+        # Eski davranış daily_reset'te L1+L2'yi otomatik düşürüyordu (AX-3 İHLALİ).
+        # Yeni davranış: sayaçlar (consecutive_losses, daily_trade_count, cooldown)
+        # sıfırlanır ama kill-switch SEVİYESİ aynı kalır. Operator manuel ACK
+        # (UI Kill-Switch sayfası) ile düşürebilir. AX-3 "monotonluk garantili".
+        #
+        # Eğer L1/L2 varsa yeni gün başında operator bilgilendirilir (DB event):
+        if self._kill_switch_level > KILL_SWITCH_NONE:
+            level_name = {KILL_SWITCH_L1: "L1", KILL_SWITCH_L2: "L2"}.get(
+                self._kill_switch_level, f"L{self._kill_switch_level}"
+            )
+            reason = self._kill_switch_details.get("reason", "belirsiz")
+            logger.warning(
+                f"[AX-3 MONOTONLUK] Günlük sıfırlama yapıldı ama kill-switch {level_name} "
+                f"(neden: {reason}) KORUNDU. Operator manuel ACK ile düşürebilir."
+            )
+            self._db.insert_event(
+                event_type="KILL_SWITCH_PERSIST",
+                message=(
+                    f"Yeni gün: kill-switch {level_name} (reason={reason}) aktif kaldı. "
+                    f"AX-3 monotonluk — operator manuel ACK gerekli."
+                ),
+                severity="WARNING",
+                action="ks_persist_daily",
             )
 
         # Yeni gün: üst üste kayıp sayacını ve cooldown'u sıfırla

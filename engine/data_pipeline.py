@@ -883,6 +883,31 @@ class DataPipeline:
             if account.equity > 0:
                 margin_usage = round(account.margin / account.equity * 100, 2)
 
+            # #257 OP-K2: margin_usage sanity check.
+            # %200 üstü leverage gerçekçi değil — broker account disabled veya
+            # equity anomalisi göstergesi. 16 Nis 2026 %4997 bulgusu referans.
+            # CRITICAL event + alert.
+            MARGIN_SANITY_LIMIT = 200.0  # %200 = 2× leverage, üstü anomali
+            if margin_usage > MARGIN_SANITY_LIMIT:
+                logger.critical(
+                    f"[OP-K2 MARGIN ANOMALI] margin_usage=%{margin_usage:.1f} "
+                    f"(limit %{MARGIN_SANITY_LIMIT}) — broker/hesap durumu kontrol edin. "
+                    f"equity={account.equity:.0f} margin={account.margin:.0f}"
+                )
+                try:
+                    self._db.insert_event(
+                        event_type="MARGIN_ANOMALY",
+                        message=(
+                            f"Margin usage anomalisi: %{margin_usage:.1f} "
+                            f"(equity={account.equity:.0f}, margin={account.margin:.0f}). "
+                            f"Broker/hesap durumu kontrol edin."
+                        ),
+                        severity="CRITICAL",
+                        action="margin_anomaly",
+                    )
+                except Exception:
+                    pass
+
             # Rejim bilgisi (son risk_snapshot'tan veya default)
             last_snap = self._db.get_latest_risk_snapshot()
             regime = last_snap.get("regime", "NORMAL") if last_snap else "NORMAL"
@@ -1014,6 +1039,38 @@ class DataPipeline:
             return 0.0
 
         dd = (peak - current_equity) / peak
+
+        # #258 OP-K1: peak_equity sanity check.
+        # 16 Nis 2026 bulgusu: peak 42K stale, equity 27K düştü, DD %35 şişti.
+        # Broker balance değişimi (manuel para çekimi, account reset) peak'ı
+        # otomatik senkronize etmez → yanlış DD alarmı. %30 üstü dd'de peak'ın
+        # balance'tan anormal sapması varsa CRITICAL uyarı.
+        PEAK_ANOMALY_DD = 0.30  # %30 üstü DD
+        PEAK_BALANCE_RATIO = 1.30  # peak balance'ın 1.3 katından fazlaysa anomali
+        if dd >= PEAK_ANOMALY_DD:
+            try:
+                account = getattr(self, "latest_account", None)
+                balance = float(account.balance) if account else 0.0
+                if balance > 0 and stored_peak > balance * PEAK_BALANCE_RATIO:
+                    logger.critical(
+                        f"[OP-K1 PEAK ANOMALİ] DD %{dd*100:.1f}, peak={stored_peak:.0f}, "
+                        f"balance={balance:.0f}. Peak balance'ın %{(stored_peak/balance-1)*100:.0f} "
+                        f"üstünde — balance değişimi (para çekme/reset) peak'a yansımamış olabilir. "
+                        f"Operator kontrol: peak_equity manuel reset gerekli mi?"
+                    )
+                    self._db.insert_event(
+                        event_type="PEAK_EQUITY_ANOMALY",
+                        message=(
+                            f"Peak-balance sapması: peak={stored_peak:.0f}, "
+                            f"balance={balance:.0f} (%{(stored_peak/balance-1)*100:.0f} fazla). "
+                            f"DD %{dd*100:.1f} — manuel peak reset gerekli mi?"
+                        ),
+                        severity="CRITICAL",
+                        action="peak_equity_review",
+                    )
+            except Exception:
+                pass
+
         return round(max(dd, 0.0), 6)
 
     # ═════════════════════════════════════════════════════════════════
