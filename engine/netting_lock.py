@@ -67,8 +67,14 @@ def acquire_symbol(symbol: str, owner: str) -> bool:
                     f"(talep eden: {owner})"
                 )
                 return False
-            # Aynı owner tekrar kilitliyorsa timestamp güncelle (reentrant)
-            _locked_symbols[symbol]["acquired_at"] = _time.monotonic()
+            # Aynı owner reentrant acquire — KILIT GECERLI SAYILIR (True) ama
+            # acquired_at DEĞİŞTİRİLMEZ (YB-400 fix). Aksi halde motor crash/hang olsa bile
+            # periyodik re-acquire çağrıları timestamp'i tazeler → stale timeout hiç tetiklenmez
+            # → infinit lock riski. Şimdi ilk acquire zamanı korunur, 120sn timeout garantidir.
+            logger.debug(
+                f"Netting kilit REENTRANT: {symbol} ← {owner} "
+                f"(acquired_at korunuyor — stale timeout orjinal zamandan ölçülür)"
+            )
             return True
 
         _locked_symbols[symbol] = {
