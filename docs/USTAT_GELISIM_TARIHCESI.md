@@ -57,6 +57,9 @@
 
 ## [6.1.0] — 2026-04-18
 
+### Security
+- #243 — KARAR #17: trend_follow stratejisi kalıcı bloke edildi. `config/default.json::strategies.trend_follow.adx_threshold`: 25.0 → 9999.0. Kanıt: P-15 (18 Nis raporu) 10/10 kayıp (WR %0). Eski strategy motoru `_check_trend_follow` sinyal üretemez hale getirildi. `_disabled_reason` alanı eklendi. UYARI: SE3 (signal_engine.py) hâlâ trend_follow tagged sinyaller üretebilir — tam blok için hafta içi `ogul.py::_execute_signal` guard eklenecek. Config-only, C2. 1 dosya.
+
 ### Fixed
 - #241 — OP-B netting_lock reentrant timestamp koruma (YB-400). `acquire_symbol()` satır 70-78: aynı owner re-acquire ederse `acquired_at` artık DEĞİŞTİRİLMEZ (önceden `_time.monotonic()` ile yenileniyordu). Önceki davranış: motor crash/hang durumda periyodik re-acquire çağrıları timestamp'i tazeler → `LOCK_TIMEOUT_SEC=120sn` stale cleanup hiç tetiklenmez → **infinit lock** riski. Yeni davranış: ilk acquire zamanı korunur, crash durumunda 120sn sonra stale cleanup garanti devreye girer. Unit test: reentrant timestamp değişmezlik + 119sn sonra stale temizlik. 1 dosya (engine/netting_lock.py). Detay: `docs/2026-04-18_session_raporu_sifirdan_ameliyat_paketi.md`.
 - #240 — OP-A config/default.json binary tail kirlilik temizliği. `json.load` "Extra data: line 168 column 1" ile fail ediyordu — dosyanın son 646 byte'ı 2 byte CRLF + 644 NULL byte padding içeriyordu. Kök neden: Windows NTFS atomik-olmayan flush — 18 Nis 15:56 sonrası `config.save()` veya shutdown yazımı esnasında sector allocate edildi ama data flush olmadı. Geçerli JSON (byte 0-3980) byte-byte korundu, SHA256 hash eşleşmesi ile doğrulandı; risk parametreleri + strategies + hybrid/ogul key'leri sağlam. Fix: trailing null rstrip + `\n`. Engine fallback `self._data = {}` davranışı (config.py:42-46) restart sonrası tetiklenecekti — önlendi. Yedek: `config/default.json.corrupt-20260418-*`. 1 dosya (config/default.json).
