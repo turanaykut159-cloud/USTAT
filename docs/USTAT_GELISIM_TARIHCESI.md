@@ -57,6 +57,9 @@
 
 ## [6.1.0] — 2026-04-18
 
+### Fixed
+- #259 — **OP-J tam: manuel partial close handler** (C3, #41). `engine/manuel_motor.py::sync_positions` akışı: ticket MT5'te hâlâ açık ama volume azaldıysa (`0 < mt5_vol < trade.volume`) PARTIAL CLOSE tespit. Yeni `_handle_partial_close(symbol, trade, close_volume, remaining_volume, mt5_pos)` metodu: (a) kapatılan kısım için ayrı DB kaydı (`exit_reason=partial_close_mt5_sync`, `source=partial_sync`, realized pnl hesabı `(exit_price - entry_price) * close_volume * contract_size`), (b) mevcut trade.volume'u kalan lot'a indir + parent DB update, (c) `manual_partial_close` notification event. Trade #279 (17 Nis 316→158 lot) tipi orphan artık oluşmaz — broker partial close otomatik DB'ye yansır. Windows test suite **106/106 PASS**.
+
 ### Security
 - #258 — **OP-K1 peak_equity anomali sanity check** (C3, `data_pipeline._calculate_drawdown`). DD ≥%30 ve stored_peak `balance * 1.30` üzerindeyse **PEAK_EQUITY_ANOMALY** CRITICAL event + log. 16 Nis 2026 bulgusu: peak 42K stale / balance değişimi (manuel çekme veya broker reset) peak'a yansımamıştı → yanlış %35 DD alarmı. Artık operatöre kontrol uyarısı.
 - #257 — **OP-K2 margin_usage anomali sanity** (C3, `data_pipeline.update_risk_snapshot`). margin_usage %200 üstü → `MARGIN_ANOMALY` CRITICAL event. 16 Nis %4997 bulgusu (broker account disabled). Artık runtime uyarı.

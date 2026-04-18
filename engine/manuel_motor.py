@@ -661,6 +661,22 @@ class ManuelMotor:
                         f"ticket={trade.ticket}"
                     )
                     self._handle_closed_trade(symbol, trade, "external_close")
+                elif trade.ticket and trade.ticket in open_tickets:
+                    # #259 OP-J tam: Ticket hâlâ açık, PARTIAL CLOSE kontrol.
+                    # Trade #279 (17 Nis) olayi: 316 lot -> 158 lot, engine full-close
+                    # yazdi DB'ye, MT5'te 158 lot orphan kaldi. Artik volume delta
+                    # tespit edilirse ayri partial close kaydi olusturulur.
+                    pos = next(
+                        (p for p in positions if p.get("ticket") == trade.ticket),
+                        None,
+                    )
+                    if pos is not None:
+                        mt5_vol = float(pos.get("volume", 0.0) or 0.0)
+                        if trade.volume > 0 and 0 < mt5_vol < trade.volume - 1e-9:
+                            delta = trade.volume - mt5_vol
+                            self._handle_partial_close(
+                                symbol, trade, delta, mt5_vol, pos,
+                            )
                 elif not trade.ticket and symbol not in open_symbols:
                     # Ticket atanmamış eski kayıt — sembol bazlı fallback
                     logger.info(
@@ -668,6 +684,100 @@ class ManuelMotor:
                         f"ticket yok, sembol bazlı tespit"
                     )
                     self._handle_closed_trade(symbol, trade, "external_close")
+
+    def _handle_partial_close(
+        self,
+        symbol: str,
+        trade: "Trade",
+        close_volume: float,
+        remaining_volume: float,
+        mt5_pos: dict,
+    ) -> None:
+        """Manuel partial close tespit edildiğinde (#259 OP-J tam):
+
+        MT5'te ticket hâlâ açık ama volume azaldı (kullanıcı partial close yapmış).
+        Strateji:
+          1. close_volume kadar ayrı DB kaydı oluştur (exit_time + exit_price + pnl)
+          2. Mevcut trade.volume'u remaining_volume'e indir (DB update)
+          3. Active_trades'te trade korunur (kalan kısım izlenir)
+
+        Args:
+            symbol: Kontrat.
+            trade: Mevcut Trade nesnesi.
+            close_volume: Kapatılan lot miktarı (delta).
+            remaining_volume: MT5'te kalan lot.
+            mt5_pos: MT5 pozisyon dict'i (current price için).
+        """
+        now = datetime.now()
+        current_price = mt5_pos.get("price_current", trade.entry_price)
+        # PnL (partial kısım için)
+        contract_size = CONTRACT_SIZE
+        try:
+            sym_info = self.mt5.get_symbol_info(symbol)
+            if sym_info and hasattr(sym_info, "trade_contract_size"):
+                contract_size = sym_info.trade_contract_size
+        except Exception:
+            pass
+
+        if trade.direction == "BUY":
+            partial_pnl = (current_price - trade.entry_price) * close_volume * contract_size
+        else:
+            partial_pnl = (trade.entry_price - current_price) * close_volume * contract_size
+
+        logger.critical(
+            f"[OP-J PARTIAL CLOSE] {symbol} ticket={trade.ticket} "
+            f"{trade.volume} -> {remaining_volume} lot "
+            f"(delta={close_volume:.2f}, pnl≈{partial_pnl:.2f})"
+        )
+
+        # 1. Partial close için ayrı DB kaydı (yeni satır)
+        try:
+            partial_id = self.db.insert_trade({
+                "strategy": "manual",
+                "symbol": symbol,
+                "direction": trade.direction,
+                "entry_time": trade.opened_at.isoformat() if trade.opened_at else now.isoformat(),
+                "exit_time": now.isoformat(),
+                "entry_price": trade.entry_price,
+                "exit_price": current_price,
+                "lot": close_volume,
+                "initial_volume": close_volume,
+                "pnl": round(partial_pnl, 2),
+                "regime": "",
+                "mt5_position_id": trade.ticket,
+                "exit_reason": "partial_close_mt5_sync",
+                "source": "partial_sync",
+            })
+            logger.info(
+                f"[OP-J] Partial close DB kaydı oluşturuldu: id={partial_id} "
+                f"{symbol} {close_volume} lot @ {current_price:.4f}"
+            )
+        except Exception as exc:
+            logger.error(f"Partial close DB insert hatası [{symbol}]: {exc}")
+
+        # 2. Mevcut trade.volume güncelle (kalan kısım)
+        trade.volume = remaining_volume
+        try:
+            if trade.db_id > 0:
+                self.db.update_trade(trade.db_id, {"lot": remaining_volume})
+        except Exception as exc:
+            logger.error(f"Partial close parent update hatası [{symbol}]: {exc}")
+
+        # 3. Bildirim
+        try:
+            from engine.event_bus import emit as _emit
+            _emit("notification", {
+                "type": "manual_partial_close",
+                "title": "Manuel Partial Close",
+                "message": (
+                    f"{symbol} {close_volume:.2f} lot kapandı (pnl≈{partial_pnl:.2f}). "
+                    f"Kalan: {remaining_volume:.2f} lot."
+                ),
+                "severity": "info",
+                "timestamp": now.isoformat(timespec="seconds"),
+            })
+        except Exception:
+            pass
 
     def _handle_closed_trade(
         self,
