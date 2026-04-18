@@ -10,9 +10,9 @@ Endpoint'ler:
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
-from api.deps import get_h_engine, get_db, get_pipeline
+from api.deps import get_h_engine, get_db, get_pipeline, require_localhost_and_token
 from api.schemas import (
     HybridCheckRequest,
     HybridCheckResponse,
@@ -41,7 +41,11 @@ async def check_hybrid_transfer(req: HybridCheckRequest):
     return HybridCheckResponse(**result)
 
 
-@router.post("/hybrid/transfer", response_model=HybridTransferResponse)
+@router.post(
+    "/hybrid/transfer",
+    response_model=HybridTransferResponse,
+    dependencies=[Depends(require_localhost_and_token)],
+)
 async def transfer_to_hybrid(req: HybridTransferRequest):
     """Pozisyonu hibrit yönetime devret (atomik)."""
     h_engine = get_h_engine()
@@ -52,7 +56,11 @@ async def transfer_to_hybrid(req: HybridTransferRequest):
     return HybridTransferResponse(**result)
 
 
-@router.post("/hybrid/remove", response_model=HybridRemoveResponse)
+@router.post(
+    "/hybrid/remove",
+    response_model=HybridRemoveResponse,
+    dependencies=[Depends(require_localhost_and_token)],
+)
 async def remove_from_hybrid(req: HybridRemoveRequest):
     """Pozisyonu hibrit yönetiminden çıkar."""
     h_engine = get_h_engine()

@@ -1232,7 +1232,14 @@ def generate_signal(
     symbol: str = "",
     news_bridge=None,
 ) -> SignalVerdict:
-    """Ana sinyal üretim motoru — 10 bağımsız kaynaktan karar (SE3).
+    """Ana sinyal üretim motoru — 10 slot / 9 aktif kaynak karar (SE3, #263 OP-M v6.1).
+
+    Kaynak matrisi (news silindi, boyut 10 korundu backward-compat için):
+      A: trend_ema | B: momentum_macd | C: rsi_extrema | D: volume_surge
+      E: breakout_atr | F: range_bounds | G: multi_tf_align | H: price_action
+      I: regime_bias | J: news_event (STUB — v6.1 NEUTRAL, kaldırıldı)
+
+    Min agree eşikleri 9 aktif kaynak üzerinden adaptif hesaplanır.
 
     Args:
         open_, high, low, close, volume: M15 OHLCV verileri.

@@ -1313,10 +1313,21 @@ class ManuelMotor:
         return tickets
 
     def _is_trading_allowed(self, now: datetime | None = None) -> bool:
-        """İşlem saatleri kontrolü (09:45-17:45)."""
+        """İşlem saatleri kontrolü (09:40-17:50)."""
         now = now or datetime.now()
         current_time = now.time()
-        if current_time < TRADING_OPEN or current_time > TRADING_CLOSE:
+        # #262 OP-L KARAR #8: Config override fallback'li (trading_hours.manuel_*)
+        t_open, t_close = TRADING_OPEN, TRADING_CLOSE
+        try:
+            cfg_open = self.config.get("trading_hours.manuel_open")
+            cfg_close = self.config.get("trading_hours.manuel_close")
+            if cfg_open and cfg_close:
+                ho, mo = str(cfg_open).split(":")
+                hc, mc = str(cfg_close).split(":")
+                t_open, t_close = time(int(ho), int(mo)), time(int(hc), int(mc))
+        except Exception:
+            pass
+        if current_time < t_open or current_time > t_close:
             return False
         # Hafta sonu kontrolü (Cumartesi=5, Pazar=6)
         if now.weekday() >= 5:

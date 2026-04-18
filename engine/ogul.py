@@ -393,8 +393,16 @@ class Ogul:
             config.get("engine.max_concurrent", MAX_CONCURRENT_DEFAULT)
         )
         # İşlem saatleri — config'den (format: "HH:MM")
-        _t_open = str(config.get("engine.trading_open", "09:45"))
-        _t_close = str(config.get("engine.trading_close", "17:45"))
+        # #262 OP-L KARAR #8: yeni trading_hours bloğu tek kaynak;
+        # eski engine.trading_open/close fallback (geriye uyumluluk).
+        _t_open = str(
+            config.get("trading_hours.ogul_open")
+            or config.get("engine.trading_open", "09:45")
+        )
+        _t_close = str(
+            config.get("trading_hours.ogul_close")
+            or config.get("engine.trading_close", "17:45")
+        )
         try:
             _ho, _mo = _t_open.split(":")
             self._trading_open: time = time(int(_ho), int(_mo))

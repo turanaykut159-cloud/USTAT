@@ -2454,7 +2454,18 @@ class HEngine:
         if now is None:
             now = datetime.now()
         current_time = now.time()
-        return TRADING_OPEN <= current_time <= TRADING_CLOSE
+        # #262 OP-L KARAR #8: Config override fallback'li (trading_hours.hybrid_*)
+        t_open, t_close = TRADING_OPEN, TRADING_CLOSE
+        try:
+            cfg_open = self.config.get("trading_hours.hybrid_open")
+            cfg_close = self.config.get("trading_hours.hybrid_close")
+            if cfg_open and cfg_close:
+                ho, mo = str(cfg_open).split(":")
+                hc, mc = str(cfg_close).split(":")
+                t_open, t_close = dtime(int(ho), int(mo)), dtime(int(hc), int(mc))
+        except Exception:
+            pass
+        return t_open <= current_time <= t_close
 
     def _refresh_daily_pnl(self) -> None:
         """Günlük PnL'yi kontrol et; gün değişmişse sıfırla, DB'den yeniden oku.

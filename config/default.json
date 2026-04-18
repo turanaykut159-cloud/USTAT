@@ -111,6 +111,17 @@
     "close_buffer_minutes": 30,
     "strength_reduction": 0.5
   },
+  "trading_hours": {
+    "_comment": "#262 OP-L KARAR #8: Tek kaynak trading saatleri. Formatı: HH:MM. Farklı motorlar farklı buffer'lar kullanır (OGUL 09:45/17:45 sinyal, Hibrit/Manuel 09:40/17:50 geniş pencere).",
+    "ogul_open": "09:45",
+    "ogul_close": "17:45",
+    "manuel_open": "09:40",
+    "manuel_close": "17:50",
+    "hybrid_open": "09:40",
+    "hybrid_close": "17:50",
+    "eod_notify": "17:45",
+    "last_window_minutes": 45
+  },
   "graduated_lot": {
     "loss_1_mult": 0.75,
     "loss_2_mult": 0.5,

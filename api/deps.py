@@ -12,8 +12,11 @@ Kullanım:
 
 from __future__ import annotations
 
+import os
 import time
 from typing import TYPE_CHECKING
+
+from fastapi import Header, HTTPException, Request
 
 if TYPE_CHECKING:
     from engine.baba import Baba
@@ -25,6 +28,9 @@ if TYPE_CHECKING:
     from engine.mt5_bridge import MT5Bridge
     from engine.ogul import Ogul
     from engine.ustat import Ustat
+
+# #261 OP-K: Localhost IP allowlist (KARAR #14 localhost+token)
+_LOCAL_IPS: set[str] = {"127.0.0.1", "localhost", "::1"}
 
 # ── Global engine referansları ────────────────────────────────────
 # server.py lifespan'da set edilir.
@@ -101,3 +107,53 @@ def is_engine_running() -> bool:
     if _engine is None:
         return False
     return getattr(_engine, 'is_running', False)
+
+
+# ════════════════════════════════════════════════════════════════════
+#  #261 OP-K (KARAR #14): AUTHORIZATION GUARD
+# ════════════════════════════════════════════════════════════════════
+
+def require_localhost_and_token(
+    request: Request,
+    x_ustat_token: str | None = Header(None, alias="X-USTAT-TOKEN"),
+) -> None:
+    """Kritik endpoint'lere localhost + opsiyonel token koruması.
+
+    Politika (KARAR #14):
+      - IP allowlist: 127.0.0.1 / ::1 / localhost. Harici → 403.
+      - Token opsiyonel: `config/default.json::api.auth_token` (veya
+        `USTAT_API_TOKEN` env) ayarlıysa `X-USTAT-TOKEN` header eşleşmeli
+        → aksi halde 401. Token boşsa sadece localhost yeterli.
+
+    Kullanım:
+        @router.post("/kritik", dependencies=[Depends(require_localhost_and_token)])
+
+    Raises:
+        HTTPException 403 — harici IP, 401 — token eşleşmedi.
+    """
+    # 1. Localhost kontrolü
+    client_ip = request.client.host if request.client else None
+    if client_ip not in _LOCAL_IPS:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Yalnizca localhost. Gelen IP: {client_ip}",
+        )
+
+    # 2. Token kontrolü (opsiyonel)
+    expected = ""
+    cfg = _engine.config if _engine is not None else None
+    if cfg is not None:
+        try:
+            expected = (cfg.get("api.auth_token", "") or "").strip()
+        except Exception:
+            expected = ""
+    if not expected:
+        expected = os.environ.get("USTAT_API_TOKEN", "").strip()
+    if not expected:
+        return  # Token set edilmedi → sadece localhost yeterli
+
+    if x_ustat_token != expected:
+        raise HTTPException(
+            status_code=401,
+            detail="Gecersiz veya eksik X-USTAT-TOKEN header",
+        )

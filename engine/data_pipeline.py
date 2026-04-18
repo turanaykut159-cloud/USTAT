@@ -836,10 +836,22 @@ class DataPipeline:
             Kaydedilen snapshot sözlüğü veya hata durumunda None.
         """
         try:
+            # #260 OP-K3: MT5 bağlantı yoksa snapshot oluşturma — drawdown yanlış
+            # hesaplanır, margin_usage 0, peak_equity stale. 16 Nis 2026 bulgusu:
+            # MT5 restricted mode başlangıçta snapshot'lar %35 DD yanlış alarmı.
+            mt5_connected = True
+            try:
+                mt5_connected = bool(getattr(self._mt5, "is_connected", lambda: True)())
+            except Exception:
+                mt5_connected = True  # Fallback: metot yoksa bağlı varsay
+            if not mt5_connected:
+                logger.debug("Risk snapshot: MT5 bağlı değil — snapshot atlandı (OP-K3)")
+                return None
+
             # Hesap bilgisi
             account = self._mt5.get_account_info()
             if account is None:
-                logger.warning("Risk snapshot: hesap bilgisi alınamadı")
+                logger.warning("Risk snapshot: hesap bilgisi alınamadı (MT5 yanıt vermedi)")
                 return None
 
             # Açık pozisyonlar

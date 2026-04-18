@@ -8,9 +8,9 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
-from api.deps import get_manuel_motor
+from api.deps import get_manuel_motor, require_localhost_and_token
 from api.schemas import (
     ManualRiskScoresResponse,
     ManualTradeCheckRequest,
@@ -37,7 +37,11 @@ async def check_manual_trade(req: ManualTradeCheckRequest):
     return ManualTradeCheckResponse(**check)
 
 
-@router.post("/manual-trade/execute", response_model=ManualTradeExecuteResponse)
+@router.post(
+    "/manual-trade/execute",
+    response_model=ManualTradeExecuteResponse,
+    dependencies=[Depends(require_localhost_and_token)],
+)
 async def execute_manual_trade(req: ManualTradeExecuteRequest):
     """Manuel emir gönder."""
     mm = get_manuel_motor()

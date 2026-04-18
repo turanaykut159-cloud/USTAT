@@ -9,11 +9,14 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 logger = logging.getLogger("ustat.api.positions")
 
-from api.deps import get_mt5, get_ogul, get_h_engine, get_engine, get_manuel_motor, get_db
+from api.deps import (
+    get_mt5, get_ogul, get_h_engine, get_engine, get_manuel_motor, get_db,
+    require_localhost_and_token,
+)
 from api.schemas import (
     ClosePositionRequest,
     ClosePositionResponse,
@@ -233,7 +236,11 @@ async def get_positions():
 
 # ── Pozisyon kapatma ───────────────────────────────────────────────
 
-@router.post("/positions/close", response_model=ClosePositionResponse)
+@router.post(
+    "/positions/close",
+    response_model=ClosePositionResponse,
+    dependencies=[Depends(require_localhost_and_token)],
+)
 async def close_position(req: ClosePositionRequest):
     """Tek pozisyonu ticket ile kapat (MT5 market kapanış)."""
     mt5 = get_mt5()

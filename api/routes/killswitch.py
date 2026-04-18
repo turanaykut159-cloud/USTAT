@@ -7,15 +7,19 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
-from api.deps import get_baba, get_db, get_h_engine
+from api.deps import get_baba, get_db, get_h_engine, require_localhost_and_token
 from api.schemas import KillSwitchRequest, KillSwitchResponse
 
 router = APIRouter()
 
 
-@router.post("/killswitch", response_model=KillSwitchResponse)
+@router.post(
+    "/killswitch",
+    response_model=KillSwitchResponse,
+    dependencies=[Depends(require_localhost_and_token)],
+)
 async def trigger_killswitch(req: KillSwitchRequest):
     """Kill-switch tetikle veya onayla."""
     baba = get_baba()
