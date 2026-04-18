@@ -4,8 +4,8 @@
 # Değişiklik C3 sınıfıdır — çift doğrulama ve 24 saat soğuma gerektirir.
 
 manifest_version: "2.0"
-constitution_version: "2.0"
-last_updated: "2026-04-14"
+constitution_version: "3.0"
+last_updated: "2026-04-18"
 
 # Anayasa metninin hash'i. check_constitution.py tarafından doğrulanır.
 # Anayasa metni değişirse bu hash güncellenmelidir (C3 değişikliktir).
