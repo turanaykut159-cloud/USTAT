@@ -14,8 +14,11 @@ from fastapi import APIRouter, Depends, HTTPException
 logger = logging.getLogger("ustat.api.positions")
 
 from api.deps import (
+    check_idempotency,
     get_mt5, get_ogul, get_h_engine, get_engine, get_manuel_motor, get_db,
+    get_idempotent_response,
     require_localhost_and_token,
+    store_idempotent_response,
 )
 from api.schemas import (
     ClosePositionRequest,
@@ -241,8 +244,16 @@ async def get_positions():
     response_model=ClosePositionResponse,
     dependencies=[Depends(require_localhost_and_token)],
 )
-async def close_position(req: ClosePositionRequest):
-    """Tek pozisyonu ticket ile kapat (MT5 market kapanış)."""
+async def close_position(
+    req: ClosePositionRequest,
+    idem_key: str | None = Depends(check_idempotency),
+):
+    """Tek pozisyonu ticket ile kapat (MT5 market kapanış). Idempotency-Key destekli."""
+    if idem_key:
+        cached = get_idempotent_response(idem_key)
+        if cached:
+            return ClosePositionResponse(**cached)
+
     mt5 = get_mt5()
     if not mt5 or not mt5.is_connected:
         raise HTTPException(status_code=503, detail="MT5 bağlantısı yok")
@@ -253,4 +264,7 @@ async def close_position(req: ClosePositionRequest):
     engine = get_engine()
     if engine:
         engine.sync_mt5_history_recent(1)
-    return ClosePositionResponse(success=True, message="Pozisyon kapatıldı")
+    response = ClosePositionResponse(success=True, message="Pozisyon kapatıldı")
+    if idem_key:
+        store_idempotent_response(idem_key, response.model_dump())
+    return response

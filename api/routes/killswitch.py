@@ -9,7 +9,15 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from api.deps import get_baba, get_db, get_h_engine, require_localhost_and_token
+from api.deps import (
+    check_idempotency,
+    get_baba,
+    get_db,
+    get_h_engine,
+    get_idempotent_response,
+    require_localhost_and_token,
+    store_idempotent_response,
+)
 from api.schemas import KillSwitchRequest, KillSwitchResponse
 
 router = APIRouter()
@@ -20,8 +28,16 @@ router = APIRouter()
     response_model=KillSwitchResponse,
     dependencies=[Depends(require_localhost_and_token)],
 )
-async def trigger_killswitch(req: KillSwitchRequest):
-    """Kill-switch tetikle veya onayla."""
+async def trigger_killswitch(
+    req: KillSwitchRequest,
+    idem_key: str | None = Depends(check_idempotency),
+):
+    """Kill-switch tetikle veya onayla. Idempotency-Key header desteği."""
+    if idem_key:
+        cached = get_idempotent_response(idem_key)
+        if cached:
+            return KillSwitchResponse(**cached)
+
     baba = get_baba()
 
     if not baba:
@@ -48,12 +64,15 @@ async def trigger_killswitch(req: KillSwitchRequest):
             msg = f"L3 kill-switch aktif — {req.user}"
             if failed:
                 msg += f"; kapatılamayan pozisyonlar: {failed}"
-            return KillSwitchResponse(
+            result = KillSwitchResponse(
                 success=True,
                 kill_switch_level=3,
                 message=msg,
                 failed_tickets=failed,
             )
+            if idem_key:
+                store_idempotent_response(idem_key, result.model_dump())
+            return result
         except Exception as e:
             return KillSwitchResponse(
                 success=False,
@@ -66,11 +85,14 @@ async def trigger_killswitch(req: KillSwitchRequest):
         try:
             success = baba.acknowledge_kill_switch(user=req.user)
             if success:
-                return KillSwitchResponse(
+                result = KillSwitchResponse(
                     success=True,
                     kill_switch_level=0,
                     message=f"Kill-switch sıfırlandı — {req.user}",
                 )
+                if idem_key:
+                    store_idempotent_response(idem_key, result.model_dump())
+                return result
             else:
                 return KillSwitchResponse(
                     success=False,

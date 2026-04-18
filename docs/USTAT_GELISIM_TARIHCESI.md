@@ -58,6 +58,13 @@
 ## [6.1.0] — 2026-04-18
 
 ### Added
+- #270 — **8 ek statik sözleşme testi** (`tests/critical_flows/test_op_n_behavior_ext.py`): 4 endpoint idempotency pattern doğrulama (killswitch/hybrid transfer/hybrid remove/positions close/manual execute), hybrid_remove idem_key parametre, news_bridge parametre kaldırıldı teyit, CLOSE_MAX_RETRIES config-driven, sanity_thresholds blok. 8/8 PASS. Toplam 136/136 Windows test.
+- #269 — **R-11 CLOSE_MAX_RETRIES drift fix**. `baba.py:2635` hardcoded `= 5` → `config.get("risk.close_max_retries", 3)`. Rapor S2-R bulgusu (CLAUDE.md §5.2 config=3 vs kod=5) düzeltildi.
+
+### Changed
+- #267 + yaygınlaştırma — **Idempotency-Key 4 kritik endpoint'te aktif**: killswitch, hybrid/transfer, hybrid/remove, positions/close (önceki manual-trade/execute'a ek). Her biri check_idempotency input + success durumunda store_idempotent_response pattern. 60sn TTL memory cache.
+
+### Added
 - #268 — **OP-N davranış testleri (MT5 mock stubs)** (#56). `tests/critical_flows/test_op_n_behavior.py`: 6 runtime davranış testi (netting reentrant, stale cleanup, config boot autorepair tail-null, scattered null fallback, idempotency cache roundtrip, sanity thresholds config). loguru/MT5 stub ile import güvenli. 6/6 PASS Windows Python 3.14. Davranış testi katmanı böylece statik sözleşmeye ek olarak gerçek fonksiyon çağrısı doğrulaması sağlar.
 - #267 — **OP-K idempotency-Key header altyapısı** (KARAR #14 uzantı). `api/deps.py::check_idempotency`, `get_idempotent_response`, `store_idempotent_response` — 60sn TTL, 128 char key max, memory cache. Örnek entegrasyon: `POST /manual-trade/execute` Idempotency-Key ile aynı istek tekrarı cached response döner. Diğer 3 kritik endpoint pattern aynı şekilde hafta içi genişletilebilir.
 

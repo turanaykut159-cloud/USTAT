@@ -2632,7 +2632,9 @@ class Baba:
             f"{len(winning)} kârda ({reason})"
         )
 
-        CLOSE_MAX_RETRIES = 5  # v5.4.1: 3'ten 5'e çıkarıldı
+        # #269 R-11 KARAR #11: config'den okuma, drift giderildi.
+        # Config `risk.close_max_retries=3` default; eski hardcoded 5 kaldırıldı.
+        CLOSE_MAX_RETRIES = int(self.config.get("risk.close_max_retries", 3))
         closed_count = 0
 
         # 1) Önce zarardakileri kapat

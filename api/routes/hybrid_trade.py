@@ -12,7 +12,15 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from api.deps import get_h_engine, get_db, get_pipeline, require_localhost_and_token
+from api.deps import (
+    check_idempotency,
+    get_h_engine,
+    get_db,
+    get_idempotent_response,
+    get_pipeline,
+    require_localhost_and_token,
+    store_idempotent_response,
+)
 from api.schemas import (
     HybridCheckRequest,
     HybridCheckResponse,
@@ -46,13 +54,23 @@ async def check_hybrid_transfer(req: HybridCheckRequest):
     response_model=HybridTransferResponse,
     dependencies=[Depends(require_localhost_and_token)],
 )
-async def transfer_to_hybrid(req: HybridTransferRequest):
-    """Pozisyonu hibrit yönetime devret (atomik)."""
+async def transfer_to_hybrid(
+    req: HybridTransferRequest,
+    idem_key: str | None = Depends(check_idempotency),
+):
+    """Pozisyonu hibrit yönetime devret (atomik). Idempotency-Key destekli."""
+    if idem_key:
+        cached = get_idempotent_response(idem_key)
+        if cached:
+            return HybridTransferResponse(**cached)
+
     h_engine = get_h_engine()
     if not h_engine:
         return HybridTransferResponse(message="Engine çalışmıyor")
 
     result = h_engine.transfer_to_hybrid(req.ticket)
+    if idem_key and isinstance(result, dict):
+        store_idempotent_response(idem_key, result)
     return HybridTransferResponse(**result)
 
 
@@ -61,13 +79,23 @@ async def transfer_to_hybrid(req: HybridTransferRequest):
     response_model=HybridRemoveResponse,
     dependencies=[Depends(require_localhost_and_token)],
 )
-async def remove_from_hybrid(req: HybridRemoveRequest):
-    """Pozisyonu hibrit yönetiminden çıkar."""
+async def remove_from_hybrid(
+    req: HybridRemoveRequest,
+    idem_key: str | None = Depends(check_idempotency),
+):
+    """Pozisyonu hibrit yönetiminden çıkar. Idempotency-Key destekli."""
+    if idem_key:
+        cached = get_idempotent_response(idem_key)
+        if cached:
+            return HybridRemoveResponse(**cached)
+
     h_engine = get_h_engine()
     if not h_engine:
         return HybridRemoveResponse(message="Engine çalışmıyor")
 
     result = h_engine.remove_from_hybrid(req.ticket)
+    if idem_key and isinstance(result, dict):
+        store_idempotent_response(idem_key, result)
     return HybridRemoveResponse(**result)
 
 
