@@ -134,3 +134,6 @@ screenshots/
 /primnet_trailing_analiz.xlsx
 /PRIMNET_TAM_METIN.docx
 /USTAT_Plus_V6_Tam_Sistem_Kitabi.docx
+
+# Runtime PID dosyasý (çalýþma zamaný)
+.ustat_pids.json
