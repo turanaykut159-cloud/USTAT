@@ -31,24 +31,78 @@ class Config:
         self._load()
 
     def _load(self) -> None:
-        """Konfigürasyon dosyasını yükle."""
-        if self._path.exists():
-            try:
-                with open(self._path, "r", encoding="utf-8") as f:
-                    self._data = json.load(f)
-                self._is_loaded = True
-                logger.info(f"Konfigürasyon yüklendi: {self._path}")
-                self._log_summary()
-            except (json.JSONDecodeError, OSError) as exc:
-                logger.error(
-                    f"Konfigürasyon parse hatası: {self._path} — {exc}"
-                )
-                self._data = {}
-        else:
+        """Konfigürasyon dosyasını yükle.
+
+        #245 OP-Q boot autorepair (18 Nis 2026 sistemik NULL-tail FS bozulmasi sonrasi):
+        json.load() oncesi ham byte null-byte taramasi yapilir. NULL byte kuyrugu
+        tespit edilirse: (a) bozuk dosyanin yedegi alinir, (b) tail null'lari temizlenir,
+        (c) yeniden parse denenir. Boylece engine boot crash yerine auto-recover.
+        Dosyanin icerik kismi bozuksa (scattered null / invalid JSON) fallback
+        `self._data = {}` ile devam eder.
+        """
+        if not self._path.exists():
             logger.critical(
                 f"Konfigürasyon dosyası bulunamadı: {self._path} — "
                 f"Varsayılan değerlerle çalışılacak!"
             )
+            return
+
+        try:
+            raw_bytes = self._path.read_bytes()
+            null_count = raw_bytes.count(b"\x00")
+
+            if null_count > 0:
+                # Tail-only null mu, scattered mi?
+                stripped = raw_bytes.rstrip(b"\x00")
+                tail_run = len(raw_bytes) - len(stripped)
+                if tail_run == null_count:
+                    # TAIL-ONLY — autorepair mumkun
+                    logger.critical(
+                        f"[OP-Q AUTOREPAIR] Konfigurasyonda {null_count} tail NULL byte "
+                        f"tespit edildi: {self._path} — otomatik tamir ediliyor"
+                    )
+                    from datetime import datetime as _dt
+                    stamp = _dt.now().strftime("%Y%m%d-%H%M%S")
+                    backup = self._path.with_suffix(
+                        self._path.suffix + f".corrupt-boot-{stamp}"
+                    )
+                    try:
+                        backup.write_bytes(raw_bytes)
+                        logger.warning(f"[OP-Q] Yedek: {backup}")
+                    except OSError as bexc:
+                        logger.error(f"[OP-Q] Yedek yazilmadi: {bexc}")
+                    # Temiz icerigi yaz (trailing newline ile)
+                    clean_bytes = stripped if stripped.endswith(b"\n") else stripped + b"\n"
+                    try:
+                        self._path.write_bytes(clean_bytes)
+                        logger.warning(
+                            f"[OP-Q] Tail NULL temizlendi: "
+                            f"{len(raw_bytes)} -> {len(clean_bytes)} byte"
+                        )
+                    except OSError as wexc:
+                        logger.error(f"[OP-Q] Autorepair yazim hatasi: {wexc}")
+                        self._data = {}
+                        return
+                else:
+                    # SCATTERED null — guvenli autorepair zor, skip
+                    logger.critical(
+                        f"[OP-Q] Konfigurasyonda {null_count} SCATTERED NULL byte "
+                        f"(tail_run={tail_run}) — autorepair atlandi, manuel inceleme gerek"
+                    )
+                    self._data = {}
+                    return
+
+            # Normal parse (autorepair sonrasi veya null-free)
+            with open(self._path, "r", encoding="utf-8") as f:
+                self._data = json.load(f)
+            self._is_loaded = True
+            logger.info(f"Konfigürasyon yüklendi: {self._path}")
+            self._log_summary()
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.error(
+                f"Konfigürasyon parse hatası: {self._path} — {exc}"
+            )
+            self._data = {}
 
     def _log_summary(self) -> None:
         """Yüklenen config bölümlerini logla."""
