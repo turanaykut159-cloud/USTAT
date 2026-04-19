@@ -104,17 +104,28 @@ export default function HybridTrade() {
     setHybridEvents(res.events || []);
   }, []);
 
+  const fetchPerf = useCallback(async () => {
+    try {
+      const stats = await getHybridPerformance();
+      setPerfStats(stats);
+    } catch (err) {
+      // Performance kartı canlı değil ama çökmesin.
+      console.error('[HybridTrade] getHybridPerformance:', err?.message ?? err);
+    }
+  }, []);
+
   // ── REST fallback (10sn) ─────────────────────────────────────
   useEffect(() => {
     fetchOpenPositions();
     fetchEvents();
-    getHybridPerformance().then(setPerfStats);
+    fetchPerf();
     const iv = setInterval(() => {
       fetchOpenPositions();
       fetchEvents();
+      fetchPerf();  // Performance kartı mount sonrası canlı kalsın (B2 fix).
     }, 10000);
     return () => clearInterval(iv);
-  }, [fetchOpenPositions, fetchEvents]);
+  }, [fetchOpenPositions, fetchEvents, fetchPerf]);
 
   // ── WebSocket canlı veri ─────────────────────────────────────
   useEffect(() => {
