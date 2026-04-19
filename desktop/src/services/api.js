@@ -602,6 +602,14 @@ export async function getNabiz() {
     return {
       database: {}, logs: {}, disk: {}, retention: {},
       cleanup_conflict: { has_conflict: false },
+      // Backend `_build_thresholds_info()` ile aynı anahtar seti — API hatası
+      // durumunda bile frontend Number.isFinite() kontrolleri düşmesin.
+      thresholds: {
+        table_row_thresholds: {},
+        summary: {},
+        log_files_display_limit: null,
+        source: 'api-fallback',
+      },
     };
   }
 }
