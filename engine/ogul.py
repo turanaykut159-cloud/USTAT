@@ -1794,6 +1794,12 @@ class Ogul:
             trailing_sl=signal.sl,
             regime_at_entry=regime.regime_type.value,
         )
+        # B3 FIX: voting_score alanı Trade dataclass'ında default 0'da kalıyordu;
+        # OĞUL hiçbir yerde set etmediği için Oto UI kartı daima "0/4" gösteriyordu.
+        # Mevcut signal.strength (0-1) 0-4 aralığına ölçeklenir — yeni hesap YOK,
+        # sadece UI için zaten var olan güç değeri taşınır. Black Door sinyal
+        # mantığı ve risk zinciri değişmez. API tüketicisi: positions.py _universal_fields.
+        trade.voting_score = int(max(0, min(4, round(signal.strength * 4))))
 
         # BABA onay — korelasyon kontrolü (BULGU #9: gerçek lot iletilir,
         # endeks ağırlık skoru artık 1.0 lot varsayımıyla şişmiyor)
