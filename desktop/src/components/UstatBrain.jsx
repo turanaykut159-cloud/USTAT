@@ -177,15 +177,26 @@ export default function UstatBrain() {
   const [days, setDays] = useState(90);
   const [loading, setLoading] = useState(true);
 
+  const [fetchError, setFetchError] = useState(null);
+
   const fetchData = useCallback(async () => {
     setLoading(true);
-    const [b, s] = await Promise.all([
-      getUstatBrain(days),
-      getStatus(),
-    ]);
-    setBrain(b);
-    setStatus(s);
-    setLoading(false);
+    setFetchError(null);
+    try {
+      const [b, s] = await Promise.all([
+        getUstatBrain(days),
+        getStatus(),
+      ]);
+      setBrain(b);
+      setStatus(s);
+    } catch (err) {
+      // Promise.all reject'inde önceki davranış: setLoading(false) hiç çalışmazdı,
+      // sonsuz spinner. Artık son bilinen veri korunur, rozet gösterilir.
+      console.error('[UstatBrain] fetchData:', err?.message ?? err);
+      setFetchError(err?.message ?? 'Bilinmeyen hata');
+    } finally {
+      setLoading(false);
+    }
   }, [days]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
@@ -219,12 +230,31 @@ export default function UstatBrain() {
     };
   }, [status]);
 
-  if (loading && !brain) {
+  if (loading && !brain && !fetchError) {
     return (
       <div className="ustat-brain">
         <div className="ub-loading">
           <div className="ub-loading-spinner" />
           <span>USTAT Beyin Merkezi yukleniyor...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!brain && fetchError) {
+    return (
+      <div className="ustat-brain">
+        <div className="ub-loading">
+          <span style={{ color: '#ef4444' }}>
+            USTAT Beyin Merkezi yuklenemedi: {fetchError}
+          </span>
+          <button
+            type="button"
+            onClick={fetchData}
+            style={{ marginTop: 12, padding: '6px 14px', cursor: 'pointer' }}
+          >
+            Tekrar Dene
+          </button>
         </div>
       </div>
     );
