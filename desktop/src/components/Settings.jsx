@@ -34,7 +34,10 @@ import { getOperatorName, setOperatorName, DEFAULT_OPERATOR } from '../utils/ope
 // Artik status?.version uzerinden /api/status endpoint'inden okunur.
 // Fallback '6.2.0' ilk render ve hata durumu icin.
 const VERSION_FALLBACK = '6.2.0';
-const BUILD_DATE = '2026-04-18';
+// Build tarihi vite.config.js::define içinde `__BUILD_DATE__` olarak inline edilir.
+// Geliştirme modunda (vite dev) tanımlı, production build'inde YYYY-MM-DD sabiti.
+// Fallback: eski hardcoded değer — tanım eksikse görüntü bozulmaz.
+const BUILD_DATE = typeof __BUILD_DATE__ !== 'undefined' ? __BUILD_DATE__ : '2026-04-18';
 
 const DEFAULT_PREFS = {
   soundEnabled: true,
