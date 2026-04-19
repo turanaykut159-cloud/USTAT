@@ -146,7 +146,13 @@ async def get_risk():
                     combined = set(resp.blocked_symbols) | set(verdict.blocked_symbols)
                     resp.blocked_symbols = list(combined)
             except Exception as e:
+                # Fail-CLOSED: verdict hesaplanamadıysa frontend'e "AÇIK" gösterme
+                # (schema default can_trade=True, lot_multiplier=1.0). Anayasa kural 9
+                # (Fail-Safe) gereği — güvenlik modülü belirsizse sistem "kilitli".
                 logger.exception("Risk limitleri kontrolü HATASI: %s", e)
+                resp.can_trade = False
+                resp.lot_multiplier = 0.0
+                resp.risk_reason = f"Risk verdict hatası: {type(e).__name__}"
 
     # ── MT5'ten açık pozisyon sayısı ──────────────────────────────
     if mt5 and mt5.is_connected:
