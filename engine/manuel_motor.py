@@ -292,9 +292,12 @@ class ManuelMotor:
         result["suggested_sl"] = round(suggested_sl, 2)
         result["suggested_tp"] = round(suggested_tp, 2)
         result["max_lot"] = max_lot
-        result["risk_summary"]["floating_pnl"] = (
-            account.profit if hasattr(account, "profit") else 0.0
-        )
+        # Floating P&L = equity - balance (Standart formül).
+        # Eski kod `account.profit` okuyordu ama AccountInfo dataclass'ında
+        # (mt5_bridge.py:54-63) `profit` alanı yok — hasattr her zaman False
+        # dönüyor ve alan hep 0.0 kalıyordu. account.py zaten bu formülü
+        # kullanıyor; ManuelMotor de aynı kaynağa hizalandı.
+        result["risk_summary"]["floating_pnl"] = float(account.equity - account.balance)
         result["risk_summary"]["equity"] = account.equity
         result["risk_summary"]["free_margin"] = account.free_margin
         return result
