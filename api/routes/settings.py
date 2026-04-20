@@ -104,6 +104,15 @@ async def update_risk_baseline(req: RiskBaselineUpdateRequest):
         3. Config dosyasına kaydet
         4. Baba'nın runtime referansını güncelle
         5. Baba modül sabiti RISK_BASELINE_DATE güncelle
+        6. Peak equity sıfırla (drawdown yeniden başlar)
+        7. v6.2 — Aylık kayıp durdurma bayrağı + aktif kill-switch sıfırla:
+           Baseline değişimi operatörün kasıtlı eylemi — "manuel onay" olarak
+           kabul edilir. Kill-switch aktif ise `acknowledge_kill_switch` çağrılır
+           (monthly_paused'u da temizler). Kill-switch L0 iken monthly_paused
+           True ise state doğrudan False yapılır (acknowledge L0'da çalışmaz).
+           NOT: baba.py Siyah Kapı fonksiyonları değişmedi; yalnızca yeni bir
+           tetikleyici eklendi. Manuel onay kuralı (`_reset_monthly` yorumu)
+           aynen korundu.
     """
     engine = get_engine()
     if not engine:
@@ -173,13 +182,57 @@ async def update_risk_baseline(req: RiskBaselineUpdateRequest):
                 f"Peak equity sıfırlandı: {current_equity:.2f} (baseline reset)"
             )
 
+    # 7. v6.2 — monthly_paused + aktif kill-switch sıfırla.
+    # İki senaryo: (a) Kill-switch aktifse acknowledge_kill_switch çağrılır —
+    # monthly_paused'u da o fonksiyon temizler. (b) Kill-switch L0 ama
+    # monthly_paused True ise (orphan state) doğrudan False'a çekilir çünkü
+    # acknowledge L0'da False döner (baba.py:2433). _risk_state kalıcılığı
+    # bir sonraki BABA cycle'ında _persist_risk_state() ile DB'ye yazılır.
+    risk_reset_msg = ""
+    if baba is not None:
+        try:
+            prev_mp = baba._risk_state.get("monthly_paused", False)
+            prev_ks = getattr(baba, "_kill_switch_level", 0)
+
+            if prev_ks > 0:
+                ack_ok = baba.acknowledge_kill_switch(user="baseline_reset")
+                if ack_ok:
+                    risk_reset_msg = (
+                        f"kill-switch L{prev_ks} + monthly_paused temizlendi"
+                    )
+                else:
+                    # Kapatılamayan pozisyon vs. nedeniyle reddedildi
+                    risk_reset_msg = (
+                        f"kill-switch L{prev_ks} sıfırlama REDDEDİLDİ "
+                        f"(açık pozisyon engeli — baba.py:2437)"
+                    )
+            elif prev_mp:
+                baba._risk_state["monthly_paused"] = False
+                risk_reset_msg = (
+                    "monthly_paused: True → False (kill-switch L0)"
+                )
+
+            if risk_reset_msg:
+                logger.info(
+                    f"Baseline reset ile risk durumu sıfırlandı: {risk_reset_msg}"
+                )
+        except Exception as exc:
+            # Risk state sıfırlama başarısız olsa bile baseline güncellemesi
+            # başarılı sayılır — sadece loglanır, endpoint hata dönmez.
+            logger.warning(f"Risk durumu sıfırlama hatası: {exc}")
+
     logger.info(
         f"Risk baseline tarihi güncellendi: {old_date} → {new_date}"
     )
 
+    # Risk reset bilgisini kullanıcıya geri bildir
+    full_message = f"Risk baseline tarihi güncellendi: {old_date} → {new_date}"
+    if risk_reset_msg:
+        full_message += f" | {risk_reset_msg}"
+
     return RiskBaselineUpdateResponse(
         success=True,
-        message=f"Risk baseline tarihi güncellendi: {old_date} → {new_date}",
+        message=full_message,
         old_date=old_date,
         new_date=new_date,
     )
