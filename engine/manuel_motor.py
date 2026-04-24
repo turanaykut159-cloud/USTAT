@@ -371,20 +371,19 @@ class ManuelMotor:
 
         price = tick_data.ask if direction == "BUY" else tick_data.bid
 
-        # Kullanıcı SL/TP verdiyse kullan, vermediyse ATR bazlı otomatik
-        if sl is None or sl <= 0:
-            if direction == "BUY":
-                sl = price - (atr_val * 1.5)
-            else:
-                sl = price + (atr_val * 1.5)
-            logger.info(f"Manuel SL otomatik: {sl:.2f} (ATR×1.5={atr_val * 1.5:.2f})")
-
-        if tp is None or tp <= 0:
-            if direction == "BUY":
-                tp = price + (atr_val * 2.0)
-            else:
-                tp = price - (atr_val * 2.0)
-            logger.info(f"Manuel TP otomatik: {tp:.2f} (ATR×2.0={atr_val * 2.0:.2f})")
+        # Manuel felsefesi (docstring): "Kullanıcı açar, kullanıcı kontrol eder.
+        # Kullanıcının SL/TP'si aynen korunur." Kullanıcı SL/TP vermediyse ZORLA
+        # otomatik türetmek bu felsefeye aykırı — ayrıca türetilen değer MT5
+        # stops_level'i karşılamayınca modify_position fail → korumasız pozisyon
+        # yanlış alarmı (#AKBNK-2026-04-24 olayı). Artık SL/TP opsiyonel:
+        # - Kullanıcı > 0 verdiyse → aynen kullanılır, modify_position ile yazılır.
+        # - Kullanıcı vermediyse (None/0) → 0 olarak bırakılır, modify_position
+        #   çağrılmaz (satır "sl > 0 and tp > 0" koşulu korur), risk göstergesi
+        #   calculate_risk_score'da sl_risk="yellow" olarak uyarır.
+        if sl is None or sl < 0:
+            sl = 0.0
+        if tp is None or tp < 0:
+            tp = 0.0
 
         # 3. Lot sınırlama — sembol bazlı
         sym_info = self.mt5.get_symbol_info(symbol)
