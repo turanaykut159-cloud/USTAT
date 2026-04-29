@@ -249,12 +249,15 @@ function buildLadder(pos, cfg) {
         status = 'GİRİŞ'; statusClass = 'entry';
         stopPrimSnapped = entryPrim - trailingDist;
         stopLevel = fmtPrim(stopPrimSnapped);
-      } else if (prim < entryPrim && prim >= slPrim) {
-        status = 'AÇIK'; statusClass = 'open';
-      } else if (isStop || (prim < slPrim && prim >= entryPrim - trailingDist - 0.25)) {
+      } else if (isCurrentStop || (!hasValidSl && isStop)) {
+        // Aktif SL satiri (trailing ile guncel slPrim'e en yakin satir).
+        // SL henuz okunamadiysa initial stop pozisyonuna fallback.
         status = 'STOP'; statusClass = 'stop';
         stopLevel = '';
-      } else if (prim < slPrim) {
+      } else if (prim < entryPrim && prim > slPrim) {
+        status = 'AÇIK'; statusClass = 'open';
+      } else if (prim < entryPrim) {
+        // slPrim altindaki satirlar: pozisyon SL'de zaten kapanmis olur, buraya ulasilamaz.
         status = 'DIŞARDA'; statusClass = 'outside';
       }
     } else {
@@ -284,12 +287,15 @@ function buildLadder(pos, cfg) {
         status = 'GİRİŞ'; statusClass = 'entry';
         stopPrimSnapped = entryPrim + trailingDist;
         stopLevel = fmtPrim(stopPrimSnapped);
-      } else if (prim > entryPrim && prim <= slPrim) {
-        status = 'AÇIK'; statusClass = 'open';
-      } else if (isStop || (prim > slPrim && prim <= entryPrim + trailingDist + 0.25)) {
+      } else if (isCurrentStop || (!hasValidSl && isStop)) {
+        // Aktif SL satiri (trailing ile guncel slPrim'e en yakin satir).
+        // SL henuz okunamadiysa initial stop pozisyonuna fallback.
         status = 'STOP'; statusClass = 'stop';
         stopLevel = '';
-      } else if (prim > slPrim) {
+      } else if (prim > entryPrim && prim < slPrim) {
+        status = 'AÇIK'; statusClass = 'open';
+      } else if (prim > entryPrim) {
+        // slPrim ustundeki satirlar: pozisyon SL'de zaten kapanmis olur, buraya ulasilamaz.
         status = 'DIŞARDA'; statusClass = 'outside';
       }
     }
