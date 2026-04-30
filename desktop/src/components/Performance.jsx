@@ -155,6 +155,10 @@ export default function Performance() {
   const [trades, setTrades] = useState([]);
   const [days, setDays] = useState(90);
   const [loading, setLoading] = useState(true);
+  // M3-294: Promise.all reject'inde sonsuz spinner bug'i — UstatBrain #280 ile
+  // ayni pattern. fetchPerfData try/catch/finally ile sariliyor, hata durumunda
+  // "Tekrar Dene" butonu gosteriliyor.
+  const [fetchError, setFetchError] = useState(null);
   // A17: Heatmap saat aralığı backend session config'den çekilir.
   const [heatmapHours, setHeatmapHours] = useState(DEFAULT_HEATMAP_HOURS);
   // A7: Aktif istatistik/risk baseline tarihleri backend'den çekilir.
@@ -198,15 +202,24 @@ export default function Performance() {
   // ── Performans verisi ────────────────────────────────────────────
   const fetchPerfData = useCallback(async () => {
     setLoading(true);
-    const [p, s, t] = await Promise.all([
-      getPerformance(days),
-      getTradeStats(1000, baselineInfo.stats_baseline),
-      getTrades({ since: baselineInfo.stats_baseline, limit: 1000 }),
-    ]);
-    setPerf(p);
-    setStats(s);
-    setTrades(t.trades || []);
-    setLoading(false);
+    setFetchError(null);
+    try {
+      const [p, s, t] = await Promise.all([
+        getPerformance(days),
+        getTradeStats(1000, baselineInfo.stats_baseline),
+        getTrades({ since: baselineInfo.stats_baseline, limit: 1000 }),
+      ]);
+      setPerf(p);
+      setStats(s);
+      setTrades(t.trades || []);
+    } catch (err) {
+      // M3-294: Promise.all reject'inde onceden setLoading(false) hic calismazdi,
+      // sonsuz spinner. Artik son bilinen veri korunur, rozet gosterilir.
+      console.error('[Performance] fetchPerfData:', err?.message ?? err);
+      setFetchError(err?.message ?? 'Bilinmeyen hata');
+    } finally {
+      setLoading(false);
+    }
   }, [days, baselineInfo.stats_baseline]);
 
   useEffect(() => {
@@ -340,11 +353,30 @@ export default function Performance() {
 
   // ── Üstat Analiz: Özet kartlar hesaplamaları ────────────────────
   // ── Render ───────────────────────────────────────────────────────
-  if (loading && !perf) {
+  if (loading && !perf && !fetchError) {
     return (
       <div className="performance">
         <h2>Performans</h2>
         <div className="pf-loading">Yükleniyor...</div>
+      </div>
+    );
+  }
+
+  // M3-294: Hata durumu — kullanici "Tekrar Dene" ile yeniden cagrabilir.
+  if (!perf && fetchError) {
+    return (
+      <div className="performance">
+        <h2>Performans</h2>
+        <div className="pf-loading" style={{ color: '#f85149' }}>
+          Performans verisi yüklenemedi: {fetchError}
+        </div>
+        <button
+          type="button"
+          onClick={fetchPerfData}
+          style={{ marginTop: 12, padding: '6px 14px', cursor: 'pointer' }}
+        >
+          Tekrar Dene
+        </button>
       </div>
     );
   }
