@@ -184,18 +184,27 @@ export default function TopBar() {
   // Backend status endpoint'i full semver ("6.0.0") dondurur; V"6.0" formatini
   // korumak icin major.minor'i cikartiyoruz. Fallback "6.0" ilk render ve hata durumu icin.
   const versionLabel = (status.version || '6.0.0').split('.').slice(0, 2).join('.');
+  // M1-292 — Initial loading mask: ilk fetchData() tamamlanana kadar (2sn polling)
+  // fallback degerler ('V6.0', 'PASIF', '0,00') misleadingly gosteriliyordu. Sayfa
+  // gecisinde kullanici 1-2sn icin yanlis bilgi goruyordu. initialLoading=true iken
+  // bu degerler em-dash ile maskelenir; gercek veri geldiginde anlik degisir.
+  const showLoading = initialLoading;
+  const dispVersion = showLoading ? '—' : versionLabel;
+  const dispPhaseLabel = showLoading ? '—' : phaseLabel;
+  const dispPhaseClass = showLoading ? 'loading' : phase;
 
   return (
     <div className="top-bar">
 
       {/* ── SOL: Logo + Faz + Bağlantı ─────────────────────────── */}
       <div className="top-bar-left">
-        <h1>ÜSTAT Plus <span className="version">V{versionLabel}</span></h1>
+        <h1>ÜSTAT Plus <span className="version">V{dispVersion}</span></h1>
         {initialLoading && <span className="tb-loading">Yükleniyor...</span>}
 
         <span
-          className={`tb-phase tb-phase--${phase}`}
+          className={`tb-phase tb-phase--${dispPhaseClass}`}
           title={
+            showLoading ? 'Veri yükleniyor — backend status henüz alınmadı' :
             phase === 'running' ? 'Engine çalışıyor — sinyal üretimi ve risk kontrolü aktif' :
             phase === 'stopped' ? 'Engine durdurulmuş — işlem yapılmıyor' :
             phase === 'killed' ? 'Kill-Switch ile durdurulmuş — sıfırlama gerekli' :
@@ -203,7 +212,7 @@ export default function TopBar() {
             phase === 'idle' ? 'Engine hazırlanıyor' : ''
           }
         >
-          {phaseLabel}
+          {dispPhaseLabel}
         </span>
 
         {phase === 'killed' && (
@@ -303,22 +312,26 @@ export default function TopBar() {
 
         <div className="tb-metric">
           <span className="tb-metric-label">Bakiye</span>
-          <span className="tb-metric-value">{formatMoney(account.balance)}</span>
+          <span className="tb-metric-value">
+            {showLoading ? '—' : formatMoney(account.balance)}
+          </span>
         </div>
 
         <div className="tb-divider" />
 
         <div className="tb-metric">
           <span className="tb-metric-label">Equity</span>
-          <span className="tb-metric-value">{formatMoney(account.equity)}</span>
+          <span className="tb-metric-value">
+            {showLoading ? '—' : formatMoney(account.equity)}
+          </span>
         </div>
 
         <div className="tb-divider" />
 
         <div className="tb-metric">
           <span className="tb-metric-label">Floating</span>
-          <span className={`tb-metric-value ${floatingPnl >= 0 ? 'profit' : 'loss'}`}>
-            {formatMoney(floatingPnl)}
+          <span className={`tb-metric-value ${showLoading ? '' : floatingPnl >= 0 ? 'profit' : 'loss'}`}>
+            {showLoading ? '—' : formatMoney(floatingPnl)}
           </span>
         </div>
 
@@ -329,8 +342,8 @@ export default function TopBar() {
             üzerinden risk_snapshots tablosundan okunuyor, doğrudan MT5'ten değil. */}
         <div className="tb-metric" title="Günlük P/L — risk_snapshots tablosundan (2 sn polling)">
           <span className="tb-metric-label">Günlük K/Z (Snapshot)</span>
-          <span className={`tb-metric-value ${dailyPnl >= 0 ? 'profit' : 'loss'}`}>
-            {formatMoney(dailyPnl)}
+          <span className={`tb-metric-value ${showLoading ? '' : dailyPnl >= 0 ? 'profit' : 'loss'}`}>
+            {showLoading ? '—' : formatMoney(dailyPnl)}
           </span>
         </div>
 
