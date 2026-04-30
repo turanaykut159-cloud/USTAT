@@ -519,15 +519,17 @@ export default function Settings() {
             <div className="st-toggle-group">
               <ToggleRow
                 label="Ses bildirimleri"
-                desc="İşlem ve uyarı sesleri (henüz aktif değil)"
+                desc="İşlem ve uyarı sesleri"
                 checked={prefs.soundEnabled}
                 onChange={() => togglePref('soundEnabled')}
+                disabled
               />
               <ToggleRow
                 label="Kill-Switch uyarısı"
-                desc="L1/L2/L3 tetiklendiğinde bildirim (henüz aktif değil)"
+                desc="L1/L2/L3 tetiklendiğinde bildirim"
                 checked={prefs.killSwitchAlert}
                 onChange={() => togglePref('killSwitchAlert')}
+                disabled
               />
               <ToggleRow
                 label="İşlem & Hibrit Uyarıları"
@@ -537,15 +539,17 @@ export default function Settings() {
               />
               <ToggleRow
                 label="Drawdown uyarısı"
-                desc="Risk limitlerine yaklaşıldığında (henüz aktif değil)"
+                desc="Risk limitlerine yaklaşıldığında"
                 checked={prefs.drawdownAlert}
                 onChange={() => togglePref('drawdownAlert')}
+                disabled
               />
               <ToggleRow
                 label="Rejim değişikliği"
-                desc="Piyasa rejimi değiştiğinde (henüz aktif değil)"
+                desc="Piyasa rejimi değiştiğinde"
                 checked={prefs.regimeAlert}
                 onChange={() => togglePref('regimeAlert')}
+                disabled
               />
             </div>
           </section>
@@ -645,18 +649,44 @@ function FieldRow({ label, value, cls, action }) {
   );
 }
 
-function ToggleRow({ label, desc, checked, onChange }) {
+function ToggleRow({ label, desc, checked, onChange, disabled }) {
+  // M4-295: disabled toggle'lar tiklanmaz, opacity 0.55, cursor not-allowed.
+  // "Yakinda" rozeti label yaninda gosterilir — kullaniciya bu togglein
+  // henuz arkada islevi olmadigi acikca soylenir.
   return (
-    <div className="st-toggle-row">
+    <div
+      className={`st-toggle-row${disabled ? ' st-toggle-row--disabled' : ''}`}
+      style={disabled ? { opacity: 0.55 } : undefined}
+    >
       <div className="st-toggle-info">
-        <span className="st-toggle-label">{label}</span>
+        <span className="st-toggle-label">
+          {label}
+          {disabled && (
+            <span style={{
+              marginLeft: 8,
+              fontSize: 10,
+              padding: '1px 6px',
+              borderRadius: 3,
+              background: 'rgba(139,148,158,0.18)',
+              color: '#8b949e',
+              border: '1px solid #484f58',
+              fontWeight: 600,
+              textTransform: 'uppercase',
+              letterSpacing: '0.04em',
+            }}>Yakında</span>
+          )}
+        </span>
         {desc && <span className="st-toggle-desc">{desc}</span>}
       </div>
       <button
         className={`st-toggle ${checked ? 'on' : 'off'}`}
-        onClick={onChange}
+        onClick={disabled ? undefined : onChange}
         role="switch"
         aria-checked={checked}
+        aria-disabled={disabled || undefined}
+        disabled={disabled || undefined}
+        title={disabled ? 'Bu özellik henüz aktif değil — yakında geliyor' : undefined}
+        style={disabled ? { cursor: 'not-allowed' } : undefined}
       >
         <span className="st-toggle-knob" />
       </button>
