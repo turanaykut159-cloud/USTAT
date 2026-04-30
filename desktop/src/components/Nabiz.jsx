@@ -80,6 +80,38 @@ function getRowColor(table, count, tableThresholds) {
   return COLORS.green;
 }
 
+// M5-296: Tablo durum noktasi tooltip metni — kullaniciya rengin
+// neden o sekilde oldugunu (esik degerleri ile) acikca gosterir.
+function getRowStatusInfo(table, count, tableThresholds) {
+  const t = (tableThresholds || DEFAULT_TABLE_THRESHOLDS)[table];
+  if (!t) {
+    return {
+      color: COLORS.green,
+      label: 'NORMAL (eşik tanımsız)',
+      tooltip: `${table}: ${formatNumber(count)} satır — bu tablo için izleme eşiği tanımlı değil.`,
+    };
+  }
+  if (count >= t.danger) {
+    return {
+      color: COLORS.red,
+      label: 'KRİTİK',
+      tooltip: `${table}: ${formatNumber(count)} satır\n→ TEHLİKE eşiği (${formatNumber(t.danger)}) aşıldı\nRetention politikası gözden geçirilmeli, eski kayıtlar arşivlenmeli.`,
+    };
+  }
+  if (count >= t.warn) {
+    return {
+      color: COLORS.yellow,
+      label: 'UYARI',
+      tooltip: `${table}: ${formatNumber(count)} satır\n→ UYARI eşiği (${formatNumber(t.warn)}) aşıldı\nTehlike eşiği: ${formatNumber(t.danger)} (henüz aşılmadı)`,
+    };
+  }
+  return {
+    color: COLORS.green,
+    label: 'NORMAL',
+    tooltip: `${table}: ${formatNumber(count)} satır\n→ Eşik altında (uyarı: ${formatNumber(t.warn)}, tehlike: ${formatNumber(t.danger)})`,
+  };
+}
+
 function pickSummaryStatus(value, warn, err) {
   if (value > err) return 'err';
   if (value > warn) return 'warn';
@@ -327,20 +359,26 @@ function TableSizesPanel({ tables, tableRowThresholds }) {
           </thead>
           <tbody>
             {sorted.map(([name, count]) => {
-              const color = getRowColor(name, count, tableRowThresholds);
+              // M5-296: getRowStatusInfo ile renk + tooltip
+              const info = getRowStatusInfo(name, count, tableRowThresholds);
               return (
-                <tr key={name} style={styles.tr}>
+                <tr key={name} style={styles.tr} title={info.tooltip}>
                   <td style={styles.td}>
                     <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{name}</span>
                   </td>
-                  <td style={{ ...styles.td, textAlign: 'right', fontWeight: 600, color }}>
+                  <td style={{ ...styles.td, textAlign: 'right', fontWeight: 600, color: info.color }}>
                     {formatNumber(count)}
                   </td>
                   <td style={{ ...styles.td, textAlign: 'center' }}>
-                    <span style={{
-                      display: 'inline-block', width: 8, height: 8,
-                      borderRadius: '50%', background: color,
-                    }} />
+                    <span
+                      style={{
+                        display: 'inline-block', width: 8, height: 8,
+                        borderRadius: '50%', background: info.color,
+                        cursor: 'help',
+                      }}
+                      title={info.tooltip}
+                      aria-label={info.label}
+                    />
                   </td>
                 </tr>
               );

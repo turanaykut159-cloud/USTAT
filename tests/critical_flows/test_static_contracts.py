@@ -1683,9 +1683,14 @@ def test_nabiz_thresholds_are_backend_driven():
         "Nabiz.jsx tableRowThresholds prop/variable'i yok — TableSizesPanel "
         "hala hardcode'a dusuyor olabilir."
     )
-    assert "getRowColor(name, count, tableRowThresholds)" in nabiz_jsx_src, (
-        "Nabiz.jsx getRowColor cagrisi tableRowThresholds argumanini gecmiyor — "
-        "hardcode kullanilmaya devam ediyor."
+    # M5-296: getRowStatusInfo helper'i eklendi — tooltip metni icin renk + label dondurur.
+    # Iki helper'dan biri tableRowThresholds parametresini gecmeli (kontrat ayni).
+    assert (
+        "getRowColor(name, count, tableRowThresholds)" in nabiz_jsx_src
+        or "getRowStatusInfo(name, count, tableRowThresholds)" in nabiz_jsx_src
+    ), (
+        "Nabiz.jsx getRowColor/getRowStatusInfo cagrisi tableRowThresholds argumanini "
+        "gecmiyor — hardcode kullanilmaya devam ediyor."
     )
 
     # (e) Inline > 1000 / > 500 / > 2000 / > 90 / > 80 SummaryCard karar pattern'leri YASAK
