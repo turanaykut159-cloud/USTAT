@@ -62,7 +62,7 @@ function CategoryTip({ active, payload }) {
     <div className="chart-tooltip">
       <span className="chart-tooltip-date">{d.label}</span>
       <span className={pnlCls(d.total_pnl)}>K/Z: <b>{fmt(d.total_pnl)}</b></span>
-      <span>WR: {fmtPct(d.win_rate)} | {d.count} islem</span>
+      <span>WR: {fmtPct(d.win_rate)} | {d.count} işlem</span>
     </div>
   );
 }
@@ -133,7 +133,7 @@ function ErrorAttributionPanel({ data }) {
           <div className="ub-ea-stats">
             <span className="ub-ea-stat">Toplam: {stats.total}</span>
             <span className="ub-ea-stat ub-ea-stat--baba">BABA: {stats.baba}</span>
-            <span className="ub-ea-stat ub-ea-stat--ogul">OGUL: {stats.ogul}</span>
+            <span className="ub-ea-stat ub-ea-stat--ogul">OĞUL: {stats.ogul}</span>
             <span className="ub-ea-stat ub-ea-stat--loss">Zarar: {fmt(stats.loss)} TL</span>
           </div>
 
@@ -159,7 +159,7 @@ function ErrorAttributionPanel({ data }) {
         </>
       ) : (
         <div className="ub-bp-empty">
-          <p>Kim hata yapti? BABA veya OGUL sorumluluk atamasi.</p>
+          <p>Kim hata yaptı? BABA veya OĞUL sorumluluk ataması.</p>
           <span className="ub-bp-waiting">Veri bekleniyor</span>
         </div>
       )}
@@ -221,12 +221,12 @@ export default function UstatBrain() {
     const mt5 = status?.mt5_connected || false;
     const engineOn = status?.engine_running || false;
     return {
-      baba: { name: 'BABA', role: 'Kalkan', desc: 'Risk yonetimi, rejim algilama, kill-switch',
-              status: engineOn ? 'AKTIF' : 'DURDURULDU', ok: engineOn },
-      ogul: { name: 'OGUL', role: 'Silah', desc: 'Top 5 secim, sinyal uretimi, emir yonetimi',
-              status: engineOn && mt5 ? 'AKTIF' : 'BEKLEMEDE', ok: engineOn && mt5 },
-      ustat: { name: 'USTAT', role: 'Beyin', desc: 'Hata atfetme, strateji havuzu, analiz',
-               status: engineOn ? 'AKTIF' : 'DURDURULDU', ok: engineOn },
+      baba: { name: 'BABA', role: 'Kalkan', desc: 'Risk yönetimi, rejim algılama, kill-switch',
+              status: engineOn ? 'AKTİF' : 'DURDURULDU', ok: engineOn },
+      ogul: { name: 'OĞUL', role: 'Silah', desc: 'Top 5 seçim, sinyal üretimi, emir yönetimi',
+              status: engineOn && mt5 ? 'AKTİF' : 'BEKLEMEDE', ok: engineOn && mt5 },
+      ustat: { name: 'ÜSTAT', role: 'Beyin', desc: 'Hata atfetme, strateji havuzu, analiz',
+               status: engineOn ? 'AKTİF' : 'DURDURULDU', ok: engineOn },
     };
   }, [status]);
 
@@ -235,7 +235,7 @@ export default function UstatBrain() {
       <div className="ustat-brain">
         <div className="ub-loading">
           <div className="ub-loading-spinner" />
-          <span>USTAT Beyin Merkezi yukleniyor...</span>
+          <span>ÜSTAT Beyin Merkezi yükleniyor...</span>
         </div>
       </div>
     );
@@ -246,7 +246,7 @@ export default function UstatBrain() {
       <div className="ustat-brain">
         <div className="ub-loading">
           <span style={{ color: '#ef4444' }}>
-            USTAT Beyin Merkezi yuklenemedi: {fetchError}
+            ÜSTAT Beyin Merkezi yüklenemedi: {fetchError}
           </span>
           <button
             type="button"
@@ -267,26 +267,26 @@ export default function UstatBrain() {
       <div className="ub-hero">
         <div className="ub-hero-left">
           <div className="ub-hero-brand">
-            <span className="ub-hero-logo">U</span>
+            <span className="ub-hero-logo">Ü</span>
             <div className="ub-hero-title-group">
-              <h1 className="ub-hero-title">USTAT</h1>
+              <h1 className="ub-hero-title">ÜSTAT</h1>
               <span className="ub-hero-subtitle">Beyin Merkezi</span>
             </div>
           </div>
           <p className="ub-hero-desc">
-            Uc motor mimarisinin analiz katmani.
-            Hata atfetme, strateji havuzu yonetimi ve kontrat profilleme.
+            Üç motor mimarisinin analiz katmanı.
+            Hata atfetme, strateji havuzu yönetimi ve kontrat profilleme.
           </p>
         </div>
         <div className="ub-hero-right">
           <div className="ub-hero-metrics">
             <div className="ub-hero-metric">
               <span className="ub-hm-value">{summary.totalTrades}</span>
-              <span className="ub-hm-label">Analiz Edilen Islem</span>
+              <span className="ub-hm-label">Analiz Edilen İşlem</span>
             </div>
             <div className="ub-hero-metric">
               <span className="ub-hm-value">{summary.bestRegime}</span>
-              <span className="ub-hm-label">En Iyi Rejim</span>
+              <span className="ub-hm-label">En İyi Rejim</span>
             </div>
             <div className="ub-hero-metric">
               <span className="ub-hm-value">{summary.bestContract}</span>
@@ -300,7 +300,7 @@ export default function UstatBrain() {
           <div className="ub-hero-period">
             {[30, 90, 180, 365].map((d) => (
               <button key={d} className={`ub-period-btn ${days === d ? 'active' : ''}`} onClick={() => setDays(d)}>
-                {d <= 30 ? '1 Ay' : d <= 90 ? '3 Ay' : d <= 180 ? '6 Ay' : '1 Yil'}
+                {d <= 30 ? '1 Ay' : d <= 90 ? '3 Ay' : d <= 180 ? '6 Ay' : '1 Yıl'}
               </button>
             ))}
           </div>
@@ -322,14 +322,14 @@ export default function UstatBrain() {
         ))}
       </div>
 
-      {/* ═══ 3. ISLEM KATEGORILERI ═══════════════════════════════════ */}
+      {/* ═══ 3. İŞLEM KATEGORİLERİ ═══════════════════════════════════ */}
       <div className="ub-section">
-        <h2 className="ub-section-title">Islem Kategorileri</h2>
+        <h2 className="ub-section-title">İşlem Kategorileri</h2>
         <div className="ub-cat-grid">
-          <MiniBarChart title="Sonuca Gore" data={brain?.trade_categories?.by_result || []} />
-          <MiniBarChart title="Yone Gore" data={brain?.trade_categories?.by_direction || []} />
-          <MiniBarChart title="Sureye Gore" data={brain?.trade_categories?.by_duration || []} />
-          <MiniBarChart title="Rejime Gore" data={brain?.trade_categories?.by_regime || []} />
+          <MiniBarChart title="Sonuca Göre" data={brain?.trade_categories?.by_result || []} />
+          <MiniBarChart title="Yöne Göre" data={brain?.trade_categories?.by_direction || []} />
+          <MiniBarChart title="Süreye Göre" data={brain?.trade_categories?.by_duration || []} />
+          <MiniBarChart title="Rejime Göre" data={brain?.trade_categories?.by_regime || []} />
         </div>
       </div>
 
@@ -347,7 +347,7 @@ export default function UstatBrain() {
                   </span>
                 </div>
                 <div className="ub-profile-stats">
-                  <div className="ub-ps"><span className="ub-ps-label">Islem</span><span className="ub-ps-val">{cp.trade_count}</span></div>
+                  <div className="ub-ps"><span className="ub-ps-label">İşlem</span><span className="ub-ps-val">{cp.trade_count}</span></div>
                   <div className="ub-ps"><span className="ub-ps-label">Win Rate</span><span className={`ub-ps-val ${winRateClass(cp.win_rate)}`}>{fmtPct(cp.win_rate)}</span></div>
                   <div className="ub-ps"><span className="ub-ps-label">K/Z</span><span className={`ub-ps-val ${pnlCls(cp.total_pnl)}`}>{fmt(cp.total_pnl)}</span></div>
                   <div className="ub-ps"><span className="ub-ps-label">Ort. Sure</span><span className="ub-ps-val">{cp.avg_duration_min > 60 ? `${(cp.avg_duration_min / 60).toFixed(1)}s` : `${cp.avg_duration_min.toFixed(0)}dk`}</span></div>
@@ -358,9 +358,9 @@ export default function UstatBrain() {
         ) : <EmptyState icon="📈" text="Kontrat verisi yok" />}
       </div>
 
-      {/* ═══ 5. KARAR AKISI ═════════════════════════════════════════ */}
+      {/* ═══ 5. KARAR AKIŞI ═════════════════════════════════════════ */}
       <div className="ub-section">
-        <h2 className="ub-section-title">Karar Akisi</h2>
+        <h2 className="ub-section-title">Karar Akışı</h2>
         {(brain?.recent_decisions || []).length > 0 ? (
           <div className="ub-timeline">
             {brain.recent_decisions.slice(0, 20).map((ev) => (
@@ -382,7 +382,7 @@ export default function UstatBrain() {
       {/* ═══ 6. REJIM BAZLI PERFORMANS ══════════════════════════════ */}
       <div className="ub-section">
         <div className="ub-section-header">
-          <h2 className="ub-section-title">Rejim Bazli Performans</h2>
+          <h2 className="ub-section-title">Rejim Bazlı Performans</h2>
           {brain?.strategy_pool?.current_regime && (
             <span className="ub-section-badge">Aktif: {brain.strategy_pool.current_regime}</span>
           )}
@@ -410,14 +410,14 @@ export default function UstatBrain() {
       {/* ═══ 7a. HATA ATAMA — Tam Genişlik ═══════════════════════════ */}
       <ErrorAttributionPanel data={brain?.error_attributions} />
 
-      {/* ═══ 7b. BEYIN PANELLERI ════════════════════════════════════ */}
+      {/* ═══ 7b. BEYİN PANELLERİ ════════════════════════════════════ */}
       <div className="ub-panels">
 
-        {/* Ertesi Gun Analizi */}
+        {/* Ertesi Gün Analizi */}
         <BrainPanel
-          title="Ertesi Gun Analizi"
+          title="Ertesi Gün Analizi"
           icon="📊"
-          placeholder="Kapanan islemler icin ertesi gun otomatik analiz. Her sabah 09:30'da puanlanir."
+          placeholder="Kapanan işlemler için ertesi gün otomatik analiz. Her sabah 09:30'da puanlanır."
           data={brain?.next_day_analyses}
           render={(items) => items.slice(0, 10).map((nda, i) => (
             <div key={i} className="ub-bp-row ub-nda-row">
@@ -434,11 +434,11 @@ export default function UstatBrain() {
           ))}
         />
 
-        {/* Regulasyon Onerileri */}
+        {/* Regülasyon Önerileri */}
         <BrainPanel
-          title="Regulasyon Onerileri"
+          title="Regülasyon Önerileri"
           icon="⚙️"
-          placeholder="BABA/OGUL parametre duzeltme onerileri. Her aksam 18:00'da uretilir."
+          placeholder="BABA/OĞUL parametre düzeltme önerileri. Her akşam 18:00'da üretilir."
           data={brain?.regulation_suggestions}
           render={(items) => items.slice(0, 10).map((rs, i) => (
             <div key={i} className="ub-bp-row">
