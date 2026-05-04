@@ -88,8 +88,8 @@ TF_ADX_THRESHOLD:     float = 25.0   # eski eşik (referans)
 TF_ADX_HARD:          float = 28.0   # FAZ 2.6: kesin trend
 TF_ADX_SOFT:          float = 22.0   # FAZ 2.6: kesin range
 TF_MACD_CONFIRM_BARS: int   = 2     # histogram 2 bar aynı işaret
-TF_SL_ATR_MULT:       float = 1.5   # entry ± 1.5×ATR (fallback)
-TF_TP_ATR_MULT:       float = 2.0   # 2×ATR
+TF_SL_ATR_MULT:       float = 1.2   # KARAR #18 (2026-05-04): 1.5 → 1.2
+TF_TP_ATR_MULT:       float = 2.5   # KARAR #18 (2026-05-04): 2.0 → 2.5 (asimetri iyileştirme)
 TF_TRAILING_ATR_MULT: float = 1.5   # trailing stop 1.5×ATR
 
 # ── Mean Reversion ────────────────────────────────────────────────
@@ -431,6 +431,10 @@ class Ogul:
         self._symbol_loss_count: dict[str, int] = {}    # sembol bazlı ardışık zarar
         self._symbol_loss_date: date | None = None       # günlük sıfırlama
 
+        # KARAR #18 (2026-05-04): trend_follow günlük trade sayacı
+        self._tf_trade_count_today: int = 0
+        self._tf_trade_count_date: date | None = None
+
         # ── v13.0 İyileştirme alanları ─────────────────────────────
         # R-Multiple istatistikleri
         self._r_multiple_history: list[float] = []        # kapanan işlemlerin R değerleri
@@ -573,6 +577,10 @@ class Ogul:
         if self._symbol_loss_date != today:
             self._symbol_loss_count.clear()
             self._symbol_loss_date = today
+        # KARAR #18: trend_follow günlük trade sayacı sıfırlama
+        if self._tf_trade_count_date != today:
+            self._tf_trade_count_today = 0
+            self._tf_trade_count_date = today
 
         # ═══ HIZLI DÖNGÜ (her 10 sn) ══════════════════════════════
 
@@ -1173,6 +1181,9 @@ class Ogul:
                     symbol, close, high, low, volume, regime,
                 )
             elif strategy == StrategyType.BREAKOUT:
+                # KARAR #18: backtest negatif edge → hibernate
+                if not self.config.get("strategies.breakout._enabled", True):
+                    continue
                 signal = self._check_breakout(
                     symbol, close, high, low, volume,
                 )
@@ -1196,6 +1207,33 @@ class Ogul:
         for candidate in candidates:
             direction_str = "BUY" if candidate.signal_type == SignalType.BUY else "SELL"
             conf_score = 0.0
+
+            # ── KARAR #18 (2026-05-04): trend_follow şartlı ADX guard ──
+            # Backtest gerekçesi: ADX 22-32 arasında trend_follow break-even/negatif,
+            # ADX>=32 ile pozitif edge'e geçiyor. Aday düşürülürse mean_reversion'a sıra gelir.
+            if candidate.strategy == StrategyType.TREND_FOLLOW:
+                _adx_min = float(self.config.get(
+                    "strategies.trend_follow.adx_min_trade", 32.0
+                ))
+                _adx_arr = calc_adx(high, low, close, ATR_PERIOD)
+                _adx_now = last_valid(_adx_arr)
+                if _adx_now is None or _adx_now < _adx_min:
+                    logger.debug(
+                        f"trend_follow atlandı [{symbol}]: "
+                        f"ADX={_adx_now:.1f if _adx_now else 0} < {_adx_min} "
+                        f"(KARAR #18)"
+                    )
+                    continue
+                # Günlük trend_follow trade limiti
+                _max_tf = int(self.config.get(
+                    "strategies.trend_follow.max_trades_per_day", 5
+                ))
+                if self._tf_trade_count_today >= _max_tf:
+                    logger.info(
+                        f"trend_follow atlandı [{symbol}]: günlük limit "
+                        f"{self._tf_trade_count_today}/{_max_tf} doldu (KARAR #18)"
+                    )
+                    continue
 
             try:
                 atr_arr = calc_atr(high, low, close, ATR_PERIOD)
@@ -1666,29 +1704,21 @@ class Ogul:
         direction = "BUY" if signal.signal_type == SignalType.BUY else "SELL"
         now = datetime.now()
 
-        # ── KARAR #17 tam blok (#249): trend_follow strategy hard-block ─
-        # P-15 bulgusu: 10/10 kayıp (WR %0). Config adx_threshold 9999 ile eski
-        # strategy motoru bypass edildi ama SE3 (signal_engine) hâlâ
-        # strategy_type="trend_follow" tagged sinyaller üretebilir. Bu guard
-        # SE3 dahil TÜM kaynaklardan gelen trend_follow sinyallerini reddeder.
-        # Kaldırma koşulu: 30-gün yeni veriyle WR ≥ 40% kanıtlanır + kullanıcı onayı.
+        # ── KARAR #17 → KARAR #18 (2026-05-04): Tam blok kaldırıldı ──
+        # KARAR #17 (2026-04-18): trend_follow 10/10 kayıp gerekçesiyle tam bloke edildi.
+        # KARAR #18 (2026-05-04): Backtest 28 gün × 15 sembol × M5 (komisyon+slippage dahil)
+        #   gösterdi ki:
+        #   - Varsayılan parametrelerle: WR %46.2, E[ATR] -0.03 (marjinal)
+        #   - ADX>=32 filtresi ile: pozitif edge potansiyeli
+        # Karar: trend_follow şartlı izin verilir.
+        #   Filtre: _generate_signal candidate loop'unda ADX>=32 + günlük 5 trade limiti
+        #   Tam blok kaldırıldı (bu fonksiyon).
+        # Eski hard-block kodu tarihçe için yorumda:
+        #   if strategy_name == "trend_follow":
+        #       logger.info(f"[TREND_FOLLOW HARD_BLOCK #249] ...")
+        #       self.db.insert_event(event_type="SIGNAL_REJECT", ...)
+        #       return
         strategy_name = getattr(signal.strategy, "value", str(signal.strategy))
-        if strategy_name == "trend_follow":
-            logger.info(
-                f"[TREND_FOLLOW HARD_BLOCK #249] Sinyal reddedildi "
-                f"[{symbol}] {direction} güç={signal.strength:.2f} "
-                f"(P-15 kanıt: 10/10 kayıp, WR %0 — KARAR #17)"
-            )
-            self.db.insert_event(
-                event_type="SIGNAL_REJECT",
-                message=(
-                    f"trend_follow hard-block: {direction} {symbol} "
-                    f"(KARAR #17, #249)"
-                ),
-                severity="INFO",
-                action="strategy_disabled",
-            )
-            return
 
         # ── PAPER TRADING MODU ──────────────────────────────────────
         if self.config.get("engine.paper_mode", False):
@@ -1983,6 +2013,13 @@ class Ogul:
         # Günlük işlem sayacı
         if self.baba:
             self.baba.increment_daily_trade_count()
+            # KARAR #18: trend_follow günlük trade sayacı
+            if signal.strategy == StrategyType.TREND_FOLLOW:
+                self._tf_trade_count_today += 1
+                logger.debug(
+                    f"trend_follow günlük trade sayacı: "
+                    f"{self._tf_trade_count_today} (KARAR #18)"
+                )
 
         # DB kayıt
         db_id = self.db.insert_trade({

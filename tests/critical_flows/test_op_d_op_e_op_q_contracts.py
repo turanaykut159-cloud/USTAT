@@ -100,18 +100,39 @@ def test_baba_risk_state_has_tightening_key():
         "_risk_state init'te ustat_floating_tightened yok"
 
 
-# ─── KARAR #17 SE3 hard-block ───────────────────────────────────────
+# ─── KARAR #17 → KARAR #18 (2026-05-04): hard-block kaldırıldı ──────
+# Eski sözleşme (KARAR #17): _execute_signal trend_follow'u reddediyordu.
+# Yeni sözleşme (KARAR #18): trend_follow şartlı izin (_generate_signal'da
+#   ADX>=32 + günlük 5 trade limiti). Aktif HARD_BLOCK kodu kaldırıldı.
+# Detay testler: tests/critical_flows/test_karar_18_contracts.py
 
-def test_ogul_execute_signal_trend_follow_hardblock():
-    """ogul._execute_signal trend_follow sinyallerini reddeder (KARAR #17, #249)."""
+def test_ogul_execute_signal_trend_follow_no_active_hardblock():
+    """KARAR #18: _execute_signal'da aktif HARD_BLOCK kodu KALMAMALI.
+
+    Eski KARAR #17 hard-block'u kaldırıldı; sadece yorumda tarihçe için
+    kalıyor. Bu test, eski davranışın geri getirilmemesini garanti eder.
+
+    KARAR #18 yeni sözleşmeleri için bkz: test_karar_18_contracts.py
+    """
     src = _src("engine/ogul.py")
     fn = _find_function(src, "_execute_signal")
     assert fn is not None, "_execute_signal metodu yok"
-    body_str = ast.unparse(fn)
-    assert "trend_follow" in body_str, \
-        "_execute_signal trend_follow hard-block guard'i yok"
-    assert "TREND_FOLLOW HARD_BLOCK" in body_str or "HARD_BLOCK" in body_str, \
-        "trend_follow hard-block log etiketi eksik"
+    body_str = ast.unparse(fn)  # ast.unparse yorumları yutar, sadece kod kalır
+    # Aktif kodda HARD_BLOCK log etiketi KALMAMALI
+    assert "TREND_FOLLOW HARD_BLOCK" not in body_str, (
+        "_execute_signal'da hala AKTİF HARD_BLOCK log var — "
+        "KARAR #18 ile bu kaldırılmış olmalıydı"
+    )
+    # Aktif kodda 'trend_follow hard-block' literal'i KALMAMALI
+    assert "trend_follow hard-block" not in body_str, (
+        "_execute_signal'da hala AKTİF 'trend_follow hard-block' string var — "
+        "KARAR #18 sözleşmesi bozulmuş"
+    )
+    # KARAR #18 referansı kodda var mı (yorumda da olabilir, ama dosya tarihçesinde olmalı)
+    full_src = _src("engine/ogul.py")
+    assert "KARAR #18" in full_src, (
+        "ogul.py'de KARAR #18 referansı yok — tarihçe yorumu silinmiş"
+    )
 
 
 # ─── OP-J initial_volume backfill ───────────────────────────────────

@@ -27,7 +27,7 @@
     "consecutive_loss_limit": 3,
     "cooldown_hours": 4,
     "fake_signal_threshold": 5,
-    "baseline_date": "2026-04-16 09:50",
+    "baseline_date": "2026-05-04 00:00",
     "stats_baseline_date": "2026-02-01",
     "master_floating_loss_pct": 0.05,
     "sltp_max_retries": 3,
@@ -76,16 +76,25 @@
   },
   "strategies": {
     "trend_follow": {
-      "_disabled_reason": "KARAR #17 (2026-04-18): 10/10 kayip (WR %0). adx_threshold 9999.0 ile sinyal uretimi pratik olarak imkansiz hale getirildi. Tam blok (SE3 + _execute_signal guard) hafta ici kod katmaninda yapilacak.",
+      "_decision_history": [
+        "KARAR #17 (2026-04-18): 10/10 kayip (WR %0) → tam blok (adx_threshold=9999.0 + _execute_signal hard-block).",
+        "KARAR #18 (2026-05-04): Backtest 28 gün × 15 sembol × M5 (komisyon+slippage 0.15 ATR dahil) → varsayılan parametrelerle WR %46.2, E[ATR] -0.03 (marjinal). ADX>=32 filtresi + günlük 5 trade limiti ile şartlı izin. KARAR #17 tam blok kaldırıldı."
+      ],
       "ema_fast": 20,
       "ema_slow": 50,
-      "adx_threshold": 9999.0,
+      "adx_threshold": 25.0,
+      "adx_min_trade": 32.0,
       "macd_confirm_bars": 2,
-      "sl_atr_mult": 1.5,
-      "tp_atr_mult": 2.0,
-      "trailing_atr_mult": 1.5
+      "sl_atr_mult": 1.2,
+      "tp_atr_mult": 2.5,
+      "trailing_atr_mult": 1.5,
+      "max_trades_per_day": 5,
+      "daily_loss_pct_limit": 0.5
     },
     "mean_reversion": {
+      "_decision_history": [
+        "KARAR #18 (2026-05-04): Backtest 28 gün × 15 sembol × M5 (varsayılan parametrelerle) → WR %81.8, E[ATR] +1.673, PF 24.5. Ana strateji olarak kabul edildi. Parametreler korundu."
+      ],
       "rsi_period": 14,
       "rsi_oversold": 20.0,
       "rsi_overbought": 80.0,
@@ -98,6 +107,10 @@
       "breakeven_profit_pct": 0.5
     },
     "breakout": {
+      "_enabled": false,
+      "_decision_history": [
+        "KARAR #18 (2026-05-04): Backtest tüm parametre kombinasyonlarında E[ATR] negatif (-0.18 ile -0.15 arasında). Hibernate edildi. İleride farklı formülasyon (Donchian + volatilite filtresi) test edilecek."
+      ],
       "lookback": 20,
       "volume_mult": 1.5,
       "atr_expansion": 1.2,
@@ -115,7 +128,7 @@
     "_comment": "#265 R-11 KARAR #11: Kritik tetikler tek kaynak. Sihirli sayılar kod'dan config'e.",
     "margin_usage_limit_pct": 200.0,
     "peak_anomaly_dd_pct": 30.0,
-    "peak_balance_ratio": 1.30,
+    "peak_balance_ratio": 1.3,
     "netting_lock_timeout_sec": 120.0
   },
   "mt5_retries": {
